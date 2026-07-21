@@ -1,0 +1,175 @@
+"""
+Flask-XXLJob 配置读取与校验。
+
+Flask-XXLJob configuration loading and validation.
+
+配置只在 ``init_app()`` 阶段读取，模块导入阶段不访问 ``current_app``。
+
+Configuration is only read during ``init_app()``; ``current_app`` is never
+accessed at import time.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, List, Mapping
+
+from .exceptions import XXLJobConfigError
+
+# 默认配置值 / Default configuration values.
+DEFAULTS: dict = {
+    "XXL_JOB_ENABLED": True,
+    "XXL_JOB_ADMIN_ADDRESSES": [],
+    "XXL_JOB_ACCESS_TOKEN": "",
+    "XXL_JOB_EXECUTOR_APP_NAME": "flask-xxljob-executor",
+    "XXL_JOB_EXECUTOR_ADDRESS": "",
+    "XXL_JOB_ROUTE_PREFIX": "",
+    "XXL_JOB_AUTO_REGISTER": True,
+    "XXL_JOB_REGISTRY_INTERVAL": 30,
+    "XXL_JOB_HTTP_CONNECT_TIMEOUT": 3,
+    "XXL_JOB_HTTP_READ_TIMEOUT": 5,
+    "XXL_JOB_CALLBACK_MESSAGE_MAX_LENGTH": 10000,
+    "XXL_JOB_MAX_REQUEST_SIZE": 1048576,
+    "XXL_JOB_MAX_PARAM_LENGTH": 65536,
+}
+
+
+@dataclass
+class XXLJobConfig:
+    """
+    经过校验的 Flask-XXLJob 运行时配置。
+
+    Validated Flask-XXLJob runtime configuration.
+    """
+
+    enabled: bool = True
+    admin_addresses: List[str] = field(default_factory=list)
+    access_token: str = ""
+    executor_app_name: str = "flask-xxljob-executor"
+    executor_address: str = ""
+    route_prefix: str = ""
+    auto_register: bool = True
+    registry_interval: int = 30
+    http_connect_timeout: int = 3
+    http_read_timeout: int = 5
+    callback_message_max_length: int = 10000
+    max_request_size: int = 1048576
+    max_param_length: int = 65536
+
+    @classmethod
+    def from_mapping(cls, config: Mapping[str, Any]) -> "XXLJobConfig":
+        """
+        从 Flask ``app.config`` 构造并校验配置。
+
+        Build and validate the configuration from a Flask ``app.config``.
+        """
+        merged = {key: config.get(key, default) for key, default in DEFAULTS.items()}
+
+        enabled = _as_bool(merged, "XXL_JOB_ENABLED")
+        auto_register = _as_bool(merged, "XXL_JOB_AUTO_REGISTER")
+
+        access_token = _as_str(merged, "XXL_JOB_ACCESS_TOKEN")
+        executor_app_name = _as_str(merged, "XXL_JOB_EXECUTOR_APP_NAME")
+        executor_address = _as_str(merged, "XXL_JOB_EXECUTOR_ADDRESS")
+        route_prefix = _as_str(merged, "XXL_JOB_ROUTE_PREFIX")
+
+        admin_addresses = _as_str_list(merged, "XXL_JOB_ADMIN_ADDRESSES")
+
+        registry_interval = _as_positive_int(merged, "XXL_JOB_REGISTRY_INTERVAL")
+        http_connect_timeout = _as_positive_int(merged, "XXL_JOB_HTTP_CONNECT_TIMEOUT")
+        http_read_timeout = _as_positive_int(merged, "XXL_JOB_HTTP_READ_TIMEOUT")
+        callback_message_max_length = _as_positive_int(
+            merged, "XXL_JOB_CALLBACK_MESSAGE_MAX_LENGTH"
+        )
+        max_request_size = _as_positive_int(merged, "XXL_JOB_MAX_REQUEST_SIZE")
+        max_param_length = _as_positive_int(merged, "XXL_JOB_MAX_PARAM_LENGTH")
+
+        instance = cls(
+            enabled=enabled,
+            admin_addresses=admin_addresses,
+            access_token=access_token,
+            executor_app_name=executor_app_name,
+            executor_address=executor_address,
+            route_prefix=_normalize_prefix(route_prefix),
+            auto_register=auto_register,
+            registry_interval=registry_interval,
+            http_connect_timeout=http_connect_timeout,
+            http_read_timeout=http_read_timeout,
+            callback_message_max_length=callback_message_max_length,
+            max_request_size=max_request_size,
+            max_param_length=max_param_length,
+        )
+        instance.validate()
+        return instance
+
+    def validate(self) -> None:
+        """
+        校验必填项。启用扩展时执行器名称与 Admin 地址必填。
+
+        Validate required fields. When enabled, the executor name and at least
+        one admin address are required.
+        """
+        if not self.enabled:
+            return
+        if not self.executor_app_name:
+            raise XXLJobConfigError("XXL_JOB_EXECUTOR_APP_NAME must not be empty.")
+        if not self.admin_addresses:
+            raise XXLJobConfigError(
+                "XXL_JOB_ADMIN_ADDRESSES must contain at least one admin address."
+            )
+
+    @property
+    def timeout(self) -> tuple:
+        """
+        返回 requests 使用的 ``(connect, read)`` 超时元组。
+
+        Return the ``(connect, read)`` timeout tuple used by requests.
+        """
+        return (self.http_connect_timeout, self.http_read_timeout)
+
+
+def _as_bool(config: Mapping[str, Any], key: str) -> bool:
+    value = config[key]
+    if not isinstance(value, bool):
+        raise XXLJobConfigError(f"{key} must be a boolean, got {type(value).__name__}.")
+    return value
+
+
+def _as_str(config: Mapping[str, Any], key: str) -> str:
+    value = config[key]
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise XXLJobConfigError(f"{key} must be a string, got {type(value).__name__}.")
+    return value
+
+
+def _as_str_list(config: Mapping[str, Any], key: str) -> List[str]:
+    value = config[key]
+    if isinstance(value, str):
+        items = [item.strip() for item in value.split(",")]
+    elif isinstance(value, (list, tuple)):
+        items = []
+        for item in value:
+            if not isinstance(item, str):
+                raise XXLJobConfigError(f"{key} must contain only strings.")
+            items.append(item.strip())
+    else:
+        raise XXLJobConfigError(f"{key} must be a list of strings or a comma-separated string.")
+    return [item for item in items if item]
+
+
+def _as_positive_int(config: Mapping[str, Any], key: str) -> int:
+    value = config[key]
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise XXLJobConfigError(f"{key} must be an integer, got {type(value).__name__}.")
+    if value <= 0:
+        raise XXLJobConfigError(f"{key} must be a positive integer.")
+    return value
+
+
+def _normalize_prefix(prefix: str) -> str:
+    if not prefix:
+        return ""
+    normalized = "/" + prefix.strip("/")
+    return normalized

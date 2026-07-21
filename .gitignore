@@ -1,43 +1,37 @@
+# 过滤所有执行产生的临时文件
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 打包与构建产物
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+wheels/
+
+# python相关文件过滤
+# 过滤所有生成的虚拟环境
+.venv/
+venv/
+env/
+
+# 测试与工具缓存
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
 # 过滤jetbrains软件的配置文件
 .idea/
 
 # 过滤vscode的配置文件
 .vscode/
 
-# 日志文件过滤
-# 过滤所有logs的文件夹
-logs/
-# 过滤所有log结尾的log文件
-*.log
-
-# python相关文件过滤
-# 过滤所有生成的虚拟环境
-venv/
-.venv/
-# 过滤所有执行产生的临时文件
-__pycache__/
-*.py[cod]
-
-# 打包与构建产物
-build/
-dist/
-*.egg-info/
-.eggs/
-
-# 测试与工具缓存
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.coverage
-htmlcov/
-
-# 环境变量文件
-.env
-
 # macos相关文件过滤
 # 过滤Finder产生的文件
 .DS_Store
-
-# jupyter相关文件过滤
-# 过滤jupyter开发文件
-*.ipynb
+Thumbs.db

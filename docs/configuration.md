@@ -1,0 +1,48 @@
+[English](configuration.md) | [简体中文](configuration.zh-CN.md)
+
+# Configuration
+
+All configuration is read from `app.config` during `init_app()`. The extension
+never reads configuration at import time and never accesses `current_app` in
+the constructor.
+
+## Keys
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `XXL_JOB_ENABLED` | `True` | Enable the extension. |
+| `XXL_JOB_ADMIN_ADDRESSES` | `[]` | List of XXL-JOB admin base URLs. |
+| `XXL_JOB_ACCESS_TOKEN` | `""` | Access token; empty means no-token mode. |
+| `XXL_JOB_EXECUTOR_APP_NAME` | `"flask-xxljob-executor"` | Executor application name. |
+| `XXL_JOB_EXECUTOR_ADDRESS` | `""` | Address the admin uses to reach this executor. |
+| `XXL_JOB_ROUTE_PREFIX` | `""` | URL prefix for the executor endpoints. |
+| `XXL_JOB_AUTO_REGISTER` | `True` | Start automatic registration renewal. |
+| `XXL_JOB_REGISTRY_INTERVAL` | `30` | Registration renewal interval (seconds). |
+| `XXL_JOB_HTTP_CONNECT_TIMEOUT` | `3` | HTTP connect timeout (seconds). |
+| `XXL_JOB_HTTP_READ_TIMEOUT` | `5` | HTTP read timeout (seconds). |
+| `XXL_JOB_CALLBACK_MESSAGE_MAX_LENGTH` | `10000` | Max `handleMsg` length. |
+| `XXL_JOB_MAX_REQUEST_SIZE` | `1048576` | Max request body size (bytes). |
+| `XXL_JOB_MAX_PARAM_LENGTH` | `65536` | Max `executorParams` length. |
+
+## Example
+
+```python
+app.config.update(
+    XXL_JOB_ADMIN_ADDRESSES=[
+        "http://admin-1:8080/xxl-job-admin",
+        "http://admin-2:8080/xxl-job-admin",
+    ],
+    XXL_JOB_ACCESS_TOKEN="",
+    XXL_JOB_EXECUTOR_APP_NAME="project-executor",
+    XXL_JOB_EXECUTOR_ADDRESS="http://127.0.0.1:5001",
+    XXL_JOB_AUTO_REGISTER=True,
+    XXL_JOB_REGISTRY_INTERVAL=30,
+)
+```
+
+## Validation
+
+Configuration is validated on `init_app()`. Invalid types or missing required
+values (`XXL_JOB_EXECUTOR_APP_NAME` and at least one `XXL_JOB_ADMIN_ADDRESSES`
+entry when enabled) raise `XXLJobConfigError`. Bad configuration is never
+silently ignored.

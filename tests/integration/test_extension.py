@@ -1,0 +1,92 @@
+"""Extension initialization and isolation tests."""
+
+from __future__ import annotations
+
+import pytest
+from flask import Flask
+
+from flask_xxljob import FlaskXXLJob, XXLJobResponse
+from flask_xxljob.exceptions import XXLJobAlreadyInitializedError, XXLJobConfigError
+from flask_xxljob.extension import EXTENSION_KEY
+from tests.conftest import BASE_CONFIG, make_app
+
+
+def test_lazy_init():
+    ext = FlaskXXLJob()
+    app, _ = make_app(ext)
+    assert EXTENSION_KEY in app.extensions
+
+
+def test_direct_init():
+    app = Flask("direct")
+    app.config.update(BASE_CONFIG)
+    ext = FlaskXXLJob(app)
+    assert EXTENSION_KEY in app.extensions
+    assert ext is not None
+
+
+def test_runtime_stored_in_extensions(app_ext):
+    app, _ = app_ext
+    runtime = app.extensions[EXTENSION_KEY]
+    assert runtime.config is not None
+    assert runtime.callback_registry is not None
+    assert runtime.admin_client is not None
+    assert runtime.callback_client is not None
+    assert runtime.registry_service is not None
+
+
+def test_double_init_raises():
+    ext = FlaskXXLJob()
+    app, _ = make_app(ext)
+    with pytest.raises(XXLJobAlreadyInitializedError):
+        ext.init_app(app)
+
+
+def test_invalid_config_raises():
+    app = Flask("bad")
+    app.config.update(XXL_JOB_ADMIN_ADDRESSES=[])
+    with pytest.raises(XXLJobConfigError):
+        FlaskXXLJob(app)
+
+
+def test_multiple_app_runtime_isolation():
+    ext = FlaskXXLJob()
+    app1, _ = make_app(ext, name="app1")
+
+    @ext.on_run
+    def run1(request):
+        return XXLJobResponse.success(content="app1")
+
+    app2, _ = make_app(ext, name="app2")
+
+    @ext.on_run
+    def run2(request):
+        return XXLJobResponse.failure("app2")
+
+    r1 = app1.extensions[EXTENSION_KEY].callback_registry.run
+    r2 = app2.extensions[EXTENSION_KEY].callback_registry.run
+    assert r1 is run1
+    assert r2 is run2
+    assert r1 is not r2
+
+
+def test_blueprint_registered(app_ext):
+    app, _ = app_ext
+    rules = {rule.rule for rule in app.url_map.iter_rules()}
+    assert "/run" in rules
+    assert "/beat" in rules
+    assert "/idleBeat" in rules
+    assert "/kill" in rules
+    assert "/log" in rules
+
+
+def test_route_prefix_applied():
+    ext = FlaskXXLJob()
+    app, _ = make_app(ext, name="prefixed", XXL_JOB_ROUTE_PREFIX="exec")
+    rules = {rule.rule for rule in app.url_map.iter_rules()}
+    assert "/exec/run" in rules
+
+
+def test_cli_command_registered(app_ext):
+    app, _ = app_ext
+    assert "xxljob" in app.cli.commands

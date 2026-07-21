@@ -1,0 +1,68 @@
+"""Configuration loading and validation tests."""
+
+from __future__ import annotations
+
+import pytest
+
+from flask_xxljob.config import XXLJobConfig
+from flask_xxljob.exceptions import XXLJobConfigError
+
+
+def base_mapping(**overrides):
+    mapping = {
+        "XXL_JOB_ADMIN_ADDRESSES": ["http://admin:8080/xxl-job-admin"],
+        "XXL_JOB_EXECUTOR_APP_NAME": "app",
+        "XXL_JOB_EXECUTOR_ADDRESS": "http://127.0.0.1:5001",
+    }
+    mapping.update(overrides)
+    return mapping
+
+
+def test_defaults_applied():
+    config = XXLJobConfig.from_mapping(base_mapping())
+    assert config.registry_interval == 30
+    assert config.http_connect_timeout == 3
+    assert config.http_read_timeout == 5
+    assert config.callback_message_max_length == 10000
+    assert config.max_request_size == 1048576
+    assert config.max_param_length == 65536
+    assert config.timeout == (3, 5)
+
+
+def test_missing_admin_addresses_raises():
+    with pytest.raises(XXLJobConfigError):
+        XXLJobConfig.from_mapping(base_mapping(XXL_JOB_ADMIN_ADDRESSES=[]))
+
+
+def test_missing_app_name_raises():
+    with pytest.raises(XXLJobConfigError):
+        XXLJobConfig.from_mapping(base_mapping(XXL_JOB_EXECUTOR_APP_NAME=""))
+
+
+def test_wrong_type_raises():
+    with pytest.raises(XXLJobConfigError):
+        XXLJobConfig.from_mapping(base_mapping(XXL_JOB_REGISTRY_INTERVAL="30"))
+
+
+def test_non_positive_int_raises():
+    with pytest.raises(XXLJobConfigError):
+        XXLJobConfig.from_mapping(base_mapping(XXL_JOB_HTTP_READ_TIMEOUT=0))
+
+
+def test_disabled_skips_required_validation():
+    config = XXLJobConfig.from_mapping(
+        {"XXL_JOB_ENABLED": False, "XXL_JOB_ADMIN_ADDRESSES": []}
+    )
+    assert config.enabled is False
+
+
+def test_comma_separated_admin_addresses():
+    config = XXLJobConfig.from_mapping(
+        base_mapping(XXL_JOB_ADMIN_ADDRESSES="http://a:8080, http://b:8080")
+    )
+    assert config.admin_addresses == ["http://a:8080", "http://b:8080"]
+
+
+def test_route_prefix_normalized():
+    config = XXLJobConfig.from_mapping(base_mapping(XXL_JOB_ROUTE_PREFIX="exec/"))
+    assert config.route_prefix == "/exec"

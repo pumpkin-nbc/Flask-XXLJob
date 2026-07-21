@@ -1,0 +1,311 @@
+"""
+Flask-XXLJob 扩展主类。
+
+Flask-XXLJob main extension class.
+"""
+
+from __future__ import annotations
+
+import atexit
+import os
+from typing import TYPE_CHECKING, Optional
+
+from flask import Flask, current_app
+
+from .callback.registry import (
+    CallbackRegistry,
+    IdleBeatCallback,
+    KillCallback,
+    LogCallback,
+    RunCallback,
+)
+from .client.admin_client import AdminClient
+from .client.callback_client import CallbackClient
+from .config import XXLJobConfig
+from .exceptions import XXLJobAlreadyInitializedError, XXLJobError
+from .protocol.blueprint import build_blueprint
+from .registry.registry_service import RegistryService
+from .response.executor import FAIL_CODE, SUCCESS_CODE
+from .runtime import XXLJobRuntime
+
+if TYPE_CHECKING:
+    from .client import CallResult
+
+# Runtime 在 app.extensions 中的键 / Runtime key in app.extensions.
+EXTENSION_KEY = "xxljob"
+
+
+class FlaskXXLJob:
+    """
+    实现官方 XXL-JOB 2.4.1 执行器协议的 Flask 扩展。
+
+    该扩展只负责协议接入：接收调度请求、校验 Token、解析参数、调用 Flask 项目
+    注册的普通处理函数，并提供执行器注册与任务结果回调能力。它不执行任何业务
+    任务，也不创建线程池、进程池或任务队列。
+
+    A Flask extension that implements the official XXL-JOB 2.4.1 executor
+    protocol.
+
+    The extension only handles protocol integration: receiving scheduler
+    requests, validating the token, parsing parameters, dispatching to plain
+    request-callbacks registered by the Flask project, and providing executor
+    registration and task-result callbacks. It never executes business tasks
+    and never creates thread pools, process pools or task queues.
+    """
+
+    def __init__(self, app: Optional[Flask] = None) -> None:
+        """
+        创建扩展实例。传入 ``app`` 时立即初始化，否则延迟到 ``init_app``。
+
+        构造阶段不会访问 ``current_app``。
+
+        Create the extension. When ``app`` is given it is initialized
+        immediately; otherwise initialization is deferred to ``init_app``.
+
+        ``current_app`` is never accessed during construction.
+        """
+        self._app: Optional[Flask] = None
+        if app is not None:
+            self.init_app(app)
+
+    def init_app(self, app: Flask) -> None:
+        """
+        在给定的 Flask 应用上初始化扩展。
+
+        依次读取并校验配置、创建 Runtime 及各客户端、注册 Blueprint 与 CLI、将
+        Runtime 保存到 ``app.extensions["xxljob"]``，并按配置决定是否启动自动
+        注册。
+
+        Initialize the extension for the given Flask application.
+
+        It reads and validates configuration, creates the runtime and clients,
+        registers the blueprint and CLI, stores the runtime in
+        ``app.extensions["xxljob"]``, and starts auto-registration when
+        configured.
+        """
+        if not hasattr(app, "extensions"):
+            app.extensions = {}
+
+        if EXTENSION_KEY in app.extensions:
+            raise XXLJobAlreadyInitializedError(
+                "Flask-XXLJob has already been initialized on this application. "
+                "Call init_app(app) only once per application."
+            )
+
+        config = XXLJobConfig.from_mapping(app.config)
+
+        callback_registry = CallbackRegistry()
+        admin_client = AdminClient(config)
+        callback_client = CallbackClient(config)
+        registry_service = RegistryService(config, admin_client)
+
+        runtime = XXLJobRuntime(
+            config=config,
+            callback_registry=callback_registry,
+            admin_client=admin_client,
+            callback_client=callback_client,
+            registry_service=registry_service,
+        )
+        app.extensions[EXTENSION_KEY] = runtime
+
+        if config.enabled:
+            blueprint = build_blueprint(_blueprint_name(app), config.route_prefix)
+            app.register_blueprint(blueprint)
+
+        self._register_cli(app)
+
+        self._app = app
+
+        if config.enabled and config.auto_register and self._should_start_registry(app):
+            registry_service.start()
+            atexit.register(_safe_stop, registry_service)
+
+    @staticmethod
+    def _should_start_registry(app: Flask) -> bool:
+        # 避免在 Flask debug reloader 的父进程中重复启动注册线程。
+        # Avoid starting the registry thread twice under the Flask debug
+        # reloader: only start in the reloader child, or when not reloading.
+        if os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+            return True
+        return not app.debug
+
+    def _register_cli(self, app: Flask) -> None:
+        from .cli.commands import xxljob_cli
+
+        # 幂等注册 CLI 分组。 / Register the CLI group idempotently.
+        if "xxljob" not in app.cli.commands:
+            app.cli.add_command(xxljob_cli)
+
+    # ------------------------------------------------------------------
+    # 请求处理函数注册 / Request-callback registration
+    # ------------------------------------------------------------------
+
+    def on_run(self, func: RunCallback) -> RunCallback:
+        """
+        注册 XXL-JOB ``/run`` 请求处理函数，可作为方法或装饰器使用。
+
+        Register the request callback for the XXL-JOB ``/run`` endpoint. Can be
+        used as a method or a decorator.
+        """
+        return self._registry().set_run(func)
+
+    def on_idle_beat(self, func: IdleBeatCallback) -> IdleBeatCallback:
+        """
+        注册 XXL-JOB ``/idleBeat`` 请求处理函数，可作为方法或装饰器使用。
+
+        Register the request callback for the XXL-JOB ``/idleBeat`` endpoint.
+        Can be used as a method or a decorator.
+        """
+        return self._registry().set_idle_beat(func)
+
+    def on_kill(self, func: KillCallback) -> KillCallback:
+        """
+        注册 XXL-JOB ``/kill`` 请求处理函数，可作为方法或装饰器使用。
+
+        Register the request callback for the XXL-JOB ``/kill`` endpoint. Can
+        be used as a method or a decorator.
+        """
+        return self._registry().set_kill(func)
+
+    def on_log(self, func: LogCallback) -> LogCallback:
+        """
+        注册 XXL-JOB ``/log`` 请求处理函数，可作为方法或装饰器使用。
+
+        Register the request callback for the XXL-JOB ``/log`` endpoint. Can be
+        used as a method or a decorator.
+        """
+        return self._registry().set_log(func)
+
+    # ------------------------------------------------------------------
+    # 执行器注册 / Executor registration
+    # ------------------------------------------------------------------
+
+    def register_executor(self, app: Optional[Flask] = None) -> "CallResult":
+        """
+        主动向 XXL-JOB Admin 注册执行器。
+
+        Actively register the executor with the XXL-JOB admin.
+        """
+        return self._get_runtime(app).registry_service.register_once_result()
+
+    def remove_executor(self, app: Optional[Flask] = None) -> "CallResult":
+        """
+        主动向 XXL-JOB Admin 注销执行器。
+
+        Actively deregister the executor from the XXL-JOB admin.
+        """
+        return self._get_runtime(app).registry_service.remove_once_result()
+
+    # ------------------------------------------------------------------
+    # 任务结果回调 / Task-result callbacks
+    # ------------------------------------------------------------------
+
+    def callback(
+        self,
+        log_id: int,
+        log_date_time: int,
+        handle_code: int,
+        handle_msg: str = "",
+        app: Optional[Flask] = None,
+    ) -> "CallResult":
+        """
+        向 XXL-JOB Admin 发送任务最终执行结果回调。
+
+        在 Flask 应用上下文中可省略 ``app`` 参数。
+
+        Send the final task-execution result callback to the XXL-JOB admin.
+
+        The ``app`` argument may be omitted inside a Flask application context.
+        """
+        runtime = self._get_runtime(app)
+        return runtime.callback_client.callback(
+            log_id=log_id,
+            log_date_time=log_date_time,
+            handle_code=handle_code,
+            handle_msg=handle_msg,
+        )
+
+    def callback_success(
+        self,
+        log_id: int,
+        log_date_time: int,
+        message: str = "",
+        app: Optional[Flask] = None,
+    ) -> "CallResult":
+        """
+        发送任务成功回调（``handle_code=200``）。
+
+        Send a task-success callback (``handle_code=200``).
+        """
+        return self.callback(
+            log_id=log_id,
+            log_date_time=log_date_time,
+            handle_code=SUCCESS_CODE,
+            handle_msg=message,
+            app=app,
+        )
+
+    def callback_failure(
+        self,
+        log_id: int,
+        log_date_time: int,
+        message: str = "",
+        app: Optional[Flask] = None,
+    ) -> "CallResult":
+        """
+        发送任务失败回调（``handle_code=500``）。
+
+        Send a task-failure callback (``handle_code=500``).
+        """
+        return self.callback(
+            log_id=log_id,
+            log_date_time=log_date_time,
+            handle_code=FAIL_CODE,
+            handle_msg=message,
+            app=app,
+        )
+
+    # ------------------------------------------------------------------
+    # 内部辅助 / Internal helpers
+    # ------------------------------------------------------------------
+
+    def _get_runtime(self, app: Optional[Flask] = None) -> XXLJobRuntime:
+        target = self._resolve_app(app)
+        try:
+            return target.extensions[EXTENSION_KEY]
+        except (AttributeError, KeyError) as exc:
+            raise XXLJobError(
+                "Flask-XXLJob is not initialized on this application. "
+                "Call init_app(app) first."
+            ) from exc
+
+    def _resolve_app(self, app: Optional[Flask]) -> Flask:
+        if app is not None:
+            return app
+        if current_app:  # 存在应用上下文 / an application context is active
+            return current_app._get_current_object()  # type: ignore[attr-defined]
+        if self._app is not None:
+            return self._app
+        raise XXLJobError(
+            "No Flask application available. Pass app=... or run within an "
+            "application context."
+        )
+
+    def _registry(self) -> CallbackRegistry:
+        return self._get_runtime().callback_registry
+
+
+def _blueprint_name(app: Flask) -> str:
+    # 每个应用使用带应用名的唯一 Blueprint 名称。
+    # Use a unique blueprint name that includes the application name.
+    return "xxljob_" + app.name.replace(".", "_")
+
+
+def _safe_stop(registry_service: RegistryService) -> None:
+    try:
+        registry_service.stop()
+    except Exception:  # noqa: BLE001 - 关闭阶段静默 / stay quiet during shutdown
+        pass
+
+
+__all__ = ["FlaskXXLJob", "EXTENSION_KEY"]
