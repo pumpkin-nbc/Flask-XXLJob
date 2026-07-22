@@ -153,13 +153,13 @@ class FlaskXXLJob:
 
     @staticmethod
     def _register_protocol_error_handlers(app: Flask, route_prefix: str) -> None:
-        # 路由级错误（404/405）在进入 Blueprint 视图前抛出，Blueprint 的 errorhandler
-        # 无法捕获。这里在应用级注册处理器，但仅对执行器接口路径返回 XXL-JOB JSON，
-        # 其余路径保持 Flask 默认行为，避免影响宿主应用。
-        # Routing errors (404/405) are raised before the blueprint view runs, so
-        # a blueprint errorhandler cannot catch them. Register app-level handlers
-        # that return XXL-JOB JSON only for executor endpoint paths and preserve
-        # Flask's default behavior for every other path.
+        # 路由级错误（404/405）在进入 Blueprint 视图前产生，Blueprint 的
+        # errorhandler 无法捕获。使用 before_request 检查 Flask 已保存的路由异常，
+        # 只处理执行器路径，避免覆盖宿主应用已有的 404/405 错误处理器。
+        # Routing errors (404/405) are produced before the blueprint view runs,
+        # so a blueprint errorhandler cannot catch them. Inspect Flask's stored
+        # routing exception in before_request and handle executor paths only,
+        # without replacing the host application's existing 404/405 handlers.
         from flask import jsonify, request
         from werkzeug.exceptions import HTTPException
 
@@ -171,17 +171,21 @@ class FlaskXXLJob:
             for suffix in ("/beat", "/idleBeat", "/run", "/kill", "/log")
         }
 
-        def _handle(exc: HTTPException) -> Any:
-            if request.path in executor_paths:
+        def _handle_protocol_routing_error() -> Any:
+            exc = getattr(request, "routing_exception", None)
+            if (
+                isinstance(exc, HTTPException)
+                and exc.code in (404, 405)
+                and request.path in executor_paths
+            ):
                 return jsonify(
                     XXLJobResponse.failure(
                         "XXL-JOB request error: " + (exc.name or "error")
                     ).to_dict()
                 )
-            return exc
+            return None
 
-        app.register_error_handler(404, _handle)
-        app.register_error_handler(405, _handle)
+        app.before_request(_handle_protocol_routing_error)
 
     # ------------------------------------------------------------------
     # 请求处理函数注册 / Request-callback registration

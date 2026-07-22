@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+from io import BytesIO
+
+import pytest
+
 from flask_xxljob import FlaskXXLJob
+from flask_xxljob.protocol.parser import RequestParseError, _read_limited_body
 from flask_xxljob.protocol.validator import check_access_token
 from tests.conftest import make_app
 
@@ -54,6 +59,31 @@ def test_body_over_limit_returns_json():
     )
     assert resp.is_json
     assert resp.json["code"] == 500
+
+
+class TrackingStream(BytesIO):
+    def __init__(self, value):
+        super().__init__(value)
+        self.read_sizes = []
+
+    def read(self, size=-1):
+        self.read_sizes.append(size)
+        return super().read(size)
+
+
+def test_known_oversized_body_is_rejected_without_reading():
+    stream = TrackingStream(b"x" * 20)
+    with pytest.raises(RequestParseError, match="maximum allowed size"):
+        _read_limited_body(stream, content_length=20, max_request_size=10)
+    assert stream.read_sizes == []
+
+
+def test_unknown_length_body_reads_at_most_limit_plus_one():
+    stream = TrackingStream(b"x" * 100)
+    with pytest.raises(RequestParseError, match="maximum allowed size"):
+        _read_limited_body(stream, content_length=None, max_request_size=10)
+    assert stream.tell() == 11
+    assert sum(stream.read_sizes) == 11
 
 
 def test_param_over_limit_returns_json():

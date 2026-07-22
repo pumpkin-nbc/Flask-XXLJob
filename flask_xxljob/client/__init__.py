@@ -222,28 +222,39 @@ def post_to_admins(
                             http_status=http_status,
                         )
                     else:
-                        code = body.get("code")
-                        msg = body.get("msg")
-                        if code == SUCCESS_CODE:
-                            return CallResult(
-                                success=True,
-                                code=code,
-                                msg=msg,
+                        if not isinstance(body, dict):
+                            last_result = CallResult(
+                                success=False,
                                 address=address,
+                                error="JSON response body must be an object",
+                                error_type=ERROR_INVALID_JSON,
                                 attempt_count=attempts,
                                 elapsed_ms=_elapsed_ms(),
                                 http_status=http_status,
                             )
-                        last_result = CallResult(
-                            success=False,
-                            code=code,
-                            msg=msg,
-                            address=address,
-                            error_type=ERROR_BUSINESS,
-                            attempt_count=attempts,
-                            elapsed_ms=_elapsed_ms(),
-                            http_status=http_status,
-                        )
+                        else:
+                            code = body.get("code")
+                            msg = body.get("msg")
+                            if code == SUCCESS_CODE:
+                                return CallResult(
+                                    success=True,
+                                    code=code,
+                                    msg=msg,
+                                    address=address,
+                                    attempt_count=attempts,
+                                    elapsed_ms=_elapsed_ms(),
+                                    http_status=http_status,
+                                )
+                            last_result = CallResult(
+                                success=False,
+                                code=code,
+                                msg=msg,
+                                address=address,
+                                error_type=ERROR_BUSINESS,
+                                attempt_count=attempts,
+                                elapsed_ms=_elapsed_ms(),
+                                http_status=http_status,
+                            )
 
             # 仅瞬时错误且仍有重试次数时，同步退避后重试同一地址。
             # Retry the same address (after synchronous backoff) only for a

@@ -111,7 +111,7 @@ flask --app "project:create_app" xxljob status
 
 ## Compatibility
 
-Target support is `Flask >= 1.0` and `Python >= 3.8`. The compatibility matrix (Python 3.8-3.13 x Flask 1/2/3) is configured in `tox.ini` and `.github/workflows/ci.yml`. This release was verified locally only on Python 3.8 with the installed Flask version; the remaining combinations are configured in CI but were not executed locally. Run the test suite in your own environment before claiming a specific combination.
+Target support is `Flask >= 1.0` and `Python >= 3.8`. The compatibility matrix (Python 3.8-3.13 x Flask 1/2/3) is configured in `tox.ini` and `.github/workflows/ci.yml`. This release was verified locally on Python 3.12 with Flask 3.0.3; the remaining combinations are configured in CI but were not executed locally. Run the test suite in your own environment before claiming a specific combination.
 
 ## Documentation
 
@@ -119,4 +119,4 @@ See the [docs](docs/) directory, including [getting-started.md](docs/getting-sta
 
 ## License
 
-[MIT](LICENSE)
+[Apache License 2.0](LICENSE). See [NOTICE](NOTICE) for attribution information.

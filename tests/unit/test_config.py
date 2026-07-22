@@ -135,6 +135,9 @@ def test_admin_address_order_preserved():
     "prefix,expected",
     [
         ("", ""),
+        ("   ", ""),
+        ("/", ""),
+        ("///", ""),
         ("/xxl-job", "/xxl-job"),
         ("/xxl-job/", "/xxl-job"),
         ("xxl-job", "/xxl-job"),

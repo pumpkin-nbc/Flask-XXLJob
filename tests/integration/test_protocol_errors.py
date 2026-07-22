@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from flask import Flask, jsonify
+
 from flask_xxljob import FlaskXXLJob, XXLJobResponse
-from tests.conftest import make_app
+from tests.conftest import BASE_CONFIG, make_app
 
 
 def build(**overrides):
@@ -94,6 +96,40 @@ def test_non_executor_404_stays_default():
     # 非执行器路径保持 Flask 默认行为。
     # Non-executor paths keep Flask's default behavior.
     assert resp.status_code == 404
+
+
+def test_host_custom_404_and_405_handlers_are_preserved():
+    ext = FlaskXXLJob()
+    app = Flask("host_errors_" + str(id(ext)))
+    app.config.update(BASE_CONFIG)
+
+    @app.post("/host-only-post")
+    def host_only_post():
+        return "ok"
+
+    @app.errorhandler(404)
+    def custom_404(error):
+        return jsonify(source="host", code=404), 404
+
+    @app.errorhandler(405)
+    def custom_405(error):
+        return jsonify(source="host", code=405), 405
+
+    # Initialize after the host handlers exist. The extension must not replace
+    # them, while its own endpoint routing failures must still use XXL-JOB JSON.
+    ext.init_app(app)
+
+    client = app.test_client()
+    not_found = client.get("/missing")
+    wrong_method = client.get("/host-only-post")
+    executor_wrong_method = client.get("/run")
+
+    assert not_found.status_code == 404
+    assert not_found.json == {"source": "host", "code": 404}
+    assert wrong_method.status_code == 405
+    assert wrong_method.json == {"source": "host", "code": 405}
+    assert executor_wrong_method.status_code == 200
+    assert executor_wrong_method.json["code"] == 500
 
 
 def test_content_type_with_charset_is_parsed():

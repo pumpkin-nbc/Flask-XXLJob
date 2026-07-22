@@ -19,6 +19,36 @@ class RequestParseError(Exception):
     """
 
 
+def _read_limited_body(
+    stream: Any, content_length: Optional[int], max_request_size: int
+) -> bytes:
+    """
+    最多从请求流读取 ``max_request_size + 1`` 字节。
+
+    Read at most ``max_request_size + 1`` bytes from a request stream.
+
+    A known oversized ``Content-Length`` is rejected before reading. For
+    streams without a known length, the extra byte detects an oversized body
+    without buffering the complete request in memory.
+    """
+    if content_length is not None and content_length > max_request_size:
+        raise RequestParseError("request body exceeds the maximum allowed size")
+
+    remaining = max_request_size + 1
+    chunks = []
+    while remaining > 0:
+        chunk = stream.read(remaining)
+        if not chunk:
+            break
+        chunks.append(chunk)
+        remaining -= len(chunk)
+
+    raw_body = b"".join(chunks)
+    if len(raw_body) > max_request_size:
+        raise RequestParseError("request body exceeds the maximum allowed size")
+    return raw_body
+
+
 def parse_json_object(raw_body: bytes, max_request_size: int) -> dict:
     """
     解析 JSON 请求体，要求其为 JSON 对象。

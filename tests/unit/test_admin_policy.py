@@ -116,6 +116,26 @@ def test_invalid_json_no_failover_by_default(mocker):
     assert post.call_count == 1
 
 
+def test_non_object_json_failover_when_enabled(mocker):
+    non_object = FakeResponse()
+    non_object.json = lambda: []
+    post = mocker.patch(
+        "flask_xxljob.client.requests.post",
+        side_effect=[non_object, FakeResponse(code=200)],
+    )
+    result = post_to_admins(
+        ["http://a:8080", "http://b:8080"],
+        "/api/registry",
+        {},
+        "",
+        (3, 5),
+        policy=AdminCallPolicy(failover_on_invalid_json=True),
+    )
+    assert result.success is True
+    assert result.address == "http://b:8080"
+    assert post.call_count == 2
+
+
 def test_business_failover_when_enabled(mocker):
     post = mocker.patch(
         "flask_xxljob.client.requests.post",

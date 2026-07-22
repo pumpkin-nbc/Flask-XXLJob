@@ -21,6 +21,8 @@ dist/
 ## 检查
 
 ```bash
+.venv\Scripts\python.exe scripts\check_docs.py
+.venv\Scripts\python.exe scripts\check_package.py
 .venv\Scripts\python.exe -m twine check dist/*
 ```
 
@@ -44,8 +46,11 @@ pip install --index-url https://test.pypi.org/simple/ Flask-XXLJob
 
 ## 发布前
 
-运行文档一致性检查，并确认产物中不包含任何密钥、内部域名或 Token：
+运行上述全部检查，确认 wheel 与源码分发包包含 `LICENSE` 和 `NOTICE`、声明
+`Apache-2.0`、使用真实项目链接，并且不包含任何密钥、内部域名或 Token：
 
 ```bash
 .venv\Scripts\python.exe scripts\check_docs.py
+.venv\Scripts\python.exe scripts\check_package.py
+.venv\Scripts\python.exe -m twine check dist/*
 ```

@@ -29,6 +29,7 @@ Run the full check set before opening a pull request:
 .venv\Scripts\python.exe -m mypy flask_xxljob
 .venv\Scripts\python.exe -m pytest
 .venv\Scripts\python.exe scripts\check_docs.py
+.venv\Scripts\python.exe scripts\check_package.py
 ```
 
 ## Documentation
@@ -41,3 +42,8 @@ other in the same pull request and keep code examples identical.
 
 Any protocol change must be verified against the official XXL-JOB 2.4.1 source,
 including exact field spelling (for example `logDateTim` and `glueUpdatetime`).
+
+## License
+
+Unless you explicitly state otherwise, contributions submitted for inclusion in
+Flask-XXLJob are licensed under the [Apache License 2.0](LICENSE).

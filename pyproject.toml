@@ -8,17 +8,16 @@ version = "0.2.0"
 description = "A Flask extension that implements the XXL-JOB 2.4.1 executor protocol."
 readme = "README.md"
 requires-python = ">=3.8"
-license = "MIT"
-license-files = ["LICENSE"]
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 keywords = ["flask", "xxl-job", "xxljob", "scheduler", "executor"]
 authors = [
-    { name = "Flask-XXLJob Contributors" },
+    { name = "Pumpkin" },
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Framework :: Flask",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",
@@ -53,10 +52,10 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/example/Flask-XXLJob"
-Documentation = "https://github.com/example/Flask-XXLJob/tree/main/docs"
-Source = "https://github.com/example/Flask-XXLJob"
-Changelog = "https://github.com/example/Flask-XXLJob/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/pumpkin-nbc/Flask-XXLJob"
+Documentation = "https://github.com/pumpkin-nbc/Flask-XXLJob/tree/main/docs"
+Source = "https://github.com/pumpkin-nbc/Flask-XXLJob"
+Changelog = "https://github.com/pumpkin-nbc/Flask-XXLJob/blob/main/CHANGELOG.md"
 
 [project.scripts]
 flask-xxljob = "flask_xxljob.cli.commands:main"
@@ -80,8 +79,10 @@ include = [
     "/SECURITY.md",
     "/SECURITY.zh-CN.md",
     "/LICENSE",
+    "/NOTICE",
     "/pyproject.toml",
     "/MANIFEST.in",
+    "/tox.ini",
 ]
 
 [tool.pytest.ini_options]

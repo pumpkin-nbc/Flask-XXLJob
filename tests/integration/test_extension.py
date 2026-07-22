@@ -103,6 +103,16 @@ def test_empty_route_prefix_mounts_at_root():
     assert "/run" in rules
 
 
+def test_slash_route_prefix_mounts_at_root_and_returns_json_errors():
+    ext = FlaskXXLJob()
+    app, _ = make_app(ext, name="slash_root_" + str(id(ext)), XXL_JOB_ROUTE_PREFIX="/")
+    rules = {rule.rule for rule in app.url_map.iter_rules()}
+    assert "/run" in rules
+    resp = app.test_client().get("/run")
+    assert resp.is_json
+    assert resp.json["code"] == 500
+
+
 def test_prefixed_run_dispatches():
     ext = FlaskXXLJob()
     app, _ = make_app(ext, name="pfxrun_" + str(id(ext)), XXL_JOB_ROUTE_PREFIX="/xxl-job/")

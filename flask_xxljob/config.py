@@ -300,7 +300,10 @@ def _validate_http_url(key: str, value: str) -> None:
 
 
 def _normalize_prefix(prefix: str) -> str:
-    if not prefix:
+    stripped = prefix.strip()
+    if not stripped:
         return ""
-    normalized = "/" + prefix.strip("/")
-    return normalized
+    normalized = stripped.strip("/")
+    if not normalized:
+        return ""
+    return "/" + normalized

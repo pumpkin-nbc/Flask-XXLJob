@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 import requests
 
 from flask_xxljob.client import (
@@ -76,6 +77,17 @@ def test_invalid_json_is_invalid_json(mocker):
         return_value=FakeResponse(bad_json=True),
     )
     assert call().error_type == ERROR_INVALID_JSON
+
+
+@pytest.mark.parametrize("body", [[], [1], None, "ok", 200])
+def test_non_object_json_is_invalid_json(mocker, body):
+    response = FakeResponse()
+    response.json = lambda: body
+    mocker.patch("flask_xxljob.client.requests.post", return_value=response)
+    result = call()
+    assert result.success is False
+    assert result.error_type == ERROR_INVALID_JSON
+    assert result.error == "JSON response body must be an object"
 
 
 def test_business_failure_is_business(mocker):

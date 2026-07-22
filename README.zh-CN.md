@@ -111,7 +111,7 @@ flask --app "project:create_app" xxljob status
 
 ## 兼容性
 
-目标支持 `Flask >= 1.0` 与 `Python >= 3.8`。兼容性矩阵（Python 3.8-3.13 x Flask 1/2/3）已在 `tox.ini` 与 `.github/workflows/ci.yml` 中配置。本版本仅在 Python 3.8 与已安装的 Flask 版本上本地验证；其余组合已在 CI 中配置但未在本地执行。请在你自己的环境中运行测试后再声明特定组合可用。
+目标支持 `Flask >= 1.0` 与 `Python >= 3.8`。兼容性矩阵（Python 3.8-3.13 x Flask 1/2/3）已在 `tox.ini` 与 `.github/workflows/ci.yml` 中配置。本版本已在 Python 3.12 与 Flask 3.0.3 上完成本地验证；其余组合已在 CI 中配置但未在本地执行。请在你自己的环境中运行测试后再声明特定组合可用。
 
 ## 文档
 
@@ -119,4 +119,4 @@ flask --app "project:create_app" xxljob status
 
 ## 许可证
 
-[MIT](LICENSE)
+[Apache License 2.0](LICENSE)。署名信息参见 [NOTICE](NOTICE)。

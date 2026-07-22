@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+
 from flask_xxljob.client import CallResult
 from flask_xxljob.config import XXLJobConfig
 from flask_xxljob.registry.registry_service import RegistryService
@@ -32,6 +34,18 @@ class FakeAdmin:
         self.remove_calls += 1
         return CallResult(success=self.success, address="http://a:8080")
 
+
+class BlockingAdmin(FakeAdmin):
+    def __init__(self):
+        super().__init__()
+        self.registry_started = threading.Event()
+        self.registry_release = threading.Event()
+
+    def registry(self, request):
+        self.registry_calls += 1
+        self.registry_started.set()
+        self.registry_release.wait(timeout=5)
+        return CallResult(success=True, address="http://a:8080")
 
 def test_register_once_result():
     admin = FakeAdmin()
@@ -71,3 +85,20 @@ def test_stop_triggers_remove():
     service.start()
     service.stop(remove=True)
     assert admin.remove_calls == 1
+
+
+def test_stop_skips_remove_while_renewal_is_still_running():
+    admin = BlockingAdmin()
+    service = RegistryService(make_config(XXL_JOB_REGISTRY_INTERVAL=1), admin)
+    service.start()
+    assert admin.registry_started.wait(timeout=1)
+
+    service.stop(remove=True)
+
+    assert admin.remove_calls == 0
+    assert service.is_running is True
+    assert service.status_snapshot()["registry_thread_running"] is True
+
+    admin.registry_release.set()
+    service.stop(remove=False)
+    assert service.is_running is False

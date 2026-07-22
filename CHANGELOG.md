@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.0] - 2026-07-22
 
+### Fixed
+
+- Non-object JSON responses from the Admin are now classified as `invalid_json` instead of raising `AttributeError`.
+- Executor request bodies are read with a strict memory bound, `/` is normalized to the root route prefix, and executor routing errors no longer replace the host application's custom 404/405 handlers.
+- Executor routes use the Flask 1.x-compatible `route(..., methods=["POST"])` API instead of the Flask 2.0-only `post()` shortcut.
+- Registry shutdown no longer deregisters while an in-flight renewal may still complete and register the executor again.
+
 ### Added
 
 - Application-level callback registration: `register_callbacks(app=None, *, run=..., idle_beat=..., kill=..., log=..., replace=False)`, `set_run_callback`/`set_idle_beat_callback`/`set_kill_callback`/`set_log_callback` (with `replace`), and `get_run_callback`/`get_idle_beat_callback`/`get_kill_callback`/`get_log_callback`. The `on_*` decorators keep working as the default template. Resolution priority is app-specific registry first, then extension-level defaults.
@@ -22,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The project license changed from MIT to Apache-2.0 before the first PyPI release. Package metadata now identifies Pumpkin as the author and points to the `pumpkin-nbc/Flask-XXLJob` repository.
 - Access-token comparison now uses `hmac.compare_digest` for constant-time behaviour and safely rejects missing/non-string headers. The empty-token official mode is unchanged; the token is never logged or returned.
 - When an explicit Admin call policy is supplied (as the built-in clients now do), the default failover behaviour is: network/timeout always fail over; HTTP errors fail over; invalid-JSON and business failures do not fail over. Direct `post_to_admins` callers without a policy keep exact 0.1.2 behaviour.
 
@@ -32,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Testing
 
 - Added tests for app-level registration (priority, multi-app isolation, duplicate/`replace`, factory seeding, handler exception/bad return), batch callback (empty/over-limit/invalid item/Chinese/truncation/failover/no-partial-send), retry policy (retry, exhaustion, failover, caps, token absence, new fields), status/lifecycle and CLI status, and access-token/request-limit security.
+- Added regressions for non-object Admin JSON, bounded request-stream reads, host error-handler preservation, root-prefix normalization and slow registry shutdown; package checks now validate license metadata and legal files. The Flask 1.x test environments pin a compatible MarkupSafe version.
 
 ### Documentation
 

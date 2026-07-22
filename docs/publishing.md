@@ -21,6 +21,8 @@ dist/
 ## Check
 
 ```bash
+.venv\Scripts\python.exe scripts\check_docs.py
+.venv\Scripts\python.exe scripts\check_package.py
 .venv\Scripts\python.exe -m twine check dist/*
 ```
 
@@ -44,9 +46,12 @@ pip install --index-url https://test.pypi.org/simple/ Flask-XXLJob
 
 ## Before publishing
 
-Run the documentation consistency check and ensure no secrets, internal
-hostnames or tokens are included in the artifacts:
+Run all checks above and confirm that the wheel and source distribution contain
+`LICENSE` and `NOTICE`, declare `Apache-2.0`, use the real project URLs, and do
+not include secrets, internal hostnames or tokens.
 
 ```bash
 .venv\Scripts\python.exe scripts\check_docs.py
+.venv\Scripts\python.exe scripts\check_package.py
+.venv\Scripts\python.exe -m twine check dist/*
 ```

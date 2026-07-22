@@ -15,7 +15,7 @@ import sys
 import tarfile
 import zipfile
 from pathlib import Path
-from typing import List
+from typing import List, Sequence
 
 ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / "dist"
@@ -26,18 +26,84 @@ FORBIDDEN_PATH_FRAGMENTS = [
     ".idea",
     ".git/",
     "__pycache__",
+    "ai.md",
+]
+
+EXPECTED_REPOSITORY = "https://github.com/pumpkin-nbc/Flask-XXLJob"
+EXPECTED_METADATA_LINES = [
+    "Author: Pumpkin",
+    "License-Expression: Apache-2.0",
+    f"Project-URL: Homepage, {EXPECTED_REPOSITORY}",
+    f"Project-URL: Source, {EXPECTED_REPOSITORY}",
 ]
 
 
-def _artifact_names() -> List[str]:
-    names: List[str] = []
-    for whl in DIST.glob("*.whl"):
-        with zipfile.ZipFile(whl) as archive:
-            names.extend(archive.namelist())
-    for sdist in DIST.glob("*.tar.gz"):
-        with tarfile.open(sdist) as archive:
-            names.extend(archive.getnames())
-    return names
+def _check_forbidden_paths(names: Sequence[str], errors: List[str]) -> None:
+    for name in names:
+        for fragment in FORBIDDEN_PATH_FRAGMENTS:
+            if fragment in name:
+                errors.append(f"Forbidden path in artifact: {name}")
+
+
+def _find_suffix(names: Sequence[str], suffix: str) -> List[str]:
+    normalized_suffix = suffix.replace("\\", "/")
+    return [name for name in names if name.replace("\\", "/").endswith(normalized_suffix)]
+
+
+def _check_wheel(path: Path, errors: List[str]) -> int:
+    with zipfile.ZipFile(path) as archive:
+        names = archive.namelist()
+        _check_forbidden_paths(names, errors)
+
+        metadata_files = _find_suffix(names, ".dist-info/METADATA")
+        if len(metadata_files) != 1:
+            errors.append(f"{path.name}: expected exactly one METADATA file")
+        else:
+            metadata = archive.read(metadata_files[0]).decode("utf-8")
+            for line in EXPECTED_METADATA_LINES:
+                if line not in metadata:
+                    errors.append(f"{path.name}: METADATA is missing {line!r}")
+            if "github.com/example/" in metadata:
+                errors.append(f"{path.name}: METADATA contains a placeholder project URL")
+            if "License :: OSI Approved" in metadata:
+                errors.append(f"{path.name}: METADATA contains a deprecated license classifier")
+
+        license_files = _find_suffix(names, ".dist-info/licenses/LICENSE")
+        notice_files = _find_suffix(names, ".dist-info/licenses/NOTICE")
+        if len(license_files) != 1:
+            errors.append(f"{path.name}: expected LICENSE in wheel license directory")
+        elif "Apache License" not in archive.read(license_files[0]).decode("utf-8"):
+            errors.append(f"{path.name}: wheel LICENSE is not Apache-2.0")
+        if len(notice_files) != 1:
+            errors.append(f"{path.name}: expected NOTICE in wheel license directory")
+        elif "Copyright 2026 Pumpkin" not in archive.read(notice_files[0]).decode("utf-8"):
+            errors.append(f"{path.name}: wheel NOTICE has incorrect attribution")
+        return len(names)
+
+
+def _check_sdist(path: Path, errors: List[str]) -> int:
+    with tarfile.open(path) as archive:
+        names = archive.getnames()
+        _check_forbidden_paths(names, errors)
+
+        required_suffixes = ["/LICENSE", "/NOTICE", "/tox.ini", "/pyproject.toml"]
+        for suffix in required_suffixes:
+            if len(_find_suffix(names, suffix)) != 1:
+                errors.append(f"{path.name}: expected exactly one {suffix[1:]} file")
+
+        license_files = _find_suffix(names, "/LICENSE")
+        notice_files = _find_suffix(names, "/NOTICE")
+        if license_files:
+            member = archive.extractfile(license_files[0])
+            content = member.read().decode("utf-8") if member is not None else ""
+            if "Apache License" not in content:
+                errors.append(f"{path.name}: sdist LICENSE is not Apache-2.0")
+        if notice_files:
+            member = archive.extractfile(notice_files[0])
+            content = member.read().decode("utf-8") if member is not None else ""
+            if "Copyright 2026 Pumpkin" not in content:
+                errors.append(f"{path.name}: sdist NOTICE has incorrect attribution")
+        return len(names)
 
 
 def main() -> int:
@@ -45,16 +111,18 @@ def main() -> int:
         print("No dist/ directory found. Build the package first.")
         return 1
 
-    names = _artifact_names()
-    if not names:
+    wheels = list(DIST.glob("*.whl"))
+    sdists = list(DIST.glob("*.tar.gz"))
+    if not wheels or not sdists:
         print("No build artifacts found in dist/.")
         return 1
 
     errors: List[str] = []
-    for name in names:
-        for fragment in FORBIDDEN_PATH_FRAGMENTS:
-            if fragment in name:
-                errors.append(f"Forbidden path in artifact: {name}")
+    entry_count = 0
+    for wheel in wheels:
+        entry_count += _check_wheel(wheel, errors)
+    for sdist in sdists:
+        entry_count += _check_sdist(sdist, errors)
 
     if errors:
         print("Package check FAILED:")
@@ -62,7 +130,7 @@ def main() -> int:
             print(f"  - {error}")
         return 1
 
-    print(f"Package check passed ({len(names)} entries inspected).")
+    print(f"Package check passed ({entry_count} entries inspected).")
     return 0
 
 

@@ -38,7 +38,11 @@ class RegistryService:
         self._admin_client = admin_client
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
+        # 生命周期锁串行化 start/stop；调用锁串行化注册与注销请求。
+        # The lifecycle lock serializes start/stop; the call lock serializes
+        # registration and deregistration requests.
         self._lock = threading.Lock()
+        self._call_lock = threading.Lock()
         # 最近一次注册/续约/注销结果（仅插件状态，绝不含 Token 或业务状态）。
         # Last registration/renewal/removal result (plugin status only; never a
         # token or any business state).
@@ -96,20 +100,21 @@ class RegistryService:
 
         Perform a single registration/renewal call and return the full result.
         """
-        result = self._admin_client.registry(self._build_request())
-        self._record(result, is_remove=False)
-        if result.success:
-            logger.info(
-                "XXL-JOB executor registered via %s (app=%s).",
-                result.address,
-                self._config.executor_app_name,
-            )
-        else:
-            logger.warning(
-                "XXL-JOB executor registration failed: %s",
-                result.error or result.msg,
-            )
-        return result
+        with self._call_lock:
+            result = self._admin_client.registry(self._build_request())
+            self._record(result, is_remove=False)
+            if result.success:
+                logger.info(
+                    "XXL-JOB executor registered via %s (app=%s).",
+                    result.address,
+                    self._config.executor_app_name,
+                )
+            else:
+                logger.warning(
+                    "XXL-JOB executor registration failed: %s",
+                    result.error or result.msg,
+                )
+            return result
 
     def remove_once_result(self) -> CallResult:
         """
@@ -117,16 +122,17 @@ class RegistryService:
 
         Perform a single deregistration call and return the full result.
         """
-        result = self._admin_client.registry_remove(self._build_request())
-        self._record(result, is_remove=True)
-        if result.success:
-            logger.info("XXL-JOB executor removed via %s.", result.address)
-        else:
-            logger.warning(
-                "XXL-JOB executor removal failed: %s",
-                result.error or result.msg,
-            )
-        return result
+        with self._call_lock:
+            result = self._admin_client.registry_remove(self._build_request())
+            self._record(result, is_remove=True)
+            if result.success:
+                logger.info("XXL-JOB executor removed via %s.", result.address)
+            else:
+                logger.warning(
+                    "XXL-JOB executor removal failed: %s",
+                    result.error or result.msg,
+                )
+            return result
 
     def register_once(self) -> bool:
         """
@@ -135,20 +141,7 @@ class RegistryService:
         Perform a single registration/renewal call. Returns whether it
         succeeded.
         """
-        result = self._admin_client.registry(self._build_request())
-        self._record(result, is_remove=False)
-        if result.success:
-            logger.info(
-                "XXL-JOB executor registered via %s (app=%s).",
-                result.address,
-                self._config.executor_app_name,
-            )
-        else:
-            logger.warning(
-                "XXL-JOB executor registration failed: %s",
-                result.error or result.msg,
-            )
-        return result.success
+        return self.register_once_result().success
 
     def remove_once(self) -> bool:
         """
@@ -156,16 +149,7 @@ class RegistryService:
 
         Perform a single deregistration call. Returns whether it succeeded.
         """
-        result = self._admin_client.registry_remove(self._build_request())
-        self._record(result, is_remove=True)
-        if result.success:
-            logger.info("XXL-JOB executor removed via %s.", result.address)
-        else:
-            logger.warning(
-                "XXL-JOB executor removal failed: %s",
-                result.error or result.msg,
-            )
-        return result.success
+        return self.remove_once_result().success
 
     def start(self) -> None:
         """
@@ -210,16 +194,37 @@ class RegistryService:
 
         Stop the renewal thread and optionally deregister the executor.
         """
-        self._stop_event.set()
-        thread = self._thread
-        if thread is not None and thread.is_alive() and thread is not threading.current_thread():
-            thread.join(timeout=self._config.registry_interval)
-        self._thread = None
-        if remove:
-            try:
-                self.remove_once()
-            except Exception:  # noqa: BLE001
-                logger.exception("Unexpected error during XXL-JOB executor removal.")
+        with self._lock:
+            self._stop_event.set()
+            thread = self._thread
+            if (
+                thread is not None
+                and thread.is_alive()
+                and thread is not threading.current_thread()
+            ):
+                thread.join(timeout=self._config.registry_interval)
+
+            if thread is not None and thread.is_alive():
+                # 仍在进行的续约无法被安全取消。此时不能发送注销，否则旧续约可能
+                # 在注销之后成功，从而把执行器重新注册。线程会在当前调用返回后看到
+                # stop_event 并自行退出；保留引用以使状态快照准确反映其仍在运行。
+                # An in-flight renewal cannot be cancelled safely. Do not send
+                # deregistration here: the old renewal could succeed afterwards
+                # and register the executor again. Keep the thread reference so
+                # status snapshots accurately report that it is still exiting.
+                logger.warning(
+                    "XXL-JOB registry thread is still stopping after %s seconds; "
+                    "skipping deregistration to avoid racing an in-flight renewal.",
+                    self._config.registry_interval,
+                )
+                return
+
+            self._thread = None
+            if remove:
+                try:
+                    self.remove_once()
+                except Exception:  # noqa: BLE001
+                    logger.exception("Unexpected error during XXL-JOB executor removal.")
 
     @property
     def is_running(self) -> bool:

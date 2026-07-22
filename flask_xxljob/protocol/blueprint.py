@@ -28,7 +28,12 @@ from ..model.log import LogRequest
 from ..model.trigger import TriggerRequest
 from ..response.executor import XXLJobResponse
 from ..response.log import LogResponse
-from .parser import RequestParseError, check_param_length, parse_json_object
+from .parser import (
+    RequestParseError,
+    _read_limited_body,
+    check_param_length,
+    parse_json_object,
+)
 from .validator import ACCESS_TOKEN_ERROR, check_access_token, extract_request_token
 
 logger = logging.getLogger("flask_xxljob.protocol")
@@ -87,7 +92,7 @@ def build_blueprint(name: str, url_prefix: str) -> Blueprint:
     """
     blueprint = Blueprint(name, __name__, url_prefix=url_prefix or None)
 
-    @blueprint.post("/beat")
+    @blueprint.route("/beat", methods=["POST"])
     def beat() -> Response:
         runtime = _runtime()
         if not _token_ok(runtime):
@@ -96,7 +101,7 @@ def build_blueprint(name: str, url_prefix: str) -> Blueprint:
         # /beat does not touch the business system; success when runtime is ok.
         return _json(XXLJobResponse.success())
 
-    @blueprint.post("/run")
+    @blueprint.route("/run", methods=["POST"])
     def run() -> Response:
         runtime = _runtime()
         if not _token_ok(runtime):
@@ -118,7 +123,7 @@ def build_blueprint(name: str, url_prefix: str) -> Blueprint:
             return model
         return _dispatch(callback, model, "run")
 
-    @blueprint.post("/idleBeat")
+    @blueprint.route("/idleBeat", methods=["POST"])
     def idle_beat() -> Response:
         runtime = _runtime()
         if not _token_ok(runtime):
@@ -136,7 +141,7 @@ def build_blueprint(name: str, url_prefix: str) -> Blueprint:
             return model
         return _dispatch(callback, model, "idleBeat")
 
-    @blueprint.post("/kill")
+    @blueprint.route("/kill", methods=["POST"])
     def kill() -> Response:
         runtime = _runtime()
         if not _token_ok(runtime):
@@ -154,7 +159,7 @@ def build_blueprint(name: str, url_prefix: str) -> Blueprint:
             return model
         return _dispatch(callback, model, "kill")
 
-    @blueprint.post("/log")
+    @blueprint.route("/log", methods=["POST"])
     def log() -> Response:
         runtime = _runtime()
         if not _token_ok(runtime):
@@ -202,7 +207,12 @@ def build_blueprint(name: str, url_prefix: str) -> Blueprint:
 
     def _parse_body(runtime: Any) -> Any:
         try:
-            return parse_json_object(request.get_data(), runtime.config.max_request_size)
+            raw_body = _read_limited_body(
+                request.stream,
+                request.content_length,
+                runtime.config.max_request_size,
+            )
+            return parse_json_object(raw_body, runtime.config.max_request_size)
         except RequestParseError as exc:
             return _json(XXLJobResponse.failure(str(exc)))
 

@@ -9,6 +9,13 @@
 
 ## [0.2.0] - 2026-07-22
 
+### 修复
+
+- Admin 返回非对象 JSON 时现归类为 `invalid_json`，不再抛出 `AttributeError`。
+- 执行器请求体现在按严格内存上限读取，`/` 会规范化为根路由前缀，执行器路由错误也不再覆盖宿主应用自定义的 404/405 处理器。
+- 执行器路由改用兼容 Flask 1.x 的 `route(..., methods=["POST"])` API，不再使用 Flask 2.0 才提供的 `post()` 快捷方法。
+- 注册服务停止时不再与尚未结束的续约并发注销，避免旧续约在注销后重新注册执行器。
+
 ### 新增
 
 - 应用级请求处理函数注册：`register_callbacks(app=None, *, run=..., idle_beat=..., kill=..., log=..., replace=False)`、`set_run_callback`/`set_idle_beat_callback`/`set_kill_callback`/`set_log_callback`（支持 `replace`），以及 `get_run_callback`/`get_idle_beat_callback`/`get_kill_callback`/`get_log_callback`。`on_*` 装饰器仍作为默认模板可用。解析优先级为：先应用级注册表，再扩展级默认。
@@ -22,6 +29,7 @@
 
 ### 变更
 
+- 在首次发布到 PyPI 前，项目许可证由 MIT 调整为 Apache-2.0；包元数据中的作者改为 Pumpkin，并指向 `pumpkin-nbc/Flask-XXLJob` 仓库。
 - Access Token 比较改用 `hmac.compare_digest` 以实现常量时间比较，并安全拒绝缺失/非字符串请求头。空 Token 的官方模式保持不变；Token 绝不写入日志或返回。
 - 当显式提供 Admin 调用策略时（内置客户端现已如此），默认故障转移行为为：网络/超时始终转移；HTTP 错误转移；非法 JSON 与业务失败不转移。未提供策略的 `post_to_admins` 直接调用者仍保持与 0.1.2 完全一致的行为。
 
@@ -32,6 +40,7 @@
 ### 测试
 
 - 新增应用级注册（优先级、多应用隔离、重复/`replace`、工厂注入、处理函数异常/错误返回）、批量回调（空/超限/非法条目/中文/截断/故障转移/不部分发送）、重试策略（重试、耗尽、故障转移、上限、Token 不泄露、新字段）、状态/生命周期与 CLI status，以及 Token 与请求限制安全的测试。
+- 新增非对象 Admin JSON、有界请求流读取、宿主错误处理器保留、根前缀规范化与慢注册线程停止的回归测试；制品检查现在还会验证许可证元数据与法律文件，Flask 1.x 测试环境也会固定兼容的 MarkupSafe 版本。
 
 ### 文档
 

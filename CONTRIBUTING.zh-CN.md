@@ -25,6 +25,7 @@ Flask-XXLJob 是 Flask 与 XXL-JOB 2.4.1 之间的**协议适配插件**。它�
 .venv\Scripts\python.exe -m mypy flask_xxljob
 .venv\Scripts\python.exe -m pytest
 .venv\Scripts\python.exe scripts\check_docs.py
+.venv\Scripts\python.exe scripts\check_package.py
 ```
 
 ## 文档
@@ -34,3 +35,7 @@ Flask-XXLJob 是 Flask 与 XXL-JOB 2.4.1 之间的**协议适配插件**。它�
 ## 协议准确性
 
 任何协议改动都必须以官方 XXL-JOB 2.4.1 源码为准进行核对，包括字段的精确拼写（例如 `logDateTim` 与 `glueUpdatetime`）。
+
+## 许可证
+
+除非贡献者另有明确声明，提交并纳入 Flask-XXLJob 的贡献均按 [Apache License 2.0](LICENSE) 授权。
