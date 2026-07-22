@@ -20,9 +20,22 @@ the constructor.
 | `XXL_JOB_REGISTRY_INTERVAL` | `30` | Registration renewal interval (seconds). |
 | `XXL_JOB_HTTP_CONNECT_TIMEOUT` | `3` | HTTP connect timeout (seconds). |
 | `XXL_JOB_HTTP_READ_TIMEOUT` | `5` | HTTP read timeout (seconds). |
-| `XXL_JOB_CALLBACK_MESSAGE_MAX_LENGTH` | `10000` | Max `handleMsg` length. |
+| `XXL_JOB_CALLBACK_MESSAGE_MAX_LENGTH` | `10000` | Max `handleMsg` length (characters). |
 | `XXL_JOB_MAX_REQUEST_SIZE` | `1048576` | Max request body size (bytes). |
-| `XXL_JOB_MAX_PARAM_LENGTH` | `65536` | Max `executorParams` length. |
+| `XXL_JOB_MAX_PARAM_LENGTH` | `65536` | Max `executorParams` length (characters). |
+| `XXL_JOB_CALLBACK_BATCH_MAX_SIZE` | `100` | Max items per `callback_many` batch. |
+| `XXL_JOB_ADMIN_RETRY_COUNT` | `0` | Same-address synchronous retries for transient errors (capped). |
+| `XXL_JOB_ADMIN_RETRY_BACKOFF` | `0.0` | Seconds to wait between retries (capped). |
+| `XXL_JOB_ADMIN_FAILOVER_ON_HTTP_ERROR` | `True` | Try the next admin on a non-200 status. |
+| `XXL_JOB_ADMIN_FAILOVER_ON_INVALID_JSON` | `False` | Try the next admin on an invalid JSON response. |
+| `XXL_JOB_ADMIN_FAILOVER_ON_BUSINESS_ERROR` | `False` | Try the next admin on a business-code failure. |
+
+Request size is measured in **bytes**; `handleMsg` and `executorParams` lengths
+are measured in **characters** (Unicode code points), so multi-byte characters
+such as Chinese count as one character each.
+
+Network and timeout errors always fail over to the next admin regardless of the
+failover keys above.
 
 ## Example
 

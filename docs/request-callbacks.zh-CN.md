@@ -64,9 +64,26 @@ def create_app():
 
 模块级注册的处理函数会成为该扩展初始化的每个应用的默认处理函数。
 
+## 应用级注册
+
+除 `on_*` 装饰器外，你还可以为指定应用注册处理函数。这在应用工厂或多应用场景中很有用：
+
+```python
+def create_app():
+    app = Flask(__name__)
+    xxl_job.init_app(app)
+    xxl_job.register_callbacks(app, run=handle_run, log=handle_log)
+    # 或：xxl_job.set_run_callback(app, handle_run, replace=True)
+    return app
+```
+
+使用 `get_run_callback(app)`（以及 `idle_beat`/`kill`/`log` 变体）读取当前已注册的处理函数。当 `app=None` 时，使用当前应用上下文或最近初始化的应用。
+
+请求分发时的解析优先级：先检查应用级注册表，再检查由 `on_*` 装饰器设置的扩展级默认。两者都未配置时，接口返回标准的“未配置”失败。
+
 ## 重复注册
 
-重复注册同一处理函数会抛出 `XXLJobError`，从而避免之前的处理函数被静默覆盖。每个处理函数只应注册一次。
+重复注册同一处理函数会抛出 `XXLJobCallbackRegistrationError`（`FlaskXXLJobError` 的子类）。向 `register_callbacks`/`set_*_callback` 传入 `replace=True` 可有意覆盖已有处理函数。
 
 ## 返回值
 

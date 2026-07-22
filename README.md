@@ -91,24 +91,31 @@ with app.app_context():
 | `XXL_JOB_REGISTRY_INTERVAL` | `30` | Registration renewal interval (seconds). |
 | `XXL_JOB_HTTP_CONNECT_TIMEOUT` | `3` | HTTP connect timeout (seconds). |
 | `XXL_JOB_HTTP_READ_TIMEOUT` | `5` | HTTP read timeout (seconds). |
-| `XXL_JOB_CALLBACK_MESSAGE_MAX_LENGTH` | `10000` | Max `handleMsg` length. |
+| `XXL_JOB_CALLBACK_MESSAGE_MAX_LENGTH` | `10000` | Max `handleMsg` length (characters). |
 | `XXL_JOB_MAX_REQUEST_SIZE` | `1048576` | Max request body size (bytes). |
-| `XXL_JOB_MAX_PARAM_LENGTH` | `65536` | Max `executorParams` length. |
+| `XXL_JOB_MAX_PARAM_LENGTH` | `65536` | Max `executorParams` length (characters). |
+| `XXL_JOB_CALLBACK_BATCH_MAX_SIZE` | `100` | Max items per `callback_many` batch. |
+| `XXL_JOB_ADMIN_RETRY_COUNT` | `0` | Same-address synchronous retries (capped). |
+| `XXL_JOB_ADMIN_RETRY_BACKOFF` | `0.0` | Seconds between retries (capped). |
+| `XXL_JOB_ADMIN_FAILOVER_ON_HTTP_ERROR` | `True` | Fail over on a non-200 status. |
+| `XXL_JOB_ADMIN_FAILOVER_ON_INVALID_JSON` | `False` | Fail over on invalid JSON. |
+| `XXL_JOB_ADMIN_FAILOVER_ON_BUSINESS_ERROR` | `False` | Fail over on a business failure. |
 
 ## CLI
 
 ```bash
 flask --app "project:create_app" xxljob register
 flask --app "project:create_app" xxljob remove
+flask --app "project:create_app" xxljob status
 ```
 
 ## Compatibility
 
-Target support is `Flask >= 1.0` and `Python >= 3.8`. This release was verified locally on Python 3.8. Other combinations in the support matrix have not all been executed locally; run the test suite in your own environment before claiming a specific combination.
+Target support is `Flask >= 1.0` and `Python >= 3.8`. The compatibility matrix (Python 3.8-3.13 x Flask 1/2/3) is configured in `tox.ini` and `.github/workflows/ci.yml`. This release was verified locally only on Python 3.8 with the installed Flask version; the remaining combinations are configured in CI but were not executed locally. Run the test suite in your own environment before claiming a specific combination.
 
 ## Documentation
 
-See the [docs](docs/) directory, including [getting-started.md](docs/getting-started.md) and [configuration.md](docs/configuration.md). Upgrading from an earlier version? See the [migration guide](docs/migration.md) and the [CHANGELOG](CHANGELOG.md).
+See the [docs](docs/) directory, including [getting-started.md](docs/getting-started.md), [configuration.md](docs/configuration.md), the [API reference](docs/api-reference.md) and [integration testing](docs/integration-testing.md). Upgrading from an earlier version? See the [migration guide](docs/migration.md) and the [CHANGELOG](CHANGELOG.md).
 
 ## License
 

@@ -28,6 +28,46 @@ Job routing, block strategies, timeouts and retries are still managed by the
 XXL-JOB admin. Flask-XXLJob only relays the protocol; your task service keeps
 full control over execution.
 
+## Upgrading 0.1.2 to 0.2.0
+
+0.2.0 is a backward-compatible minor release. It adds application-level callback
+registration, batch callbacks, a configurable synchronous Admin retry/failover
+policy, plugin status querying and a `xxljob status` CLI command, richer
+`CallResult` fields, constant-time access-token comparison, and a public
+exception hierarchy. All 0.1.2 public APIs, imports and configuration keys keep
+working unchanged.
+
+### Do I need to change my code or config?
+
+No. Every new feature is opt-in, and the new configuration keys default to
+0.1.2-compatible behaviour:
+
+- App-level registration: `register_callbacks`, `set_*_callback(replace=...)`,
+  `get_*_callback`. The `on_*` decorators still work.
+- Batch callback: `callback_many(...)`. Single `callback*` methods are unchanged.
+- Admin call policy (defaults keep 0.1.2 behaviour): `XXL_JOB_ADMIN_RETRY_COUNT`
+  (0), `XXL_JOB_ADMIN_RETRY_BACKOFF` (0.0), `XXL_JOB_ADMIN_FAILOVER_ON_HTTP_ERROR`
+  (True), `XXL_JOB_ADMIN_FAILOVER_ON_INVALID_JSON` (False),
+  `XXL_JOB_ADMIN_FAILOVER_ON_BUSINESS_ERROR` (False),
+  `XXL_JOB_CALLBACK_BATCH_MAX_SIZE` (100).
+- Status: `get_status(app=None)` returns an `XXLJobStatus`; `start_registry` /
+  `stop_registry` control the registry thread.
+- Exceptions: `FlaskXXLJobError` is the new base; all previous names remain as
+  aliases, so existing `except XXLJobError` / `except XXLJobConfigError` keep
+  working.
+
+### Upgrade
+
+```bash
+pip install --upgrade Flask-XXLJob==0.2.0
+```
+
+### Rollback
+
+```bash
+pip install Flask-XXLJob==0.1.2
+```
+
 ## Upgrading 0.1.1 to 0.1.2
 
 0.1.2 is a backward-compatible patch release. It focuses on protocol

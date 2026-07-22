@@ -18,9 +18,20 @@
 | `XXL_JOB_REGISTRY_INTERVAL` | `30` | 注册续约间隔（秒）。 |
 | `XXL_JOB_HTTP_CONNECT_TIMEOUT` | `3` | HTTP 连接超时（秒）。 |
 | `XXL_JOB_HTTP_READ_TIMEOUT` | `5` | HTTP 读取超时（秒）。 |
-| `XXL_JOB_CALLBACK_MESSAGE_MAX_LENGTH` | `10000` | `handleMsg` 最大长度。 |
+| `XXL_JOB_CALLBACK_MESSAGE_MAX_LENGTH` | `10000` | `handleMsg` 最大长度（字符）。 |
 | `XXL_JOB_MAX_REQUEST_SIZE` | `1048576` | 请求体最大字节数。 |
-| `XXL_JOB_MAX_PARAM_LENGTH` | `65536` | `executorParams` 最大长度。 |
+| `XXL_JOB_MAX_PARAM_LENGTH` | `65536` | `executorParams` 最大长度（字符）。 |
+| `XXL_JOB_CALLBACK_BATCH_MAX_SIZE` | `100` | `callback_many` 单批最大条目数。 |
+| `XXL_JOB_ADMIN_RETRY_COUNT` | `0` | 瞬时错误的同地址同步重试次数（有上限）。 |
+| `XXL_JOB_ADMIN_RETRY_BACKOFF` | `0.0` | 重试之间的等待秒数（有上限）。 |
+| `XXL_JOB_ADMIN_FAILOVER_ON_HTTP_ERROR` | `True` | 非 200 状态时尝试下一个 Admin。 |
+| `XXL_JOB_ADMIN_FAILOVER_ON_INVALID_JSON` | `False` | 非法 JSON 响应时尝试下一个 Admin。 |
+| `XXL_JOB_ADMIN_FAILOVER_ON_BUSINESS_ERROR` | `False` | 业务码失败时尝试下一个 Admin。 |
+
+请求大小以**字节**计量；`handleMsg` 与 `executorParams` 长度以**字符**（Unicode
+码点）计量，因此中文等多字节字符每个计为一个字符。
+
+无论上述故障转移开关如何设置，网络与超时错误始终会转移到下一个 Admin。
 
 ## 示例
 

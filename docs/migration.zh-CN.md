@@ -26,6 +26,32 @@ XXL-JOB -> Flask (Flask-XXLJob) -> your on_run submits the task
 
 任务路由、阻塞策略、超时与重试仍由 XXL-JOB Admin 管理。Flask-XXLJob 只负责协议中转；你的任务服务始终完全掌控执行过程。
 
+## 从 0.1.2 升级到 0.2.0
+
+0.2.0 是向下兼容的次要版本。它新增了应用级请求处理函数注册、批量回调、可配置的同步 Admin 重试/故障转移策略、插件状态查询与 `xxljob status` CLI 命令、更丰富的 `CallResult` 字段、常量时间 Token 比较，以及公共异常层级。0.1.2 的全部公共 API、导入路径与配置项均保持不变。
+
+### 我需要修改代码或配置吗？
+
+不需要。所有新功能均为可选启用，新配置项的默认值与 0.1.2 行为一致：
+
+- 应用级注册：`register_callbacks`、`set_*_callback(replace=...)`、`get_*_callback`。`on_*` 装饰器仍然可用。
+- 批量回调：`callback_many(...)`。单条 `callback*` 方法保持不变。
+- Admin 调用策略（默认保持 0.1.2 行为）：`XXL_JOB_ADMIN_RETRY_COUNT`（0）、`XXL_JOB_ADMIN_RETRY_BACKOFF`（0.0）、`XXL_JOB_ADMIN_FAILOVER_ON_HTTP_ERROR`（True）、`XXL_JOB_ADMIN_FAILOVER_ON_INVALID_JSON`（False）、`XXL_JOB_ADMIN_FAILOVER_ON_BUSINESS_ERROR`（False）、`XXL_JOB_CALLBACK_BATCH_MAX_SIZE`（100）。
+- 状态：`get_status(app=None)` 返回 `XXLJobStatus`；`start_registry` / `stop_registry` 控制注册线程。
+- 异常：`FlaskXXLJobError` 为新的基类；所有旧名称保留为别名，因此现有的 `except XXLJobError` / `except XXLJobConfigError` 继续有效。
+
+### 升级
+
+```bash
+pip install --upgrade Flask-XXLJob==0.2.0
+```
+
+### 回滚
+
+```bash
+pip install Flask-XXLJob==0.1.2
+```
+
 ## 从 0.1.1 升级到 0.1.2
 
 0.1.2 是向下兼容的补丁版本，重点在于协议复核、注册与回调可靠性、更清晰的配置校验，以及更完善的测试和中英文文档。没有破坏性 API 变更，0.1.1 的使用方式继续有效。

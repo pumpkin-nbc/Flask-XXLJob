@@ -9,6 +9,7 @@ from __future__ import annotations
 from ..config import XXLJobConfig
 from ..model.registry import RegistryRequest
 from . import CallResult, post_to_admins
+from .policy import AdminCallPolicy
 
 # 官方 Admin 注册接口路径 / Official admin registry API paths.
 REGISTRY_PATH = "/api/registry"
@@ -42,6 +43,7 @@ class AdminClient:
             request.to_wire(),
             self._config.access_token,
             self._config.timeout,
+            policy=AdminCallPolicy.from_config(self._config),
         )
 
     def registry_remove(self, request: RegistryRequest) -> CallResult:
@@ -56,4 +58,5 @@ class AdminClient:
             request.to_wire(),
             self._config.access_token,
             self._config.timeout,
+            policy=AdminCallPolicy.from_config(self._config),
         )

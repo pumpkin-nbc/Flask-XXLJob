@@ -34,8 +34,13 @@ PAIRED_DOCS = [
     "docs/migration",
     "docs/development",
     "docs/publishing",
+    "docs/api-reference",
+    "docs/integration-testing",
     "examples/basic/README",
     "examples/application_factory/README",
+    "examples/batch_callback/README",
+    "examples/multiple_apps/README",
+    "examples/registry_status/README",
 ]
 
 # 禁止出现的旧文档命名 / Forbidden legacy doc names.

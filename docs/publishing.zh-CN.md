@@ -14,8 +14,8 @@
 
 ```text
 dist/
-  flask_xxljob-0.1.2-py3-none-any.whl
-  flask_xxljob-0.1.2.tar.gz
+  flask_xxljob-0.2.0-py3-none-any.whl
+  flask_xxljob-0.2.0.tar.gz
 ```
 
 ## 检查

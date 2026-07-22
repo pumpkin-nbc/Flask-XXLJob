@@ -31,6 +31,12 @@ DEFAULTS: dict = {
     "XXL_JOB_CALLBACK_MESSAGE_MAX_LENGTH": 10000,
     "XXL_JOB_MAX_REQUEST_SIZE": 1048576,
     "XXL_JOB_MAX_PARAM_LENGTH": 65536,
+    "XXL_JOB_CALLBACK_BATCH_MAX_SIZE": 100,
+    "XXL_JOB_ADMIN_RETRY_COUNT": 0,
+    "XXL_JOB_ADMIN_RETRY_BACKOFF": 0.0,
+    "XXL_JOB_ADMIN_FAILOVER_ON_HTTP_ERROR": True,
+    "XXL_JOB_ADMIN_FAILOVER_ON_INVALID_JSON": False,
+    "XXL_JOB_ADMIN_FAILOVER_ON_BUSINESS_ERROR": False,
 }
 
 
@@ -55,6 +61,12 @@ class XXLJobConfig:
     callback_message_max_length: int = 10000
     max_request_size: int = 1048576
     max_param_length: int = 65536
+    callback_batch_max_size: int = 100
+    admin_retry_count: int = 0
+    admin_retry_backoff: float = 0.0
+    admin_failover_on_http_error: bool = True
+    admin_failover_on_invalid_json: bool = False
+    admin_failover_on_business_error: bool = False
 
     @classmethod
     def from_mapping(cls, config: Mapping[str, Any]) -> "XXLJobConfig":
@@ -88,6 +100,22 @@ class XXLJobConfig:
         )
         max_request_size = _as_positive_int(merged, "XXL_JOB_MAX_REQUEST_SIZE")
         max_param_length = _as_positive_int(merged, "XXL_JOB_MAX_PARAM_LENGTH")
+        callback_batch_max_size = _as_positive_int(
+            merged, "XXL_JOB_CALLBACK_BATCH_MAX_SIZE"
+        )
+        admin_retry_count = _as_non_negative_int(merged, "XXL_JOB_ADMIN_RETRY_COUNT")
+        admin_retry_backoff = _as_non_negative_float(
+            merged, "XXL_JOB_ADMIN_RETRY_BACKOFF"
+        )
+        admin_failover_on_http_error = _as_bool(
+            merged, "XXL_JOB_ADMIN_FAILOVER_ON_HTTP_ERROR"
+        )
+        admin_failover_on_invalid_json = _as_bool(
+            merged, "XXL_JOB_ADMIN_FAILOVER_ON_INVALID_JSON"
+        )
+        admin_failover_on_business_error = _as_bool(
+            merged, "XXL_JOB_ADMIN_FAILOVER_ON_BUSINESS_ERROR"
+        )
 
         instance = cls(
             enabled=enabled,
@@ -103,6 +131,12 @@ class XXLJobConfig:
             callback_message_max_length=callback_message_max_length,
             max_request_size=max_request_size,
             max_param_length=max_param_length,
+            callback_batch_max_size=callback_batch_max_size,
+            admin_retry_count=admin_retry_count,
+            admin_retry_backoff=admin_retry_backoff,
+            admin_failover_on_http_error=admin_failover_on_http_error,
+            admin_failover_on_invalid_json=admin_failover_on_invalid_json,
+            admin_failover_on_business_error=admin_failover_on_business_error,
         )
         instance.validate()
         return instance
@@ -213,6 +247,34 @@ def _as_positive_int(config: Mapping[str, Any], key: str) -> int:
             f"{key} must be a positive integer (> 0); got value {value}."
         )
     return value
+
+
+def _as_non_negative_int(config: Mapping[str, Any], key: str) -> int:
+    value = config[key]
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise XXLJobConfigError(
+            f"{key} must be a non-negative integer; got type "
+            f"{type(value).__name__}."
+        )
+    if value < 0:
+        raise XXLJobConfigError(
+            f"{key} must be a non-negative integer (>= 0); got value {value}."
+        )
+    return value
+
+
+def _as_non_negative_float(config: Mapping[str, Any], key: str) -> float:
+    value = config[key]
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise XXLJobConfigError(
+            f"{key} must be a non-negative number; got type "
+            f"{type(value).__name__}."
+        )
+    if value < 0:
+        raise XXLJobConfigError(
+            f"{key} must be a non-negative number (>= 0); got value {value}."
+        )
+    return float(value)
 
 
 def _normalize_address(value: str) -> str:

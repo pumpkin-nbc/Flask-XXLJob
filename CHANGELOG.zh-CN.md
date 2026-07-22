@@ -7,6 +7,44 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 并遵循 [语义化版本](https://semver.org/lang/zh-CN/spec/v2.0.0.html)。
 
+## [0.2.0] - 2026-07-22
+
+### 新增
+
+- 应用级请求处理函数注册：`register_callbacks(app=None, *, run=..., idle_beat=..., kill=..., log=..., replace=False)`、`set_run_callback`/`set_idle_beat_callback`/`set_kill_callback`/`set_log_callback`（支持 `replace`），以及 `get_run_callback`/`get_idle_beat_callback`/`get_kill_callback`/`get_log_callback`。`on_*` 装饰器仍作为默认模板可用。解析优先级为：先应用级注册表，再扩展级默认。
+- 批量回调：`callback_many(callbacks, app=None)` 在一次官方请求中发送多条 `HandleCallbackParam`。发送前完整校验每一条，绝不自动拆分；任一非法或超过 `XXL_JOB_CALLBACK_BATCH_MAX_SIZE` 都整体拒绝且不发送任何数据。
+- 可配置、有限的同步 Admin 调用策略：`XXL_JOB_ADMIN_RETRY_COUNT`、`XXL_JOB_ADMIN_RETRY_BACKOFF`、`XXL_JOB_ADMIN_FAILOVER_ON_HTTP_ERROR`、`XXL_JOB_ADMIN_FAILOVER_ON_INVALID_JSON`、`XXL_JOB_ADMIN_FAILOVER_ON_BUSINESS_ERROR`。重试与退避均有上限；不引入后台线程或持久化。
+- `CallResult`/`AdminCallResult` 新增可选字段 `attempt_count`、`elapsed_ms`、`http_status`（均有默认值）。
+- 插件状态查询：`XXLJobStatus` 模型，以及 `get_status(app=None)`、`start_registry(app=None)`/`stop_registry(app=None)` 生命周期控制。状态只描述插件本身（绝不含 Token 或业务任务状态）。
+- CLI `xxljob status` 命令（Flask 分组与独立脚本），输出人类可读且不含 Token，最近一次注册失败时以非零码退出。
+- 公共异常层级以 `FlaskXXLJobError` 为根，新增 `XXLJobInitializationError`、`XXLJobCallbackRegistrationError`、`XXLJobValidationError`、`XXLJobAdminCallError`（及既有子类）。所有旧名称保留为别名（`XXLJobError`、`XXLJobConfigError`、`XXLJobRequestError` 等）。
+- 新增 `docs/api-reference` 与 `docs/integration-testing` 文档、`tox.ini` 与 GitHub Actions 矩阵、可选开启的官方 XXL-JOB 2.4.1 集成测试（由 `XXLJOB_ADMIN_URL` 控制），以及三个新示例：`batch_callback`、`multiple_apps`、`registry_status`。
+
+### 变更
+
+- Access Token 比较改用 `hmac.compare_digest` 以实现常量时间比较，并安全拒绝缺失/非字符串请求头。空 Token 的官方模式保持不变；Token 绝不写入日志或返回。
+- 当显式提供 Admin 调用策略时（内置客户端现已如此），默认故障转移行为为：网络/超时始终转移；HTTP 错误转移；非法 JSON 与业务失败不转移。未提供策略的 `post_to_admins` 直接调用者仍保持与 0.1.2 完全一致的行为。
+
+### 安全
+
+- 常量时间 Token 比较降低时序侧信道风险。请求体大小（字节）与 `executorParams` 长度（字符）限制仍返回 XXL-JOB JSON 错误，绝不返回 HTML。
+
+### 测试
+
+- 新增应用级注册（优先级、多应用隔离、重复/`replace`、工厂注入、处理函数异常/错误返回）、批量回调（空/超限/非法条目/中文/截断/故障转移/不部分发送）、重试策略（重试、耗尽、故障转移、上限、Token 不泄露、新字段）、状态/生命周期与 CLI status，以及 Token 与请求限制安全的测试。
+
+### 文档
+
+- 新增“0.1.2 到 0.2.0”迁移章节、API 参考与集成测试指南、兼容性矩阵说明，并刷新双语的配置/回调/请求处理函数文档与 README。
+
+升级说明：这是一个向后兼容的次要版本。使用以下命令升级：
+
+```bash
+pip install --upgrade Flask-XXLJob==0.2.0
+```
+
+无需修改任何代码或配置。所有新行为均通过新 API 与新配置项选择性启用，其默认值与 0.1.2 一致。
+
 ## [0.1.2] - 2026-07-22
 
 ### 修复

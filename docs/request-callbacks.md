@@ -69,10 +69,35 @@ def create_app():
 Module-level callbacks become the defaults for every application initialized by
 the extension.
 
+## Application-level registration
+
+In addition to the `on_*` decorators you can register handlers for a specific
+application. This is useful with the application factory or multiple apps:
+
+```python
+def create_app():
+    app = Flask(__name__)
+    xxl_job.init_app(app)
+    xxl_job.register_callbacks(app, run=handle_run, log=handle_log)
+    # or: xxl_job.set_run_callback(app, handle_run, replace=True)
+    return app
+```
+
+Read the currently registered handler with `get_run_callback(app)` (and the
+`idle_beat`/`kill`/`log` variants). When `app=None`, the current application
+context or the most recently initialized application is used.
+
+Resolution priority when dispatching a request: the application-specific
+registry is checked first, then the extension-level defaults set by the `on_*`
+decorators. If neither is configured, the endpoint returns the standard
+not-configured failure.
+
 ## Duplicate registration
 
-Registering the same callback twice raises `XXLJobError`. This prevents an
-earlier handler from being silently overwritten. Register each callback once.
+Registering the same callback twice raises `XXLJobCallbackRegistrationError`
+(a subclass of `FlaskXXLJobError`). Pass `replace=True` to
+`register_callbacks`/`set_*_callback` to intentionally override an existing
+handler.
 
 ## Return values
 

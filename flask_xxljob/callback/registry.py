@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
-from ..exceptions import XXLJobError
+from ..exceptions import XXLJobCallbackRegistrationError
 from ..model.idle_beat import IdleBeatRequest
 from ..model.kill import KillRequest
 from ..model.log import LogRequest
@@ -45,31 +45,45 @@ class CallbackRegistry:
         self._kill: Optional[KillCallback] = None
         self._log: Optional[LogCallback] = None
 
-    def set_run(self, func: RunCallback) -> RunCallback:
+    def set_run(self, func: RunCallback, replace: bool = False) -> RunCallback:
         """注册 ``/run`` 处理函数。 / Register the ``/run`` callback."""
-        if self._run is not None:
-            raise XXLJobError("XXL-JOB run callback has already been registered")
+        if self._run is not None and not replace:
+            raise XXLJobCallbackRegistrationError(
+                "XXL-JOB run callback has already been registered; pass "
+                "replace=True to override it"
+            )
         self._run = func
         return func
 
-    def set_idle_beat(self, func: IdleBeatCallback) -> IdleBeatCallback:
+    def set_idle_beat(
+        self, func: IdleBeatCallback, replace: bool = False
+    ) -> IdleBeatCallback:
         """注册 ``/idleBeat`` 处理函数。 / Register the ``/idleBeat`` callback."""
-        if self._idle_beat is not None:
-            raise XXLJobError("XXL-JOB idleBeat callback has already been registered")
+        if self._idle_beat is not None and not replace:
+            raise XXLJobCallbackRegistrationError(
+                "XXL-JOB idleBeat callback has already been registered; pass "
+                "replace=True to override it"
+            )
         self._idle_beat = func
         return func
 
-    def set_kill(self, func: KillCallback) -> KillCallback:
+    def set_kill(self, func: KillCallback, replace: bool = False) -> KillCallback:
         """注册 ``/kill`` 处理函数。 / Register the ``/kill`` callback."""
-        if self._kill is not None:
-            raise XXLJobError("XXL-JOB kill callback has already been registered")
+        if self._kill is not None and not replace:
+            raise XXLJobCallbackRegistrationError(
+                "XXL-JOB kill callback has already been registered; pass "
+                "replace=True to override it"
+            )
         self._kill = func
         return func
 
-    def set_log(self, func: LogCallback) -> LogCallback:
+    def set_log(self, func: LogCallback, replace: bool = False) -> LogCallback:
         """注册 ``/log`` 处理函数。 / Register the ``/log`` callback."""
-        if self._log is not None:
-            raise XXLJobError("XXL-JOB log callback has already been registered")
+        if self._log is not None and not replace:
+            raise XXLJobCallbackRegistrationError(
+                "XXL-JOB log callback has already been registered; pass "
+                "replace=True to override it"
+            )
         self._log = func
         return func
 

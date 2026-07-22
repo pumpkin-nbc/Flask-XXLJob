@@ -32,6 +32,27 @@ xxl_job.callback(
 )
 ```
 
+## Batch callback
+
+To report several task results in one official request, use `callback_many`:
+
+```python
+from flask_xxljob import CallbackRequest
+
+xxl_job.callback_many(
+    [
+        CallbackRequest(log_id=1, log_date_time=1710000000000, handle_code=200),
+        CallbackRequest(log_id=2, log_date_time=1710000000000, handle_code=500,
+                        handle_msg="failed"),
+    ],
+    app=app,
+)
+```
+
+Every item is validated before anything is sent. The batch is never auto-split,
+and if any item is invalid or the count exceeds `XXL_JOB_CALLBACK_BATCH_MAX_SIZE`
+the whole batch is rejected (all-or-nothing) and nothing is delivered.
+
 ## Within an application context
 
 Inside a Flask application context the `app` argument can be omitted:
@@ -64,4 +85,8 @@ network error, a non-200 status, or invalid JSON. The returned `CallResult`
 (also exported as `AdminCallResult`) exposes `success`, `code`, `msg`/`message`,
 `address`/`admin_address` and `error_type`. `error_type` classifies failures as
 one of `network`, `timeout`, `http`, `invalid_json`, `business` or `config`
-(and is `None` on success), so you can react without inspecting `requests`.
+(and is `None` on success), so you can react without inspecting `requests`. The
+result also carries `attempt_count`, `elapsed_ms` and `http_status` for
+troubleshooting. Failover and bounded synchronous retry are controlled by the
+`XXL_JOB_ADMIN_*` configuration keys; by default business failures are not
+re-sent to another admin.

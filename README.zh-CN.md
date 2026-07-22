@@ -91,24 +91,31 @@ with app.app_context():
 | `XXL_JOB_REGISTRY_INTERVAL` | `30` | 注册续约间隔（秒）。 |
 | `XXL_JOB_HTTP_CONNECT_TIMEOUT` | `3` | HTTP 连接超时（秒）。 |
 | `XXL_JOB_HTTP_READ_TIMEOUT` | `5` | HTTP 读取超时（秒）。 |
-| `XXL_JOB_CALLBACK_MESSAGE_MAX_LENGTH` | `10000` | `handleMsg` 最大长度。 |
+| `XXL_JOB_CALLBACK_MESSAGE_MAX_LENGTH` | `10000` | `handleMsg` 最大长度（字符）。 |
 | `XXL_JOB_MAX_REQUEST_SIZE` | `1048576` | 请求体最大字节数。 |
-| `XXL_JOB_MAX_PARAM_LENGTH` | `65536` | `executorParams` 最大长度。 |
+| `XXL_JOB_MAX_PARAM_LENGTH` | `65536` | `executorParams` 最大长度（字符）。 |
+| `XXL_JOB_CALLBACK_BATCH_MAX_SIZE` | `100` | `callback_many` 单批最大条目数。 |
+| `XXL_JOB_ADMIN_RETRY_COUNT` | `0` | 同地址同步重试次数（有上限）。 |
+| `XXL_JOB_ADMIN_RETRY_BACKOFF` | `0.0` | 重试之间的等待秒数（有上限）。 |
+| `XXL_JOB_ADMIN_FAILOVER_ON_HTTP_ERROR` | `True` | 非 200 状态时故障转移。 |
+| `XXL_JOB_ADMIN_FAILOVER_ON_INVALID_JSON` | `False` | 非法 JSON 时故障转移。 |
+| `XXL_JOB_ADMIN_FAILOVER_ON_BUSINESS_ERROR` | `False` | 业务失败时故障转移。 |
 
 ## 命令行
 
 ```bash
 flask --app "project:create_app" xxljob register
 flask --app "project:create_app" xxljob remove
+flask --app "project:create_app" xxljob status
 ```
 
 ## 兼容性
 
-目标支持 `Flask >= 1.0` 与 `Python >= 3.8`。本版本已在 Python 3.8 上本地验证。支持矩阵中的其他组合尚未全部在本地运行，请在你自己的环境中运行测试后再声明特定组合可用。
+目标支持 `Flask >= 1.0` 与 `Python >= 3.8`。兼容性矩阵（Python 3.8-3.13 x Flask 1/2/3）已在 `tox.ini` 与 `.github/workflows/ci.yml` 中配置。本版本仅在 Python 3.8 与已安装的 Flask 版本上本地验证；其余组合已在 CI 中配置但未在本地执行。请在你自己的环境中运行测试后再声明特定组合可用。
 
 ## 文档
 
-参见 [docs](docs/) 目录，包括 [getting-started.md](docs/getting-started.md) 与 [configuration.md](docs/configuration.md)。从旧版本升级？请参阅[迁移指南](docs/migration.zh-CN.md)与 [CHANGELOG](CHANGELOG.zh-CN.md)。
+参见 [docs](docs/) 目录，包括 [getting-started.md](docs/getting-started.md)、[configuration.md](docs/configuration.md)、[API 参考](docs/api-reference.zh-CN.md)与[集成测试](docs/integration-testing.zh-CN.md)。从旧版本升级？请参阅[迁移指南](docs/migration.zh-CN.md)与 [CHANGELOG](CHANGELOG.zh-CN.md)。
 
 ## 许可证
 

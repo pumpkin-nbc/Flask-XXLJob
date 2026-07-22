@@ -29,7 +29,11 @@ from .response.executor import FAIL_CODE, SUCCESS_CODE
 from .runtime import XXLJobRuntime
 
 if TYPE_CHECKING:
+    from typing import Sequence
+
     from .client import CallResult
+    from .client.callback_client import CallbackLike
+    from .status import XXLJobStatus
 
 # Runtime 在 app.extensions 中的键 / Runtime key in app.extensions.
 EXTENSION_KEY = "xxljob"
@@ -220,6 +224,87 @@ class FlaskXXLJob:
         return self._target_registry().set_log(func)
 
     # ------------------------------------------------------------------
+    # 应用级请求处理函数注册 / Application-level callback registration
+    # ------------------------------------------------------------------
+
+    def register_callbacks(
+        self,
+        app: Optional[Flask] = None,
+        *,
+        run: Optional[RunCallback] = None,
+        idle_beat: Optional[IdleBeatCallback] = None,
+        kill: Optional[KillCallback] = None,
+        log: Optional[LogCallback] = None,
+        replace: bool = False,
+    ) -> None:
+        """
+        为指定 Flask 应用一次性注册一个或多个请求处理函数。
+
+        所有处理函数参数均可选。``app`` 为 ``None`` 时使用当前应用上下文或最近一次
+        初始化的应用；显式传入 ``app`` 时用于多应用场景。除非 ``replace=True``，
+        否则重复注册会抛出 :class:`XXLJobCallbackRegistrationError`。
+
+        Register one or more request-callbacks for a Flask application at once.
+
+        All callback arguments are optional. When ``app`` is ``None`` the current
+        application context (or the most recently initialized app) is used;
+        passing ``app`` explicitly supports multi-application setups. Duplicate
+        registration raises :class:`XXLJobCallbackRegistrationError` unless
+        ``replace=True``.
+        """
+        registry = self._registry_for(app)
+        if run is not None:
+            registry.set_run(run, replace=replace)
+        if idle_beat is not None:
+            registry.set_idle_beat(idle_beat, replace=replace)
+        if kill is not None:
+            registry.set_kill(kill, replace=replace)
+        if log is not None:
+            registry.set_log(log, replace=replace)
+
+    def set_run_callback(
+        self, app: Optional[Flask], func: RunCallback, replace: bool = False
+    ) -> RunCallback:
+        """为指定应用注册 ``/run`` 处理函数。 / Register the ``/run`` callback for an app."""
+        return self._registry_for(app).set_run(func, replace=replace)
+
+    def set_idle_beat_callback(
+        self, app: Optional[Flask], func: IdleBeatCallback, replace: bool = False
+    ) -> IdleBeatCallback:
+        """为指定应用注册 ``/idleBeat`` 处理函数。 / Register the ``/idleBeat`` callback."""
+        return self._registry_for(app).set_idle_beat(func, replace=replace)
+
+    def set_kill_callback(
+        self, app: Optional[Flask], func: KillCallback, replace: bool = False
+    ) -> KillCallback:
+        """为指定应用注册 ``/kill`` 处理函数。 / Register the ``/kill`` callback."""
+        return self._registry_for(app).set_kill(func, replace=replace)
+
+    def set_log_callback(
+        self, app: Optional[Flask], func: LogCallback, replace: bool = False
+    ) -> LogCallback:
+        """为指定应用注册 ``/log`` 处理函数。 / Register the ``/log`` callback."""
+        return self._registry_for(app).set_log(func, replace=replace)
+
+    def get_run_callback(self, app: Optional[Flask] = None) -> Optional[RunCallback]:
+        """返回指定应用的 ``/run`` 处理函数。 / Return the app's ``/run`` callback."""
+        return self._registry_for(app).run
+
+    def get_idle_beat_callback(
+        self, app: Optional[Flask] = None
+    ) -> Optional[IdleBeatCallback]:
+        """返回指定应用的 ``/idleBeat`` 处理函数。 / Return the app's ``/idleBeat`` callback."""
+        return self._registry_for(app).idle_beat
+
+    def get_kill_callback(self, app: Optional[Flask] = None) -> Optional[KillCallback]:
+        """返回指定应用的 ``/kill`` 处理函数。 / Return the app's ``/kill`` callback."""
+        return self._registry_for(app).kill
+
+    def get_log_callback(self, app: Optional[Flask] = None) -> Optional[LogCallback]:
+        """返回指定应用的 ``/log`` 处理函数。 / Return the app's ``/log`` callback."""
+        return self._registry_for(app).log
+
+    # ------------------------------------------------------------------
     # 执行器注册 / Executor registration
     # ------------------------------------------------------------------
 
@@ -314,6 +399,74 @@ class FlaskXXLJob:
             app=app,
         )
 
+    def callback_many(
+        self,
+        callbacks: "Sequence[CallbackLike]",
+        app: Optional[Flask] = None,
+    ) -> "CallResult":
+        """
+        在一次官方请求中批量发送多条任务结果回调。
+
+        发送前会完整校验所有条目，超过批量上限或存在非法条目时抛出异常且不发送任何
+        数据（全有或全无）。在 Flask 应用上下文中可省略 ``app`` 参数。
+
+        Send multiple task-result callbacks in a single official request.
+
+        All items are validated before sending; exceeding the batch limit or an
+        invalid item raises without sending any data (all-or-nothing). The
+        ``app`` argument may be omitted inside a Flask application context.
+        """
+        return self._get_runtime(app).callback_client.callback_many(callbacks)
+
+    # ------------------------------------------------------------------
+    # 插件状态与注册生命周期 / Plugin status and registry lifecycle
+    # ------------------------------------------------------------------
+
+    def get_status(self, app: Optional[Flask] = None) -> "XXLJobStatus":
+        """
+        返回插件运行状态快照（是否启用、是否自动注册、最近一次注册结果等）。
+
+        该状态只描述 Flask-XXLJob 插件自身，绝不包含 Access Token 或业务任务状态。
+
+        Return a snapshot of the plugin runtime status (enabled, auto-register,
+        last registration result, and so on).
+
+        The status only describes the Flask-XXLJob plugin itself; it never
+        contains the access token or any business-task state.
+        """
+        from .status import XXLJobStatus
+
+        runtime = self._get_runtime(app)
+        config = runtime.config
+        snapshot = runtime.registry_service.status_snapshot()
+        return XXLJobStatus(
+            enabled=config.enabled,
+            auto_register=config.auto_register,
+            registered=snapshot["registered"],
+            last_registry_time=snapshot["last_registry_time"],
+            last_registry_success=snapshot["last_registry_success"],
+            last_registry_admin_address=snapshot["last_registry_admin_address"],
+            last_registry_error_type=snapshot["last_registry_error_type"],
+            last_registry_message=snapshot["last_registry_message"],
+            registry_thread_running=snapshot["registry_thread_running"],
+        )
+
+    def start_registry(self, app: Optional[Flask] = None) -> None:
+        """
+        启动执行器自动注册/续约线程（幂等）。
+
+        Start the executor auto-registration/renewal thread (idempotent).
+        """
+        self._get_runtime(app).registry_service.start()
+
+    def stop_registry(self, app: Optional[Flask] = None) -> None:
+        """
+        停止执行器自动注册/续约线程并注销执行器。
+
+        Stop the executor auto-registration/renewal thread and deregister.
+        """
+        self._get_runtime(app).registry_service.stop()
+
     # ------------------------------------------------------------------
     # 内部辅助 / Internal helpers
     # ------------------------------------------------------------------
@@ -358,6 +511,15 @@ class FlaskXXLJob:
         if self._app is not None:
             return self._get_runtime(self._app).callback_registry
         return self._deferred_callbacks
+
+    def _registry_for(self, app: Optional[Flask]) -> CallbackRegistry:
+        # 显式传入 app -> 使用该应用的注册表（要求已初始化）；
+        # 未传入 -> 与装饰器一致，使用上下文/最近应用/延迟注册表。
+        # Explicit app -> that application's registry (must be initialized);
+        # omitted -> same as decorators: context / last-app / deferred registry.
+        if app is not None:
+            return self._get_runtime(app).callback_registry
+        return self._target_registry()
 
 
 def _require_int(name: str, value: object) -> None:

@@ -24,6 +24,7 @@ from flask.cli import ScriptInfo, with_appcontext
 
 from .. import __version__
 from ..extension import EXTENSION_KEY
+from ..status import XXLJobStatus
 
 
 def _runtime() -> Any:
@@ -33,6 +34,48 @@ def _runtime() -> Any:
             "Flask-XXLJob is not initialized on this application."
         )
     return runtime
+
+
+def _build_status(runtime: Any) -> XXLJobStatus:
+    config = runtime.config
+    snapshot = runtime.registry_service.status_snapshot()
+    return XXLJobStatus(
+        enabled=config.enabled,
+        auto_register=config.auto_register,
+        registered=snapshot["registered"],
+        last_registry_time=snapshot["last_registry_time"],
+        last_registry_success=snapshot["last_registry_success"],
+        last_registry_admin_address=snapshot["last_registry_admin_address"],
+        last_registry_error_type=snapshot["last_registry_error_type"],
+        last_registry_message=snapshot["last_registry_message"],
+        registry_thread_running=snapshot["registry_thread_running"],
+    )
+
+
+def _echo_status(status: XXLJobStatus) -> None:
+    # 只输出插件状态，绝不输出 Access Token 或业务任务信息。
+    # Print plugin status only; never the access token or business-task info.
+    click.echo("Flask-XXLJob status")
+    click.echo(f"  Enabled: {status.enabled}")
+    click.echo(f"  Auto register: {status.auto_register}")
+    click.echo(f"  Registered: {status.registered}")
+    click.echo(f"  Registry thread running: {status.registry_thread_running}")
+    if status.last_registry_time is None:
+        click.echo("  Last registry: (no attempt yet)")
+    else:
+        click.echo(f"  Last registry time: {status.last_registry_time}")
+        click.echo(f"  Last registry admin: {status.last_registry_admin_address}")
+        result = "success" if status.last_registry_success else "failure"
+        click.echo(f"  Last registry result: {result}")
+        if not status.last_registry_success:
+            click.echo(f"  Last registry error type: {status.last_registry_error_type}")
+            click.echo(f"  Last registry message: {status.last_registry_message}")
+
+
+def _status_failed(status: XXLJobStatus) -> bool:
+    # 仅当确实发生过一次失败时才视为失败（未尝试过不算失败）。
+    # Treat as failure only when an attempt actually failed (no attempt is ok).
+    return status.last_registry_success is False
 
 
 @click.group(name="xxljob")
@@ -65,6 +108,16 @@ def remove_command() -> None:
         click.echo(
             f"Executor removal failed: {result.error or result.msg}", err=True
         )
+        raise SystemExit(1)
+
+
+@xxljob_cli.command(name="status")
+@with_appcontext
+def status_command() -> None:
+    """查询插件运行状态。 / Query the plugin runtime status."""
+    status = _build_status(_runtime())
+    _echo_status(status)
+    if _status_failed(status):
         raise SystemExit(1)
 
 
@@ -121,6 +174,29 @@ def standalone_register(ctx: click.Context) -> None:
 def standalone_remove(ctx: click.Context) -> None:
     """注销执行器。 / Deregister the executor."""
     _run_standalone(ctx, "remove")
+
+
+@standalone_cli.command(name="status")
+@click.pass_context
+def standalone_status(ctx: click.Context) -> None:
+    """查询插件运行状态。 / Query the plugin runtime status."""
+    script_info: ScriptInfo = ctx.obj
+    try:
+        app = script_info.load_app()
+    except Exception as exc:  # noqa: BLE001
+        raise click.ClickException(f"Failed to load Flask application: {exc}") from exc
+
+    runtime = app.extensions.get(EXTENSION_KEY)
+    if runtime is None:
+        raise click.ClickException(
+            "Flask-XXLJob is not initialized on this application."
+        )
+
+    with app.app_context():
+        status = _build_status(runtime)
+    _echo_status(status)
+    if _status_failed(status):
+        raise SystemExit(1)
 
 
 def main(args: Optional[List[str]] = None) -> None:

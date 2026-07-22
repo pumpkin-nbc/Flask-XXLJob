@@ -6,6 +6,7 @@ HTTP clients used by Flask-XXLJob to talk to the XXL-JOB admin.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from typing import Any, List, Optional, Tuple
 
@@ -13,6 +14,7 @@ import requests
 
 from ..response.executor import SUCCESS_CODE
 from ..utils.url_utils import join_url
+from .policy import AdminCallPolicy
 
 # 官方 Access Token 请求头名称 / Official access-token header name.
 ACCESS_TOKEN_HEADER = "XXL-JOB-ACCESS-TOKEN"
@@ -32,6 +34,9 @@ class CallResult:
     address: Optional[str] = None
     error: Optional[str] = None
     error_type: Optional[str] = None
+    attempt_count: int = 0
+    elapsed_ms: Optional[int] = None
+    http_status: Optional[int] = None
 
     @property
     def message(self) -> Optional[str]:
@@ -79,6 +84,26 @@ def _build_headers(access_token: str) -> dict:
     return headers
 
 
+# 可在同一地址重试的错误类型（瞬时错误）。
+# Error types that may be retried on the same address (transient errors).
+_RETRYABLE_ERROR_TYPES = frozenset({ERROR_NETWORK, ERROR_TIMEOUT, ERROR_HTTP})
+
+
+def _should_failover(error_type: Optional[str], policy: AdminCallPolicy) -> bool:
+    # 决定某类错误是否应切换到下一个 Admin 地址。
+    # Decide whether a given error type should fail over to the next admin.
+    if error_type in (ERROR_NETWORK, ERROR_TIMEOUT):
+        return True
+    if error_type == ERROR_HTTP:
+        return policy.failover_on_http_error
+    if error_type == ERROR_INVALID_JSON:
+        return policy.failover_on_invalid_json
+    if error_type == ERROR_BUSINESS:
+        return policy.failover_on_business_error
+    # ERROR_CONFIG 或未知：不切换。 / ERROR_CONFIG or unknown: no failover.
+    return False
+
+
 def post_to_admins(
     admin_addresses: List[str],
     api_path: str,
@@ -86,91 +111,153 @@ def post_to_admins(
     access_token: str,
     timeout: Tuple[int, int],
     stop_on_business_response: bool = False,
+    policy: Optional[AdminCallPolicy] = None,
 ) -> CallResult:
     """
-    依次向多个 Admin 地址发送 POST 请求，直到成功或全部失败。
+    依次向多个 Admin 地址发送 POST 请求，支持有限的同步重试与故障转移。
 
-    - ``stop_on_business_response=False``（默认，用于注册/注销）：仅在业务成功时
-      返回，业务失败会继续尝试下一个地址。
-    - ``stop_on_business_response=True``（用于任务回调）：只要收到 Admin 的有效
-      业务响应（无论成功或失败）即返回，避免向多个 Admin 重复发送同一回调；仅在
-      网络错误、非 200 或非法 JSON 时才切换到下一个地址。
+    对每个地址，最多重试 ``policy.retry_count`` 次（仅针对网络/超时/HTTP 等瞬时
+    错误，重试之间按 ``policy.retry_backoff`` 秒同步等待）。是否在一类错误后切换到
+    下一个地址由 ``policy`` 决定；网络与超时错误始终切换。返回的 :class:`CallResult`
+    额外包含 ``attempt_count``（总请求次数）、``elapsed_ms``（总耗时）与
+    ``http_status``（最近一次 HTTP 状态码）。Access Token 绝不写入结果或日志。
 
-    Send a POST request to multiple admin addresses in order.
+    当未显式提供 ``policy`` 时，采用与 0.1.2 完全一致的行为（不重试；网络/超时/
+    HTTP/非法 JSON 均切换；业务失败是否切换取决于 ``stop_on_business_response``）。
 
-    - ``stop_on_business_response=False`` (default, for registration): returns
-      only on business success; a business failure moves on to the next address.
-    - ``stop_on_business_response=True`` (for task callbacks): returns as soon as
-      any valid business response is received (success or failure) so that the
-      same callback is not delivered to multiple admins; failover happens only on
-      a network error, non-200 status, or invalid JSON.
+    Send a POST request to multiple admin addresses in order, with bounded
+    synchronous retry and failover.
+
+    For each address the request is retried at most ``policy.retry_count`` times
+    (only for transient network/timeout/HTTP errors, with a synchronous
+    ``policy.retry_backoff`` second wait between attempts). Whether an error type
+    fails over to the next address is governed by ``policy``; network and timeout
+    errors always fail over. The returned :class:`CallResult` additionally
+    carries ``attempt_count`` (total requests made), ``elapsed_ms`` (total
+    elapsed time) and ``http_status`` (the most recent HTTP status). The access
+    token is never written to the result or to logs.
+
+    When no ``policy`` is supplied, behaviour is identical to 0.1.2 (no retry;
+    network/timeout/HTTP/invalid-JSON all fail over; business failover depends on
+    ``stop_on_business_response``).
     """
+    if policy is None:
+        # 复现 0.1.2 行为，保证直接调用者/旧测试不受影响。
+        # Reproduce 0.1.2 behaviour so direct callers/old tests are unaffected.
+        policy = AdminCallPolicy(
+            retry_count=0,
+            retry_backoff=0.0,
+            failover_on_http_error=True,
+            failover_on_invalid_json=True,
+            failover_on_business_error=not stop_on_business_response,
+        )
+
     headers = _build_headers(access_token)
+    start = time.monotonic()
+    attempts = 0
     last_result = CallResult(
         success=False,
         error="no admin address configured",
         error_type=ERROR_CONFIG,
     )
 
+    def _elapsed_ms() -> int:
+        return int((time.monotonic() - start) * 1000)
+
     for address in admin_addresses:
         url = join_url(address, api_path)
-        try:
-            response = requests.post(url, json=payload, headers=headers, timeout=timeout)
-        except requests.Timeout as exc:
-            # 请求超时。 / Request timed out.
-            last_result = CallResult(
-                success=False,
-                address=address,
-                error=f"{type(exc).__name__}: {exc}",
-                error_type=ERROR_TIMEOUT,
-            )
-            continue
-        except requests.RequestException as exc:
-            # 网络连接失败。不泄露 Token，仅记录异常类型与地址。
-            # Network failure. Do not leak the token; record type and address.
-            last_result = CallResult(
-                success=False,
-                address=address,
-                error=f"{type(exc).__name__}: {exc}",
-                error_type=ERROR_NETWORK,
-            )
-            continue
 
-        if response.status_code != 200:
-            last_result = CallResult(
-                success=False,
-                address=address,
-                error=f"HTTP {response.status_code}",
-                error_type=ERROR_HTTP,
-            )
-            continue
+        # 单个地址内的有限重试（仅瞬时错误）。
+        # Bounded retry within a single address (transient errors only).
+        for attempt in range(policy.retry_count + 1):
+            attempts += 1
+            http_status: Optional[int] = None
+            try:
+                response = requests.post(
+                    url, json=payload, headers=headers, timeout=timeout
+                )
+            except requests.Timeout as exc:
+                last_result = CallResult(
+                    success=False,
+                    address=address,
+                    error=f"{type(exc).__name__}: {exc}",
+                    error_type=ERROR_TIMEOUT,
+                    attempt_count=attempts,
+                    elapsed_ms=_elapsed_ms(),
+                )
+            except requests.RequestException as exc:
+                # 网络失败。不泄露 Token，仅记录异常类型与地址。
+                # Network failure. Do not leak the token; record type and address.
+                last_result = CallResult(
+                    success=False,
+                    address=address,
+                    error=f"{type(exc).__name__}: {exc}",
+                    error_type=ERROR_NETWORK,
+                    attempt_count=attempts,
+                    elapsed_ms=_elapsed_ms(),
+                )
+            else:
+                http_status = response.status_code
+                if response.status_code != 200:
+                    last_result = CallResult(
+                        success=False,
+                        address=address,
+                        error=f"HTTP {response.status_code}",
+                        error_type=ERROR_HTTP,
+                        attempt_count=attempts,
+                        elapsed_ms=_elapsed_ms(),
+                        http_status=http_status,
+                    )
+                else:
+                    try:
+                        body = response.json()
+                    except ValueError:
+                        last_result = CallResult(
+                            success=False,
+                            address=address,
+                            error="invalid JSON response",
+                            error_type=ERROR_INVALID_JSON,
+                            attempt_count=attempts,
+                            elapsed_ms=_elapsed_ms(),
+                            http_status=http_status,
+                        )
+                    else:
+                        code = body.get("code")
+                        msg = body.get("msg")
+                        if code == SUCCESS_CODE:
+                            return CallResult(
+                                success=True,
+                                code=code,
+                                msg=msg,
+                                address=address,
+                                attempt_count=attempts,
+                                elapsed_ms=_elapsed_ms(),
+                                http_status=http_status,
+                            )
+                        last_result = CallResult(
+                            success=False,
+                            code=code,
+                            msg=msg,
+                            address=address,
+                            error_type=ERROR_BUSINESS,
+                            attempt_count=attempts,
+                            elapsed_ms=_elapsed_ms(),
+                            http_status=http_status,
+                        )
 
-        try:
-            body = response.json()
-        except ValueError:
-            last_result = CallResult(
-                success=False,
-                address=address,
-                error="invalid JSON response",
-                error_type=ERROR_INVALID_JSON,
-            )
-            continue
+            # 仅瞬时错误且仍有重试次数时，同步退避后重试同一地址。
+            # Retry the same address (after synchronous backoff) only for a
+            # transient error while retries remain.
+            retryable = last_result.error_type in _RETRYABLE_ERROR_TYPES
+            if retryable and attempt < policy.retry_count:
+                if policy.retry_backoff > 0:
+                    time.sleep(policy.retry_backoff)
+                continue
+            break
 
-        code = body.get("code")
-        msg = body.get("msg")
-        if code == SUCCESS_CODE:
-            return CallResult(success=True, code=code, msg=msg, address=address)
-
-        last_result = CallResult(
-            success=False,
-            code=code,
-            msg=msg,
-            address=address,
-            error_type=ERROR_BUSINESS,
-        )
-        # 收到有效业务响应即停止，避免重复回调。
-        # Stop on a valid business response to avoid duplicate callbacks.
-        if stop_on_business_response:
+        # 重试用尽后，按策略决定是否切换到下一个 Admin。
+        # After retries are exhausted, decide failover per policy.
+        if not _should_failover(last_result.error_type, policy):
             return last_result
 
     return last_result
@@ -179,6 +266,7 @@ def post_to_admins(
 __all__ = [
     "CallResult",
     "AdminCallResult",
+    "AdminCallPolicy",
     "ACCESS_TOKEN_HEADER",
     "post_to_admins",
     "ERROR_CONFIG",

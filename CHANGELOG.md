@@ -7,6 +7,44 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-07-22
+
+### Added
+
+- Application-level callback registration: `register_callbacks(app=None, *, run=..., idle_beat=..., kill=..., log=..., replace=False)`, `set_run_callback`/`set_idle_beat_callback`/`set_kill_callback`/`set_log_callback` (with `replace`), and `get_run_callback`/`get_idle_beat_callback`/`get_kill_callback`/`get_log_callback`. The `on_*` decorators keep working as the default template. Resolution priority is app-specific registry first, then extension-level defaults.
+- Batch callback: `callback_many(callbacks, app=None)` sends multiple `HandleCallbackParam` entries in a single official request. Every item is validated before sending, the batch is never auto-split, and an invalid item or exceeding `XXL_JOB_CALLBACK_BATCH_MAX_SIZE` rejects the whole batch without sending anything.
+- Configurable, bounded synchronous Admin call policy: `XXL_JOB_ADMIN_RETRY_COUNT`, `XXL_JOB_ADMIN_RETRY_BACKOFF`, `XXL_JOB_ADMIN_FAILOVER_ON_HTTP_ERROR`, `XXL_JOB_ADMIN_FAILOVER_ON_INVALID_JSON`, `XXL_JOB_ADMIN_FAILOVER_ON_BUSINESS_ERROR`. Retry and backoff are capped; no background threads or persistence are introduced.
+- `CallResult`/`AdminCallResult` gained additive fields `attempt_count`, `elapsed_ms` and `http_status` (all defaulted).
+- Plugin status querying: the `XXLJobStatus` model plus `get_status(app=None)`, and registry lifecycle control via `start_registry(app=None)` / `stop_registry(app=None)`. Status describes only the plugin (never the token or any business-task state).
+- CLI `xxljob status` command (Flask group and standalone) with human-readable, token-free output and a non-zero exit code when the last registration failed.
+- Public exception hierarchy rooted at `FlaskXXLJobError` with `XXLJobInitializationError`, `XXLJobCallbackRegistrationError`, `XXLJobValidationError`, `XXLJobAdminCallError` (and existing subclasses). All previous names remain as aliases (`XXLJobError`, `XXLJobConfigError`, `XXLJobRequestError`, ...).
+- New `docs/api-reference` and `docs/integration-testing` pages, a `tox.ini` and GitHub Actions matrix, opt-in official XXL-JOB 2.4.1 integration tests (gated by `XXLJOB_ADMIN_URL`), and three new examples: `batch_callback`, `multiple_apps`, `registry_status`.
+
+### Changed
+
+- Access-token comparison now uses `hmac.compare_digest` for constant-time behaviour and safely rejects missing/non-string headers. The empty-token official mode is unchanged; the token is never logged or returned.
+- When an explicit Admin call policy is supplied (as the built-in clients now do), the default failover behaviour is: network/timeout always fail over; HTTP errors fail over; invalid-JSON and business failures do not fail over. Direct `post_to_admins` callers without a policy keep exact 0.1.2 behaviour.
+
+### Security
+
+- Constant-time access-token comparison reduces timing side channels. Request body size (bytes) and `executorParams` length (characters) limits still return XXL-JOB JSON errors, never HTML.
+
+### Testing
+
+- Added tests for app-level registration (priority, multi-app isolation, duplicate/`replace`, factory seeding, handler exception/bad return), batch callback (empty/over-limit/invalid item/Chinese/truncation/failover/no-partial-send), retry policy (retry, exhaustion, failover, caps, token absence, new fields), status/lifecycle and CLI status, and access-token/request-limit security.
+
+### Documentation
+
+- Added a "0.1.2 to 0.2.0" migration section, the API reference and integration-testing guides, a compatibility matrix note, and refreshed the bilingual configuration/callback/request-callbacks docs and README.
+
+Upgrade note: this is a backward-compatible minor release. Upgrade with:
+
+```bash
+pip install --upgrade Flask-XXLJob==0.2.0
+```
+
+No code or configuration changes are required. All new behaviour is opt-in via new APIs and config keys whose defaults match 0.1.2.
+
 ## [0.1.2] - 2026-07-22
 
 ### Fixed

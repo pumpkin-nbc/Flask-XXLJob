@@ -34,18 +34,23 @@ execute the actual tasks.
 
 from __future__ import annotations
 
-__version__ = "0.1.2"
+__version__ = "0.2.0"
 
 from .client import AdminCallResult, CallResult
 from .exceptions import (
+    FlaskXXLJobError,
+    XXLJobAdminCallError,
     XXLJobAlreadyInitializedError,
     XXLJobCallbackError,
+    XXLJobCallbackRegistrationError,
     XXLJobConfigError,
     XXLJobConfigurationError,
     XXLJobError,
+    XXLJobInitializationError,
     XXLJobProtocolError,
     XXLJobRegistryError,
     XXLJobRequestError,
+    XXLJobValidationError,
 )
 from .extension import FlaskXXLJob
 from .model.callback import CallbackRequest
@@ -56,6 +61,7 @@ from .model.registry import RegistryRequest
 from .model.trigger import TriggerRequest
 from .response.executor import XXLJobResponse
 from .response.log import LogResponse
+from .status import XXLJobStatus
 
 __all__ = [
     "__version__",
@@ -70,12 +76,18 @@ __all__ = [
     "XXLJobResponse",
     "CallResult",
     "AdminCallResult",
+    "XXLJobStatus",
+    "FlaskXXLJobError",
     "XXLJobError",
     "XXLJobConfigError",
     "XXLJobConfigurationError",
+    "XXLJobInitializationError",
     "XXLJobAlreadyInitializedError",
+    "XXLJobCallbackRegistrationError",
+    "XXLJobValidationError",
     "XXLJobRequestError",
     "XXLJobProtocolError",
+    "XXLJobAdminCallError",
     "XXLJobCallbackError",
     "XXLJobRegistryError",
 ]

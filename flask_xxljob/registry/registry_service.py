@@ -15,7 +15,8 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Optional
+from datetime import datetime, timezone
+from typing import Any, Dict, Optional
 
 from ..client import CallResult
 from ..client.admin_client import AdminClient
@@ -38,6 +39,50 @@ class RegistryService:
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._lock = threading.Lock()
+        # 最近一次注册/续约/注销结果（仅插件状态，绝不含 Token 或业务状态）。
+        # Last registration/renewal/removal result (plugin status only; never a
+        # token or any business state).
+        self._status_lock = threading.Lock()
+        self._registered = False
+        self._last_registry_time: Optional[str] = None
+        self._last_registry_success: Optional[bool] = None
+        self._last_registry_admin_address: Optional[str] = None
+        self._last_registry_error_type: Optional[str] = None
+        self._last_registry_message: Optional[str] = None
+
+    def _record(self, result: CallResult, *, is_remove: bool) -> None:
+        # 记录最近一次调用的插件级状态，供 get_status 查询。
+        # Record plugin-level status of the latest call for get_status.
+        with self._status_lock:
+            self._last_registry_time = datetime.now(timezone.utc).isoformat(
+                timespec="seconds"
+            )
+            self._last_registry_success = result.success
+            self._last_registry_admin_address = result.address
+            self._last_registry_error_type = result.error_type
+            self._last_registry_message = result.message
+            if result.success:
+                # 注册成功 -> 已注册；注销成功 -> 未注册。
+                # Successful register -> registered; successful remove -> not.
+                self._registered = not is_remove
+
+    def status_snapshot(self) -> Dict[str, Any]:
+        """
+        返回最近一次注册状态的快照（不含 Token 或业务状态）。
+
+        Return a snapshot of the latest registration status (never a token or
+        any business state).
+        """
+        with self._status_lock:
+            return {
+                "registered": self._registered,
+                "last_registry_time": self._last_registry_time,
+                "last_registry_success": self._last_registry_success,
+                "last_registry_admin_address": self._last_registry_admin_address,
+                "last_registry_error_type": self._last_registry_error_type,
+                "last_registry_message": self._last_registry_message,
+                "registry_thread_running": self.is_running,
+            }
 
     def _build_request(self) -> RegistryRequest:
         return RegistryRequest.for_executor(
@@ -52,6 +97,7 @@ class RegistryService:
         Perform a single registration/renewal call and return the full result.
         """
         result = self._admin_client.registry(self._build_request())
+        self._record(result, is_remove=False)
         if result.success:
             logger.info(
                 "XXL-JOB executor registered via %s (app=%s).",
@@ -72,6 +118,7 @@ class RegistryService:
         Perform a single deregistration call and return the full result.
         """
         result = self._admin_client.registry_remove(self._build_request())
+        self._record(result, is_remove=True)
         if result.success:
             logger.info("XXL-JOB executor removed via %s.", result.address)
         else:
@@ -89,6 +136,7 @@ class RegistryService:
         succeeded.
         """
         result = self._admin_client.registry(self._build_request())
+        self._record(result, is_remove=False)
         if result.success:
             logger.info(
                 "XXL-JOB executor registered via %s (app=%s).",
@@ -109,6 +157,7 @@ class RegistryService:
         Perform a single deregistration call. Returns whether it succeeded.
         """
         result = self._admin_client.registry_remove(self._build_request())
+        self._record(result, is_remove=True)
         if result.success:
             logger.info("XXL-JOB executor removed via %s.", result.address)
         else:
