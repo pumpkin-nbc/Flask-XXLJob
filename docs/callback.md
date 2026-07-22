@@ -61,5 +61,7 @@ When several admin addresses are configured, the callback stops at the first
 address that returns a valid business response (success or failure) to avoid
 delivering the same callback twice; it only fails over to the next address on a
 network error, a non-200 status, or invalid JSON. The returned `CallResult`
-(also exported as `AdminCallResult`) exposes `success`, `code`, `msg`/`message`
-and `address`/`admin_address`.
+(also exported as `AdminCallResult`) exposes `success`, `code`, `msg`/`message`,
+`address`/`admin_address` and `error_type`. `error_type` classifies failures as
+one of `network`, `timeout`, `http`, `invalid_json`, `business` or `config`
+(and is `None` on success), so you can react without inspecting `requests`.

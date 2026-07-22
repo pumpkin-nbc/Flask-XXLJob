@@ -108,7 +108,7 @@ Target support is `Flask >= 1.0` and `Python >= 3.8`. This release was verified 
 
 ## Documentation
 
-See the [docs](docs/) directory, including [getting-started.md](docs/getting-started.md) and [configuration.md](docs/configuration.md).
+See the [docs](docs/) directory, including [getting-started.md](docs/getting-started.md) and [configuration.md](docs/configuration.md). Upgrading from an earlier version? See the [migration guide](docs/migration.md) and the [CHANGELOG](CHANGELOG.md).
 
 ## License
 

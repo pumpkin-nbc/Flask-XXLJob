@@ -31,6 +31,7 @@ class CallResult:
     msg: Optional[str] = None
     address: Optional[str] = None
     error: Optional[str] = None
+    error_type: Optional[str] = None
 
     @property
     def message(self) -> Optional[str]:
@@ -50,6 +51,16 @@ class CallResult:
         The admin address that produced this result (alias of ``address``).
         """
         return self.address
+
+
+# 调用结果错误分类常量（见 needs 10.4）。
+# Call-result error categories (see spec 10.4).
+ERROR_CONFIG = "config"
+ERROR_NETWORK = "network"
+ERROR_TIMEOUT = "timeout"
+ERROR_HTTP = "http"
+ERROR_INVALID_JSON = "invalid_json"
+ERROR_BUSINESS = "business"
 
 
 # 规范名称别名：语义等同 CallResult，导出以便公开 API 使用。
@@ -95,19 +106,33 @@ def post_to_admins(
       a network error, non-200 status, or invalid JSON.
     """
     headers = _build_headers(access_token)
-    last_result = CallResult(success=False, error="no admin address configured")
+    last_result = CallResult(
+        success=False,
+        error="no admin address configured",
+        error_type=ERROR_CONFIG,
+    )
 
     for address in admin_addresses:
         url = join_url(address, api_path)
         try:
             response = requests.post(url, json=payload, headers=headers, timeout=timeout)
-        except requests.RequestException as exc:
-            # 不泄露 Token，仅记录异常类型与地址。
-            # Do not leak the token; only record the exception type and address.
+        except requests.Timeout as exc:
+            # 请求超时。 / Request timed out.
             last_result = CallResult(
                 success=False,
                 address=address,
                 error=f"{type(exc).__name__}: {exc}",
+                error_type=ERROR_TIMEOUT,
+            )
+            continue
+        except requests.RequestException as exc:
+            # 网络连接失败。不泄露 Token，仅记录异常类型与地址。
+            # Network failure. Do not leak the token; record type and address.
+            last_result = CallResult(
+                success=False,
+                address=address,
+                error=f"{type(exc).__name__}: {exc}",
+                error_type=ERROR_NETWORK,
             )
             continue
 
@@ -116,6 +141,7 @@ def post_to_admins(
                 success=False,
                 address=address,
                 error=f"HTTP {response.status_code}",
+                error_type=ERROR_HTTP,
             )
             continue
 
@@ -126,6 +152,7 @@ def post_to_admins(
                 success=False,
                 address=address,
                 error="invalid JSON response",
+                error_type=ERROR_INVALID_JSON,
             )
             continue
 
@@ -134,7 +161,13 @@ def post_to_admins(
         if code == SUCCESS_CODE:
             return CallResult(success=True, code=code, msg=msg, address=address)
 
-        last_result = CallResult(success=False, code=code, msg=msg, address=address)
+        last_result = CallResult(
+            success=False,
+            code=code,
+            msg=msg,
+            address=address,
+            error_type=ERROR_BUSINESS,
+        )
         # 收到有效业务响应即停止，避免重复回调。
         # Stop on a valid business response to avoid duplicate callbacks.
         if stop_on_business_response:
@@ -143,4 +176,15 @@ def post_to_admins(
     return last_result
 
 
-__all__ = ["CallResult", "AdminCallResult", "ACCESS_TOKEN_HEADER", "post_to_admins"]
+__all__ = [
+    "CallResult",
+    "AdminCallResult",
+    "ACCESS_TOKEN_HEADER",
+    "post_to_admins",
+    "ERROR_CONFIG",
+    "ERROR_NETWORK",
+    "ERROR_TIMEOUT",
+    "ERROR_HTTP",
+    "ERROR_INVALID_JSON",
+    "ERROR_BUSINESS",
+]

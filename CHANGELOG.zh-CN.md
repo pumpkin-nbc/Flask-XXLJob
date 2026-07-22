@@ -7,6 +7,33 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 并遵循 [语义化版本](https://semver.org/lang/zh-CN/spec/v2.0.0.html)。
 
+## [0.1.2] - 2026-07-22
+
+### 修复
+
+- 加载配置时对 Admin 与执行器地址进行规范化：去除首尾空格与多余的尾部斜杠，同时保留上下文路径（例如 `/xxl-job-admin`）与地址顺序。无论地址书写方式如何，注册、注销与回调 URL 都保持一致。
+
+### 调整
+
+- `register_executor`、`remove_executor` 与 `callback*` 方法返回的结果新增可选的 `error_type` 分类（`network`、`timeout`、`http`、`invalid_json`、`business`、`config`，成功时为 `None`），无需检查底层 `requests` 对象即可区分失败原因。现有 `CallResult`/`AdminCallResult` 字段保持不变，且任何结果中都不包含 Access Token。
+- 配置校验错误信息现在统一包含配置项名称、收到的值类型（非敏感字段包含值）以及期望格式。
+
+### 测试
+
+- 新增针对调用结果错误分类（注册与回调：网络、超时、HTTP、非法 JSON、业务失败、无 Admin）、Admin/执行器地址规范化、路由前缀变体（空、前导/尾部/重复斜杠）以及 `Content-Type: application/json; charset=UTF-8` 解析（含中文 `executorParams`）的测试。
+
+### 文档
+
+- 新增 “从 0.1.1 升级到 0.1.2” 的升级与回滚指南，更新中英文文档与版本引用，并记录 `error_type` 结果字段。
+
+升级说明：这是一个向下兼容的补丁版本。使用以下命令升级：
+
+```bash
+pip install --upgrade Flask-XXLJob==0.1.2
+```
+
+无需修改代码或配置；唯一的新增是调用结果上的可选 `error_type` 字段。
+
 ## [0.1.1] - 2026-07-22
 
 ### 修复

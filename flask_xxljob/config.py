@@ -70,10 +70,15 @@ class XXLJobConfig:
 
         access_token = _as_str(merged, "XXL_JOB_ACCESS_TOKEN")
         executor_app_name = _as_str(merged, "XXL_JOB_EXECUTOR_APP_NAME")
-        executor_address = _as_str(merged, "XXL_JOB_EXECUTOR_ADDRESS")
+        executor_address = _normalize_address(
+            _as_str(merged, "XXL_JOB_EXECUTOR_ADDRESS")
+        )
         route_prefix = _as_str(merged, "XXL_JOB_ROUTE_PREFIX")
 
-        admin_addresses = _as_str_list(merged, "XXL_JOB_ADMIN_ADDRESSES")
+        admin_addresses = [
+            _normalize_address(item)
+            for item in _as_str_list(merged, "XXL_JOB_ADMIN_ADDRESSES")
+        ]
 
         registry_interval = _as_positive_int(merged, "XXL_JOB_REGISTRY_INTERVAL")
         http_connect_timeout = _as_positive_int(merged, "XXL_JOB_HTTP_CONNECT_TIMEOUT")
@@ -158,7 +163,10 @@ class XXLJobConfig:
 def _as_bool(config: Mapping[str, Any], key: str) -> bool:
     value = config[key]
     if not isinstance(value, bool):
-        raise XXLJobConfigError(f"{key} must be a boolean, got {type(value).__name__}.")
+        raise XXLJobConfigError(
+            f"{key} must be a boolean (True/False); got type "
+            f"{type(value).__name__}."
+        )
     return value
 
 
@@ -167,7 +175,9 @@ def _as_str(config: Mapping[str, Any], key: str) -> str:
     if value is None:
         return ""
     if not isinstance(value, str):
-        raise XXLJobConfigError(f"{key} must be a string, got {type(value).__name__}.")
+        raise XXLJobConfigError(
+            f"{key} must be a string; got type {type(value).__name__}."
+        )
     return value
 
 
@@ -179,20 +189,40 @@ def _as_str_list(config: Mapping[str, Any], key: str) -> List[str]:
         items = []
         for item in value:
             if not isinstance(item, str):
-                raise XXLJobConfigError(f"{key} must contain only strings.")
+                raise XXLJobConfigError(
+                    f"{key} must be a list of non-empty strings; found a list "
+                    f"item of type {type(item).__name__}."
+                )
             items.append(item.strip())
     else:
-        raise XXLJobConfigError(f"{key} must be a list of strings or a comma-separated string.")
+        raise XXLJobConfigError(
+            f"{key} must be a list of strings or a comma-separated string; got "
+            f"type {type(value).__name__}."
+        )
     return [item for item in items if item]
 
 
 def _as_positive_int(config: Mapping[str, Any], key: str) -> int:
     value = config[key]
     if isinstance(value, bool) or not isinstance(value, int):
-        raise XXLJobConfigError(f"{key} must be an integer, got {type(value).__name__}.")
+        raise XXLJobConfigError(
+            f"{key} must be a positive integer; got type {type(value).__name__}."
+        )
     if value <= 0:
-        raise XXLJobConfigError(f"{key} must be a positive integer.")
+        raise XXLJobConfigError(
+            f"{key} must be a positive integer (> 0); got value {value}."
+        )
     return value
+
+
+def _normalize_address(value: str) -> str:
+    # 去除首尾空格与多余尾部斜杠，保留上下文路径（如 /xxl-job-admin）。
+    # Strip surrounding whitespace and redundant trailing slashes while
+    # preserving any context path (e.g. /xxl-job-admin).
+    stripped = value.strip()
+    if not stripped:
+        return ""
+    return stripped.rstrip("/")
 
 
 def _validate_http_url(key: str, value: str) -> None:
@@ -202,7 +232,8 @@ def _validate_http_url(key: str, value: str) -> None:
     lowered = value.strip().lower()
     if not (lowered.startswith("http://") or lowered.startswith("https://")):
         raise XXLJobConfigError(
-            f"{key} must use the http or https scheme, got '{value}'."
+            f"{key} must be an http/https URL (e.g. 'http://host:port/path'); "
+            f"got '{value}'."
         )
 
 

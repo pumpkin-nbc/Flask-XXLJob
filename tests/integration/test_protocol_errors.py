@@ -94,3 +94,32 @@ def test_non_executor_404_stays_default():
     # 非执行器路径保持 Flask 默认行为。
     # Non-executor paths keep Flask's default behavior.
     assert resp.status_code == 404
+
+
+def test_content_type_with_charset_is_parsed():
+    app, _ = build()
+    resp = app.test_client().post(
+        "/run",
+        data=b'{"jobId": 5}',
+        content_type="application/json; charset=UTF-8",
+    )
+    assert resp.json["code"] == 200
+
+
+def test_chinese_executor_params_parsed():
+    ext = FlaskXXLJob()
+    app, _ = make_app(ext, name="zh_" + str(id(ext)))
+    seen = {}
+
+    @ext.on_run
+    def handler(request):
+        seen["params"] = request.executor_params
+        return XXLJobResponse.success()
+
+    resp = app.test_client().post(
+        "/run",
+        data='{"jobId": 1, "executorParams": "\u4efb\u52a1\u53c2\u6570"}'.encode("utf-8"),
+        content_type="application/json; charset=UTF-8",
+    )
+    assert resp.json["code"] == 200
+    assert seen["params"] == "\u4efb\u52a1\u53c2\u6570"

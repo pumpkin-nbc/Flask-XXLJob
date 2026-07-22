@@ -88,6 +88,28 @@ def test_callback_timeout_returns_failure(mocker):
     assert "Timeout" in (result.error or "")
 
 
+def test_callback_timeout_result_has_timeout_error_type(mocker):
+    mocker.patch(
+        "flask_xxljob.client.requests.post",
+        side_effect=requests.Timeout("timeout"),
+    )
+    client = CallbackClient(make_config(XXL_JOB_ADMIN_ADDRESSES=["http://a:8080"]))
+    result = client.callback(log_id=1, log_date_time=2, handle_code=200)
+    assert result.success is False
+    assert result.error_type == "timeout"
+
+
+def test_callback_business_failure_has_business_error_type(mocker):
+    mocker.patch(
+        "flask_xxljob.client.requests.post",
+        return_value=FakeResponse(code=500),
+    )
+    client = CallbackClient(make_config(XXL_JOB_ADMIN_ADDRESSES=["http://a:8080"]))
+    result = client.callback(log_id=1, log_date_time=2, handle_code=200)
+    assert result.success is False
+    assert result.error_type == "business"
+
+
 def test_callback_uses_configured_timeout(mocker):
     post = mocker.patch("flask_xxljob.client.requests.post", return_value=FakeResponse())
     client = CallbackClient(

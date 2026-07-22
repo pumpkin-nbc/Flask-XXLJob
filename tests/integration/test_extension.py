@@ -87,6 +87,34 @@ def test_route_prefix_applied():
     assert "/exec/run" in rules
 
 
+@pytest.mark.parametrize("prefix", ["/xxl-job", "/xxl-job/", "//xxl-job//"])
+def test_route_prefix_variants_have_no_double_slash(prefix):
+    ext = FlaskXXLJob()
+    app, _ = make_app(ext, name="pfx_" + str(id(ext)), XXL_JOB_ROUTE_PREFIX=prefix)
+    rules = {rule.rule for rule in app.url_map.iter_rules()}
+    assert "/xxl-job/run" in rules
+    assert not any("//" in rule for rule in rules)
+
+
+def test_empty_route_prefix_mounts_at_root():
+    ext = FlaskXXLJob()
+    app, _ = make_app(ext, name="root_" + str(id(ext)), XXL_JOB_ROUTE_PREFIX="")
+    rules = {rule.rule for rule in app.url_map.iter_rules()}
+    assert "/run" in rules
+
+
+def test_prefixed_run_dispatches():
+    ext = FlaskXXLJob()
+    app, _ = make_app(ext, name="pfxrun_" + str(id(ext)), XXL_JOB_ROUTE_PREFIX="/xxl-job/")
+
+    @ext.on_run
+    def handler(request):
+        return XXLJobResponse.success(content="prefixed")
+
+    resp = app.test_client().post("/xxl-job/run", json={"jobId": 1})
+    assert resp.json["content"] == "prefixed"
+
+
 def test_cli_command_registered(app_ext):
     app, _ = app_ext
     assert "xxljob" in app.cli.commands

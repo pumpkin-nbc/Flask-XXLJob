@@ -108,7 +108,7 @@ flask --app "project:create_app" xxljob remove
 
 ## 文档
 
-参见 [docs](docs/) 目录，包括 [getting-started.md](docs/getting-started.md) 与 [configuration.md](docs/configuration.md)。
+参见 [docs](docs/) 目录，包括 [getting-started.md](docs/getting-started.md) 与 [configuration.md](docs/configuration.md)。从旧版本升级？请参阅[迁移指南](docs/migration.zh-CN.md)与 [CHANGELOG](CHANGELOG.zh-CN.md)。
 
 ## 许可证
 

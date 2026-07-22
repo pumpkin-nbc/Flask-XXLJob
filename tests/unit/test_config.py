@@ -91,3 +91,56 @@ def test_bad_admin_url_scheme_raises():
 def test_bad_executor_url_scheme_raises():
     with pytest.raises(XXLJobConfigError):
         XXLJobConfig.from_mapping(base_mapping(XXL_JOB_EXECUTOR_ADDRESS="admin:8080"))
+
+
+def test_admin_address_trailing_slash_normalized():
+    config = XXLJobConfig.from_mapping(
+        base_mapping(
+            XXL_JOB_ADMIN_ADDRESSES=[
+                "http://admin-1:8080/xxl-job-admin/",
+                "  http://admin-2:8080/  ",
+            ]
+        )
+    )
+    assert config.admin_addresses == [
+        "http://admin-1:8080/xxl-job-admin",
+        "http://admin-2:8080",
+    ]
+
+
+def test_executor_address_trailing_slash_normalized():
+    config = XXLJobConfig.from_mapping(
+        base_mapping(XXL_JOB_EXECUTOR_ADDRESS="http://127.0.0.1:5001/")
+    )
+    assert config.executor_address == "http://127.0.0.1:5001"
+
+
+def test_https_admin_address_supported():
+    config = XXLJobConfig.from_mapping(
+        base_mapping(XXL_JOB_ADMIN_ADDRESSES=["https://admin:8443/xxl-job-admin"])
+    )
+    assert config.admin_addresses == ["https://admin:8443/xxl-job-admin"]
+
+
+def test_admin_address_order_preserved():
+    config = XXLJobConfig.from_mapping(
+        base_mapping(
+            XXL_JOB_ADMIN_ADDRESSES=["http://a:8080", "http://b:8080", "http://c:8080"]
+        )
+    )
+    assert config.admin_addresses == ["http://a:8080", "http://b:8080", "http://c:8080"]
+
+
+@pytest.mark.parametrize(
+    "prefix,expected",
+    [
+        ("", ""),
+        ("/xxl-job", "/xxl-job"),
+        ("/xxl-job/", "/xxl-job"),
+        ("xxl-job", "/xxl-job"),
+        ("//xxl-job//", "/xxl-job"),
+    ],
+)
+def test_route_prefix_normalization_variants(prefix, expected):
+    config = XXLJobConfig.from_mapping(base_mapping(XXL_JOB_ROUTE_PREFIX=prefix))
+    assert config.route_prefix == expected

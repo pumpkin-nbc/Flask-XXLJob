@@ -47,4 +47,8 @@ Configuration is validated on `init_app()`. Invalid types raise
 `XXL_JOB_ADMIN_ADDRESSES` entry and `XXL_JOB_EXECUTOR_ADDRESS` are required only
 when `XXL_JOB_AUTO_REGISTER` is enabled, so a protocol-only deployment that does
 not register can omit them. When provided, admin and executor addresses must use
-the `http` or `https` scheme. Bad configuration is never silently ignored.
+the `http` or `https` scheme. Admin and executor addresses are normalized on
+load (surrounding whitespace and redundant trailing slashes are removed while
+context paths and order are preserved). Validation messages name the offending
+key, its received type and the expected format. Bad configuration is never
+silently ignored.

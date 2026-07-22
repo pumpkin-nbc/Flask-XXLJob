@@ -49,4 +49,4 @@ with app.app_context():
 
 `message` 默认为 `None`（按空信息处理）。`log_id` 与 `log_date_time` 必须是整数；传入布尔值或非整数会抛出 `XXLJobRequestError`。
 
-配置多个 Admin 地址时，回调会在第一个返回有效业务响应（成功或失败）的地址处停止，避免重复投递同一回调；仅在网络错误、非 200 状态或非法 JSON 时才切换到下一个地址。返回的 `CallResult`（同时导出为 `AdminCallResult`）提供 `success`、`code`、`msg`/`message` 与 `address`/`admin_address`。
+配置多个 Admin 地址时，回调会在第一个返回有效业务响应（成功或失败）的地址处停止，避免重复投递同一回调；仅在网络错误、非 200 状态或非法 JSON 时才切换到下一个地址。返回的 `CallResult`（同时导出为 `AdminCallResult`）提供 `success`、`code`、`msg`/`message`、`address`/`admin_address` 与 `error_type`。`error_type` 将失败归类为 `network`、`timeout`、`http`、`invalid_json`、`business` 或 `config` 之一（成功时为 `None`），因此无需检查 `requests` 即可作出响应。
