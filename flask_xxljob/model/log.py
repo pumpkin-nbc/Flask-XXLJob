@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from .coerce import coerce_int
+
 
 @dataclass
 class LogRequest:
@@ -37,9 +39,9 @@ class LogRequest:
         Build the object from an official ``LogParam`` JSON mapping.
         """
         return cls(
-            log_date_time=int(data.get("logDateTim") or 0),
-            log_id=int(data.get("logId") or 0),
-            from_line_num=int(data.get("fromLineNum") or 0),
+            log_date_time=coerce_int(data.get("logDateTim"), "logDateTim"),
+            log_id=coerce_int(data.get("logId"), "logId"),
+            from_line_num=coerce_int(data.get("fromLineNum"), "fromLineNum"),
         )
 
     def to_wire(self) -> dict:

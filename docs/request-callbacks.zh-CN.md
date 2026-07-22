@@ -45,9 +45,32 @@ def handle_log(request):
     )
 ```
 
+## 注册时机
+
+处理函数可以在 `init_app` 之前或之后注册。在模块级（`init_app` 之前）注册已完全支持，也是 Application Factory 模式推荐的写法：
+
+```python
+xxl_job = FlaskXXLJob()
+
+@xxl_job.on_run
+def handle_run(request):
+    return XXLJobResponse.success()
+
+def create_app():
+    app = Flask(__name__)
+    xxl_job.init_app(app)
+    return app
+```
+
+模块级注册的处理函数会成为该扩展初始化的每个应用的默认处理函数。
+
+## 重复注册
+
+重复注册同一处理函数会抛出 `XXLJobError`，从而避免之前的处理函数被静默覆盖。每个处理函数只应注册一次。
+
 ## 返回值
 
-`on_run`、`on_idle_beat` 与 `on_kill` 返回 `XXLJobResponse`。`on_log` 返回 `LogResponse`。
+`on_run`、`on_idle_beat` 与 `on_kill` 返回 `XXLJobResponse`。`on_log` 返回 `LogResponse`。返回其他类型（包括 `None`、`dict`、`str`、`bool`）会返回明确的 “unsupported response type” 失败，而不是内部错误。
 
 ## 未注册处理函数
 

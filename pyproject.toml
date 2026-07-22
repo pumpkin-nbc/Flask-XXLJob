@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "Flask-XXLJob"
-version = "0.1.0"
+version = "0.1.1"
 description = "A Flask extension that implements the XXL-JOB 2.4.1 executor protocol."
 readme = "README.md"
 requires-python = ">=3.8"

@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 from ..utils.json_utils import try_parse_json
+from .coerce import coerce_int
 
 
 @dataclass
@@ -48,18 +49,18 @@ class TriggerRequest:
         Build the object from an official ``TriggerParam`` JSON mapping.
         """
         return cls(
-            job_id=int(data.get("jobId") or 0),
+            job_id=coerce_int(data.get("jobId"), "jobId"),
             executor_handler=data.get("executorHandler") or "",
             executor_params=data.get("executorParams") or "",
             executor_block_strategy=data.get("executorBlockStrategy") or "",
-            executor_timeout=int(data.get("executorTimeout") or 0),
-            log_id=int(data.get("logId") or 0),
-            log_date_time=int(data.get("logDateTime") or 0),
+            executor_timeout=coerce_int(data.get("executorTimeout"), "executorTimeout"),
+            log_id=coerce_int(data.get("logId"), "logId"),
+            log_date_time=coerce_int(data.get("logDateTime"), "logDateTime"),
             glue_type=data.get("glueType") or "",
             glue_source=data.get("glueSource") or "",
-            glue_update_time=int(data.get("glueUpdatetime") or 0),
-            broadcast_index=int(data.get("broadcastIndex") or 0),
-            broadcast_total=int(data.get("broadcastTotal") or 0),
+            glue_update_time=coerce_int(data.get("glueUpdatetime"), "glueUpdatetime"),
+            broadcast_index=coerce_int(data.get("broadcastIndex"), "broadcastIndex"),
+            broadcast_total=coerce_int(data.get("broadcastTotal"), "broadcastTotal"),
         )
 
     def to_wire(self) -> dict:

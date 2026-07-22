@@ -32,6 +32,31 @@ class CallResult:
     address: Optional[str] = None
     error: Optional[str] = None
 
+    @property
+    def message(self) -> Optional[str]:
+        """
+        规范化的结果信息：优先返回 Admin 的 ``msg``，否则返回本地 ``error``。
+
+        Canonical result message: the admin ``msg`` when present, otherwise the
+        local ``error``.
+        """
+        return self.msg if self.msg is not None else self.error
+
+    @property
+    def admin_address(self) -> Optional[str]:
+        """
+        产生该结果的 Admin 地址（``address`` 的别名）。
+
+        The admin address that produced this result (alias of ``address``).
+        """
+        return self.address
+
+
+# 规范名称别名：语义等同 CallResult，导出以便公开 API 使用。
+# Canonical-name alias: semantically identical to CallResult, exported for the
+# public API.
+AdminCallResult = CallResult
+
 
 def _build_headers(access_token: str) -> dict:
     headers = {"Content-Type": "application/json"}
@@ -49,12 +74,25 @@ def post_to_admins(
     payload: Any,
     access_token: str,
     timeout: Tuple[int, int],
+    stop_on_business_response: bool = False,
 ) -> CallResult:
     """
     依次向多个 Admin 地址发送 POST 请求，直到成功或全部失败。
 
-    Send a POST request to multiple admin addresses in order until one
-    succeeds or all of them fail.
+    - ``stop_on_business_response=False``（默认，用于注册/注销）：仅在业务成功时
+      返回，业务失败会继续尝试下一个地址。
+    - ``stop_on_business_response=True``（用于任务回调）：只要收到 Admin 的有效
+      业务响应（无论成功或失败）即返回，避免向多个 Admin 重复发送同一回调；仅在
+      网络错误、非 200 或非法 JSON 时才切换到下一个地址。
+
+    Send a POST request to multiple admin addresses in order.
+
+    - ``stop_on_business_response=False`` (default, for registration): returns
+      only on business success; a business failure moves on to the next address.
+    - ``stop_on_business_response=True`` (for task callbacks): returns as soon as
+      any valid business response is received (success or failure) so that the
+      same callback is not delivered to multiple admins; failover happens only on
+      a network error, non-200 status, or invalid JSON.
     """
     headers = _build_headers(access_token)
     last_result = CallResult(success=False, error="no admin address configured")
@@ -97,8 +135,12 @@ def post_to_admins(
             return CallResult(success=True, code=code, msg=msg, address=address)
 
         last_result = CallResult(success=False, code=code, msg=msg, address=address)
+        # 收到有效业务响应即停止，避免重复回调。
+        # Stop on a valid business response to avoid duplicate callbacks.
+        if stop_on_business_response:
+            return last_result
 
     return last_result
 
 
-__all__ = ["CallResult", "ACCESS_TOKEN_HEADER", "post_to_admins"]
+__all__ = ["CallResult", "AdminCallResult", "ACCESS_TOKEN_HEADER", "post_to_admins"]

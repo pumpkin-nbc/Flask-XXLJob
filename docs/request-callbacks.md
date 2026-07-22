@@ -47,10 +47,39 @@ def handle_log(request):
     )
 ```
 
+## Registration timing
+
+Callbacks may be registered either before or after `init_app`. Registering at
+module level (before `init_app`) is fully supported and is the recommended form
+for the application factory pattern:
+
+```python
+xxl_job = FlaskXXLJob()
+
+@xxl_job.on_run
+def handle_run(request):
+    return XXLJobResponse.success()
+
+def create_app():
+    app = Flask(__name__)
+    xxl_job.init_app(app)
+    return app
+```
+
+Module-level callbacks become the defaults for every application initialized by
+the extension.
+
+## Duplicate registration
+
+Registering the same callback twice raises `XXLJobError`. This prevents an
+earlier handler from being silently overwritten. Register each callback once.
+
 ## Return values
 
 `on_run`, `on_idle_beat` and `on_kill` return an `XXLJobResponse`. `on_log`
-returns a `LogResponse`.
+returns a `LogResponse`. Any other return type (including `None`, `dict`, `str`
+or `bool`) produces an explicit "unsupported response type" failure rather than
+an internal error.
 
 ## Unconfigured callbacks
 

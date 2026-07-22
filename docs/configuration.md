@@ -42,7 +42,9 @@ app.config.update(
 
 ## Validation
 
-Configuration is validated on `init_app()`. Invalid types or missing required
-values (`XXL_JOB_EXECUTOR_APP_NAME` and at least one `XXL_JOB_ADMIN_ADDRESSES`
-entry when enabled) raise `XXLJobConfigError`. Bad configuration is never
-silently ignored.
+Configuration is validated on `init_app()`. Invalid types raise
+`XXLJobConfigError`. `XXL_JOB_EXECUTOR_APP_NAME`, at least one
+`XXL_JOB_ADMIN_ADDRESSES` entry and `XXL_JOB_EXECUTOR_ADDRESS` are required only
+when `XXL_JOB_AUTO_REGISTER` is enabled, so a protocol-only deployment that does
+not register can omit them. When provided, admin and executor addresses must use
+the `http` or `https` scheme. Bad configuration is never silently ignored.

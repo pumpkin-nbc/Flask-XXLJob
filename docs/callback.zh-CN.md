@@ -45,4 +45,8 @@ with app.app_context():
 
 ## 行为
 
-回调客户端构造官方请求（向 `/api/callback` 发送单元素 `HandleCallbackParam` 数组），携带 Access Token，应用连接与读取超时，将 `handleMsg` 截断到配置的最大长度，按顺序尝试多个 Admin 地址，并返回明确的结果。它不持久化回调、不在后台无限重试，也不创建后台线程。
+回调客户端构造官方请求（向 `/api/callback` 发送单元素 `HandleCallbackParam` 数组），携带 Access Token，应用连接与读取超时，将 `handleMsg` 截断到配置的最大长度，并返回明确的结果。它不持久化回调、不在后台无限重试，也不创建后台线程。
+
+`message` 默认为 `None`（按空信息处理）。`log_id` 与 `log_date_time` 必须是整数；传入布尔值或非整数会抛出 `XXLJobRequestError`。
+
+配置多个 Admin 地址时，回调会在第一个返回有效业务响应（成功或失败）的地址处停止，避免重复投递同一回调；仅在网络错误、非 200 状态或非法 JSON 时才切换到下一个地址。返回的 `CallResult`（同时导出为 `AdminCallResult`）提供 `success`、`code`、`msg`/`message` 与 `address`/`admin_address`。

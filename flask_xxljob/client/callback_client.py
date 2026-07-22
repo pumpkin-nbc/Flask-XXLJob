@@ -68,4 +68,5 @@ class CallbackClient:
             [request.to_wire()],
             self._config.access_token,
             self._config.timeout,
+            stop_on_business_response=True,
         )

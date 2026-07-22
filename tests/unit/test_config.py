@@ -66,3 +66,28 @@ def test_comma_separated_admin_addresses():
 def test_route_prefix_normalized():
     config = XXLJobConfig.from_mapping(base_mapping(XXL_JOB_ROUTE_PREFIX="exec/"))
     assert config.route_prefix == "/exec"
+
+
+def test_auto_register_off_relaxes_admin_requirement():
+    # 关闭自动注册后不再强制要求 Admin/执行器地址。
+    # With auto-register off, admin/executor addresses are no longer required.
+    config = XXLJobConfig.from_mapping(
+        {"XXL_JOB_AUTO_REGISTER": False, "XXL_JOB_ADMIN_ADDRESSES": []}
+    )
+    assert config.enabled is True
+    assert config.auto_register is False
+
+
+def test_missing_executor_address_raises_when_auto_register():
+    with pytest.raises(XXLJobConfigError):
+        XXLJobConfig.from_mapping(base_mapping(XXL_JOB_EXECUTOR_ADDRESS=""))
+
+
+def test_bad_admin_url_scheme_raises():
+    with pytest.raises(XXLJobConfigError):
+        XXLJobConfig.from_mapping(base_mapping(XXL_JOB_ADMIN_ADDRESSES=["ftp://admin"]))
+
+
+def test_bad_executor_url_scheme_raises():
+    with pytest.raises(XXLJobConfigError):
+        XXLJobConfig.from_mapping(base_mapping(XXL_JOB_EXECUTOR_ADDRESS="admin:8080"))

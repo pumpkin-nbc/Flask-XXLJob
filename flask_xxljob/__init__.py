@@ -34,8 +34,19 @@ execute the actual tasks.
 
 from __future__ import annotations
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
+from .client import AdminCallResult, CallResult
+from .exceptions import (
+    XXLJobAlreadyInitializedError,
+    XXLJobCallbackError,
+    XXLJobConfigError,
+    XXLJobConfigurationError,
+    XXLJobError,
+    XXLJobProtocolError,
+    XXLJobRegistryError,
+    XXLJobRequestError,
+)
 from .extension import FlaskXXLJob
 from .model.callback import CallbackRequest
 from .model.idle_beat import IdleBeatRequest
@@ -57,4 +68,14 @@ __all__ = [
     "CallbackRequest",
     "RegistryRequest",
     "XXLJobResponse",
+    "CallResult",
+    "AdminCallResult",
+    "XXLJobError",
+    "XXLJobConfigError",
+    "XXLJobConfigurationError",
+    "XXLJobAlreadyInitializedError",
+    "XXLJobRequestError",
+    "XXLJobProtocolError",
+    "XXLJobCallbackError",
+    "XXLJobRegistryError",
 ]

@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from .coerce import coerce_int
+
 
 @dataclass
 class CallbackRequest:
@@ -38,9 +40,9 @@ class CallbackRequest:
         Build the object from an official ``HandleCallbackParam`` JSON mapping.
         """
         return cls(
-            log_id=int(data.get("logId") or 0),
-            log_date_time=int(data.get("logDateTim") or 0),
-            handle_code=int(data.get("handleCode") or 0),
+            log_id=coerce_int(data.get("logId"), "logId"),
+            log_date_time=coerce_int(data.get("logDateTim"), "logDateTim"),
+            handle_code=coerce_int(data.get("handleCode"), "handleCode"),
             handle_msg=data.get("handleMsg") or "",
         )
 

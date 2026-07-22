@@ -104,19 +104,46 @@ class XXLJobConfig:
 
     def validate(self) -> None:
         """
-        校验必填项。启用扩展时执行器名称与 Admin 地址必填。
+        校验配置。
 
-        Validate required fields. When enabled, the executor name and at least
-        one admin address are required.
+        - 扩展禁用时不做任何校验。
+        - 仅当开启自动注册（``auto_register``）时，才要求 Admin 地址、执行器名称
+          与执行器地址；这样仅提供协议接入而不注册的场景也能正常工作。
+        - 提供了 Admin 地址或执行器地址时，必须为 ``http``/``https`` 方案。
+
+        Validate the configuration.
+
+        - No validation is performed when the extension is disabled.
+        - The admin addresses, executor name and executor address are required
+          only when auto-registration is enabled, so scenarios that provide the
+          protocol endpoints without registering still work.
+        - When provided, admin/executor addresses must use the ``http``/``https``
+          scheme.
         """
         if not self.enabled:
             return
-        if not self.executor_app_name:
-            raise XXLJobConfigError("XXL_JOB_EXECUTOR_APP_NAME must not be empty.")
-        if not self.admin_addresses:
-            raise XXLJobConfigError(
-                "XXL_JOB_ADMIN_ADDRESSES must contain at least one admin address."
-            )
+
+        if self.auto_register:
+            if not self.executor_app_name:
+                raise XXLJobConfigError(
+                    "XXL_JOB_EXECUTOR_APP_NAME must not be empty when "
+                    "XXL_JOB_AUTO_REGISTER is enabled."
+                )
+            if not self.admin_addresses:
+                raise XXLJobConfigError(
+                    "XXL_JOB_ADMIN_ADDRESSES must contain at least one admin "
+                    "address when XXL_JOB_AUTO_REGISTER is enabled."
+                )
+            if not self.executor_address:
+                raise XXLJobConfigError(
+                    "XXL_JOB_EXECUTOR_ADDRESS must not be empty when "
+                    "XXL_JOB_AUTO_REGISTER is enabled."
+                )
+
+        for address in self.admin_addresses:
+            _validate_http_url("XXL_JOB_ADMIN_ADDRESSES", address)
+        if self.executor_address:
+            _validate_http_url("XXL_JOB_EXECUTOR_ADDRESS", self.executor_address)
 
     @property
     def timeout(self) -> tuple:
@@ -166,6 +193,17 @@ def _as_positive_int(config: Mapping[str, Any], key: str) -> int:
     if value <= 0:
         raise XXLJobConfigError(f"{key} must be a positive integer.")
     return value
+
+
+def _validate_http_url(key: str, value: str) -> None:
+    # 仅校验方案，不做严格 URL 解析，兼容带路径/端口的 Admin 地址。
+    # Only validate the scheme, not a strict URL parse, to stay compatible with
+    # admin addresses that carry a path or port.
+    lowered = value.strip().lower()
+    if not (lowered.startswith("http://") or lowered.startswith("https://")):
+        raise XXLJobConfigError(
+            f"{key} must use the http or https scheme, got '{value}'."
+        )
 
 
 def _normalize_prefix(prefix: str) -> str:

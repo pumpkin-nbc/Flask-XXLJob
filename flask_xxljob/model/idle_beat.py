@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from .coerce import coerce_int
+
 
 @dataclass
 class IdleBeatRequest:
@@ -27,7 +29,7 @@ class IdleBeatRequest:
 
         Build the object from an official ``IdleBeatParam`` JSON mapping.
         """
-        return cls(job_id=int(data.get("jobId") or 0))
+        return cls(job_id=coerce_int(data.get("jobId"), "jobId"))
 
     def to_wire(self) -> dict:
         """

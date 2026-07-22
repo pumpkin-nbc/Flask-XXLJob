@@ -7,6 +7,41 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 并遵循 [语义化版本](https://semver.org/lang/zh-CN/spec/v2.0.0.html)。
 
+## [0.1.1] - 2026-07-22
+
+### 修复
+
+- 现在支持在 `init_app` 之前进行模块级处理函数注册（导入阶段使用 `@xxl_job.on_run` 装饰器），不再因缺少应用上下文而抛异常。
+- `_resolve_app` 改用 `flask.has_app_context()`，回调与注册辅助方法在应用上下文之外不再抛出难以理解的 `RuntimeError`。
+- 执行器接口始终返回 XXL-JOB 标准 JSON。空请求体、非 JSON 内容以及 JSON 数组/标量现在返回明确的 `code: 500` 失败，而不是被静默当作 `{}`。
+- 数字字段（`jobId`、`logId`、`logDateTime` 等）安全转换：缺失使用默认值，`0` 被保留，非数字值返回协议失败而不会崩溃。
+- 执行器路由上的错误 HTTP 方法（405）返回 XXL-JOB JSON，而不是 Werkzeug 的 HTML 错误页；其他应用路由保持 Flask 默认行为。
+- 任务结果回调在收到第一个有效的 Admin 业务响应后即停止，避免向多个 Admin 地址重复投递。
+
+### 变更
+
+- 重复注册处理函数现在抛出 `XXLJobError`，而不是静默覆盖之前的处理函数。
+- 处理函数返回除 `XXLJobResponse`（`/log` 还包括 `LogResponse`）以外的类型时，返回明确的 “unsupported response type” 失败。
+- 仅当启用 `XXL_JOB_AUTO_REGISTER` 时，配置校验才要求 Admin 地址、执行器名称与执行器地址，并校验 Admin/执行器地址使用 `http`/`https` 方案。
+- `callback`、`callback_success`、`callback_failure` 接受 `message=None`，并校验 `log_id`/`log_date_time` 为整数（拒绝布尔值）。原有的 `handle_msg` 关键字用法保持兼容。
+- 新增异常类型 `XXLJobConfigurationError`、`XXLJobRequestError`、`XXLJobProtocolError`、`XXLJobRegistryError`，以及带 `message`/`admin_address` 访问器的 `AdminCallResult` 别名。`XXLJobConfigError` 作为别名保留。
+
+### 文档
+
+- 更新中英文 README 与 `docs/` 文档，说明 init 前注册、重复注册行为、统一 JSON 错误响应、放宽的配置规则以及扩展后的结果/异常模型。
+
+### 测试
+
+- 新增针对注册模式、请求解析、处理函数返回类型、统一错误响应、配置校验、URL 拼接、回调校验以及多 Admin 故障转移语义的回归与协议测试。
+
+升级说明：这是一个向下兼容的补丁版本。使用以下命令升级：
+
+```bash
+pip install --upgrade Flask-XXLJob==0.1.1
+```
+
+唯一需要注意的行为变更是：重复注册同一处理函数现在会抛出 `XXLJobError`，而不再静默覆盖之前的处理函数。
+
 ## [0.1.0] - 2026-07-21
 
 ### 新增

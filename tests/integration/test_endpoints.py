@@ -88,7 +88,7 @@ def test_run_handler_exception():
 
     resp = app.test_client().post("/run", json={"jobId": 1})
     assert resp.json["code"] == 500
-    assert "callback error" in resp.json["msg"]
+    assert resp.json["msg"] == "XXL-JOB run callback execution failed"
 
 
 def test_run_missing_fields_defaults():

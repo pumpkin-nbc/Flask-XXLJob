@@ -40,4 +40,4 @@ app.config.update(
 
 ## 校验
 
-配置在 `init_app()` 时校验。类型错误或缺少必填项（启用时的 `XXL_JOB_EXECUTOR_APP_NAME` 以及至少一个 `XXL_JOB_ADMIN_ADDRESSES` 条目）会抛出 `XXLJobConfigError`。错误配置绝不会被静默忽略。
+配置在 `init_app()` 时校验。类型错误会抛出 `XXLJobConfigError`。`XXL_JOB_EXECUTOR_APP_NAME`、至少一个 `XXL_JOB_ADMIN_ADDRESSES` 条目以及 `XXL_JOB_EXECUTOR_ADDRESS` 仅在启用 `XXL_JOB_AUTO_REGISTER` 时才是必填项，因此仅做协议接入而不注册的部署可以省略它们。提供 Admin/执行器地址时必须使用 `http` 或 `https` 方案。错误配置绝不会被静默忽略。

@@ -50,6 +50,16 @@ with app.app_context():
 The callback client builds the official request (a single-element
 `HandleCallbackParam` array sent to `/api/callback`), carries the access token,
 applies connect and read timeouts, truncates `handleMsg` to the configured
-maximum length, tries multiple admin addresses in order, and returns an
-explicit result. It does not persist callbacks, retry indefinitely in the
-background, or create background threads.
+maximum length, and returns an explicit result. It does not persist callbacks,
+retry indefinitely in the background, or create background threads.
+
+`message` defaults to `None` (treated as an empty message). `log_id` and
+`log_date_time` must be integers; passing a boolean or non-integer raises
+`XXLJobRequestError`.
+
+When several admin addresses are configured, the callback stops at the first
+address that returns a valid business response (success or failure) to avoid
+delivering the same callback twice; it only fails over to the next address on a
+network error, a non-200 status, or invalid JSON. The returned `CallResult`
+(also exported as `AdminCallResult`) exposes `success`, `code`, `msg`/`message`
+and `address`/`admin_address`.

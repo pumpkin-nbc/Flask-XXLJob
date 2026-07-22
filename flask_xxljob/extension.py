@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import atexit
 import os
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
-from flask import Flask, current_app
+from flask import Flask, current_app, has_app_context
 
 from .callback.registry import (
     CallbackRegistry,
@@ -22,7 +22,7 @@ from .callback.registry import (
 from .client.admin_client import AdminClient
 from .client.callback_client import CallbackClient
 from .config import XXLJobConfig
-from .exceptions import XXLJobAlreadyInitializedError, XXLJobError
+from .exceptions import XXLJobAlreadyInitializedError, XXLJobError, XXLJobRequestError
 from .protocol.blueprint import build_blueprint
 from .registry.registry_service import RegistryService
 from .response.executor import FAIL_CODE, SUCCESS_CODE
@@ -65,6 +65,12 @@ class FlaskXXLJob:
         ``current_app`` is never accessed during construction.
         """
         self._app: Optional[Flask] = None
+        # 扩展级默认处理函数：在任何 app 初始化前（模块级装饰器）注册的函数暂存
+        # 于此，并在 ``init_app()`` 时注入到每个应用的注册表中。
+        # Extension-level default callbacks: callbacks registered before any app
+        # is initialized (module-level decorators) are buffered here and seeded
+        # into every application's registry during ``init_app()``.
+        self._deferred_callbacks = CallbackRegistry()
         if app is not None:
             self.init_app(app)
 
@@ -95,6 +101,10 @@ class FlaskXXLJob:
         config = XXLJobConfig.from_mapping(app.config)
 
         callback_registry = CallbackRegistry()
+        # 将模块级默认处理函数注入到本应用的注册表，支持在 init_app 之前注册。
+        # Seed this application's registry with module-level default callbacks,
+        # enabling registration before init_app.
+        callback_registry.seed_from(self._deferred_callbacks)
         admin_client = AdminClient(config)
         callback_client = CallbackClient(config)
         registry_service = RegistryService(config, admin_client)
@@ -111,6 +121,7 @@ class FlaskXXLJob:
         if config.enabled:
             blueprint = build_blueprint(_blueprint_name(app), config.route_prefix)
             app.register_blueprint(blueprint)
+            self._register_protocol_error_handlers(app, config.route_prefix)
 
         self._register_cli(app)
 
@@ -136,6 +147,38 @@ class FlaskXXLJob:
         if "xxljob" not in app.cli.commands:
             app.cli.add_command(xxljob_cli)
 
+    @staticmethod
+    def _register_protocol_error_handlers(app: Flask, route_prefix: str) -> None:
+        # 路由级错误（404/405）在进入 Blueprint 视图前抛出，Blueprint 的 errorhandler
+        # 无法捕获。这里在应用级注册处理器，但仅对执行器接口路径返回 XXL-JOB JSON，
+        # 其余路径保持 Flask 默认行为，避免影响宿主应用。
+        # Routing errors (404/405) are raised before the blueprint view runs, so
+        # a blueprint errorhandler cannot catch them. Register app-level handlers
+        # that return XXL-JOB JSON only for executor endpoint paths and preserve
+        # Flask's default behavior for every other path.
+        from flask import jsonify, request
+        from werkzeug.exceptions import HTTPException
+
+        from .response.executor import XXLJobResponse
+
+        prefix = route_prefix or ""
+        executor_paths = {
+            prefix + suffix
+            for suffix in ("/beat", "/idleBeat", "/run", "/kill", "/log")
+        }
+
+        def _handle(exc: HTTPException) -> Any:
+            if request.path in executor_paths:
+                return jsonify(
+                    XXLJobResponse.failure(
+                        "XXL-JOB request error: " + (exc.name or "error")
+                    ).to_dict()
+                )
+            return exc
+
+        app.register_error_handler(404, _handle)
+        app.register_error_handler(405, _handle)
+
     # ------------------------------------------------------------------
     # 请求处理函数注册 / Request-callback registration
     # ------------------------------------------------------------------
@@ -147,7 +190,7 @@ class FlaskXXLJob:
         Register the request callback for the XXL-JOB ``/run`` endpoint. Can be
         used as a method or a decorator.
         """
-        return self._registry().set_run(func)
+        return self._target_registry().set_run(func)
 
     def on_idle_beat(self, func: IdleBeatCallback) -> IdleBeatCallback:
         """
@@ -156,7 +199,7 @@ class FlaskXXLJob:
         Register the request callback for the XXL-JOB ``/idleBeat`` endpoint.
         Can be used as a method or a decorator.
         """
-        return self._registry().set_idle_beat(func)
+        return self._target_registry().set_idle_beat(func)
 
     def on_kill(self, func: KillCallback) -> KillCallback:
         """
@@ -165,7 +208,7 @@ class FlaskXXLJob:
         Register the request callback for the XXL-JOB ``/kill`` endpoint. Can
         be used as a method or a decorator.
         """
-        return self._registry().set_kill(func)
+        return self._target_registry().set_kill(func)
 
     def on_log(self, func: LogCallback) -> LogCallback:
         """
@@ -174,7 +217,7 @@ class FlaskXXLJob:
         Register the request callback for the XXL-JOB ``/log`` endpoint. Can be
         used as a method or a decorator.
         """
-        return self._registry().set_log(func)
+        return self._target_registry().set_log(func)
 
     # ------------------------------------------------------------------
     # 执行器注册 / Executor registration
@@ -205,31 +248,37 @@ class FlaskXXLJob:
         log_id: int,
         log_date_time: int,
         handle_code: int,
-        handle_msg: str = "",
+        handle_msg: Optional[str] = None,
         app: Optional[Flask] = None,
     ) -> "CallResult":
         """
         向 XXL-JOB Admin 发送任务最终执行结果回调。
 
-        在 Flask 应用上下文中可省略 ``app`` 参数。
+        在 Flask 应用上下文中可省略 ``app`` 参数。``handle_msg`` 为 ``None`` 时
+        按空信息处理。``log_id`` 与 ``log_date_time`` 必须为整数（不接受布尔值）。
 
         Send the final task-execution result callback to the XXL-JOB admin.
 
         The ``app`` argument may be omitted inside a Flask application context.
+        A ``None`` ``handle_msg`` is treated as an empty message. ``log_id`` and
+        ``log_date_time`` must be integers (booleans are rejected).
         """
+        _require_int("log_id", log_id)
+        _require_int("log_date_time", log_date_time)
+        _require_int("handle_code", handle_code)
         runtime = self._get_runtime(app)
         return runtime.callback_client.callback(
             log_id=log_id,
             log_date_time=log_date_time,
             handle_code=handle_code,
-            handle_msg=handle_msg,
+            handle_msg=handle_msg or "",
         )
 
     def callback_success(
         self,
         log_id: int,
         log_date_time: int,
-        message: str = "",
+        message: Optional[str] = None,
         app: Optional[Flask] = None,
     ) -> "CallResult":
         """
@@ -249,7 +298,7 @@ class FlaskXXLJob:
         self,
         log_id: int,
         log_date_time: int,
-        message: str = "",
+        message: Optional[str] = None,
         app: Optional[Flask] = None,
     ) -> "CallResult":
         """
@@ -282,7 +331,11 @@ class FlaskXXLJob:
     def _resolve_app(self, app: Optional[Flask]) -> Flask:
         if app is not None:
             return app
-        if current_app:  # 存在应用上下文 / an application context is active
+        # 使用 has_app_context() 而不是布尔判断 current_app，避免上下文外抛出
+        # 难以理解的 RuntimeError。
+        # Use has_app_context() rather than truth-testing current_app to avoid a
+        # confusing RuntimeError when there is no application context.
+        if has_app_context():
             return current_app._get_current_object()  # type: ignore[attr-defined]
         if self._app is not None:
             return self._app
@@ -291,8 +344,29 @@ class FlaskXXLJob:
             "application context."
         )
 
-    def _registry(self) -> CallbackRegistry:
-        return self._get_runtime().callback_registry
+    def _target_registry(self) -> CallbackRegistry:
+        # 处理函数注册目标解析：
+        # 1. 应用上下文内 -> 当前应用注册表；
+        # 2. 已初始化过应用 -> 最近一次初始化的应用注册表；
+        # 3. 尚未初始化 -> 扩展级默认注册表（延迟注入）。
+        # Resolve the registration target:
+        # 1. within an app context -> current application's registry;
+        # 2. an app was initialized -> the most recently initialized app's;
+        # 3. no app yet -> the extension-level deferred registry.
+        if has_app_context():
+            return self._get_runtime().callback_registry
+        if self._app is not None:
+            return self._get_runtime(self._app).callback_registry
+        return self._deferred_callbacks
+
+
+def _require_int(name: str, value: object) -> None:
+    # bool 是 int 的子类，但回调参数不接受布尔值。
+    # bool is a subclass of int, but callback arguments reject booleans.
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise XXLJobRequestError(
+            f"{name} must be an integer, got {type(value).__name__}"
+        )
 
 
 def _blueprint_name(app: Flask) -> str:
