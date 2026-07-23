@@ -132,8 +132,8 @@ flask --app "project:create_app" xxljob status
 ## 兼容性
 
 目标支持 `Flask >= 1.0` 与 `Python >= 3.8`。兼容性矩阵
-（Python 3.8-3.14 x Flask 1/2/3）已在 `tox.ini` 与
-`.github/workflows/ci.yml` 中配置。本版本已在 Python 3.12.13 与 Flask 3.1.3
+（Python 3.8-3.14 x Flask 1/2/3）已在 `.github/workflows/ci.yml` 中配置。
+本版本已在 Python 3.12.13 与 Flask 3.1.3
 上完成本地验证；其余组合已在 CI 中配置但未在本地执行。请在你自己的环境中
 运行测试后再声明特定组合可用。
 

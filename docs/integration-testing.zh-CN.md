@@ -53,6 +53,6 @@ $env:XXLJOB_EXECUTOR_ADDRESS = "http://127.0.0.1:5001"  # 可选
 - `pip check`、Ruff、mypy、双语文档检查、wheel/sdist 检查与干净环境 wheel
   安装冒烟测试通过。
 
-其余 Python/Flask 组合已在 CI（`.github/workflows/ci.yml`）与 `tox.ini` 中**配置**，
+其余 Python/Flask 组合已在 CI（`.github/workflows/ci.yml`）中**配置**，
 但**未在本地执行**。上述官方 XXL-JOB 2.4.1 集成测试因无可用的在线 Admin，本环境
 **未执行**；两项跳过测试即为这些选择性检查。

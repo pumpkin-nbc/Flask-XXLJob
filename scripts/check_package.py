@@ -90,7 +90,7 @@ def _check_sdist(path: Path, errors: List[str]) -> int:
         names = archive.getnames()
         _check_forbidden_paths(names, errors)
 
-        required_suffixes = ["/LICENSE", "/NOTICE", "/tox.ini", "/pyproject.toml"]
+        required_suffixes = ["/LICENSE", "/NOTICE", "/pyproject.toml"]
         for suffix in required_suffixes:
             if len(_find_suffix(names, suffix)) != 1:
                 errors.append(f"{path.name}: expected exactly one {suffix[1:]} file")

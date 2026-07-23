@@ -86,7 +86,6 @@ include = [
     "/NOTICE",
     "/pyproject.toml",
     "/MANIFEST.in",
-    "/tox.ini",
 ]
 
 [tool.pytest.ini_options]

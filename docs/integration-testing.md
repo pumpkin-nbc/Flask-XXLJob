@@ -61,7 +61,7 @@ Only the following was actually executed in this environment on 2026-07-23:
   and clean installed-wheel smoke tests passing.
 
 The remaining Python/Flask combinations are **configured in CI**
-(`.github/workflows/ci.yml`) and `tox.ini`, but were **not executed locally**.
+(`.github/workflows/ci.yml`), but were **not executed locally**.
 The official XXL-JOB 2.4.1 integration tests above were **not executed** here
 because no live admin was available; the two skipped tests are those opt-in
 checks.

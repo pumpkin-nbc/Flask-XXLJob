@@ -109,7 +109,7 @@ def test_host_custom_404_and_405_handlers_are_preserved():
     app = Flask("host_errors_" + str(id(ext)))
     app.config.update(BASE_CONFIG)
 
-    @app.post("/host-only-post")
+    @app.route("/host-only-post", methods=["POST"])
     def host_only_post():
         return "ok"
 

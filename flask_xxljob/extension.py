@@ -7,7 +7,7 @@ Flask-XXLJob main extension class.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional, cast
 
 from flask import Flask, current_app, has_app_context
 
@@ -559,7 +559,7 @@ class FlaskXXLJob:
         # Use has_app_context() rather than truth-testing current_app to avoid a
         # confusing RuntimeError when there is no application context.
         if has_app_context():
-            return current_app._get_current_object()  # type: ignore[attr-defined]
+            return cast(Flask, cast(Any, current_app)._get_current_object())
         return self._applications.resolve()
 
     def _target_registry(self) -> CallbackRegistry:
