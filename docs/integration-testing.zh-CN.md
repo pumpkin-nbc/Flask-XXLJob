@@ -40,7 +40,7 @@ $env:XXLJOB_EXECUTOR_ADDRESS = "http://127.0.0.1:5001"  # 可选
    及 `callback_many`；确认日志状态更新。
 4. **Token 开启与关闭**：验证正确 Token 通过、错误 Token 被拒绝，且 Admin 未配置
    Token 时无 Token 模式可用。
-5. **路由前缀**：设置 `XXL_JOB_ROUTE_PREFIX`，确认 Admin 可访问带前缀的接口。
+5. **路由前缀**：设置 `XXL_JOB_ROUTE_PREFIX`（`XXL_JOB_EXECUTOR_ADDRESS` 只填基础地址），确认 Admin 可访问带前缀的接口。
 6. **中文任务参数**：下发带中文 `executorParams` 的任务并确认解码正确。
 7. **多个 Admin 地址**：配置两个 Admin，确认注册与回调的故障转移。
 

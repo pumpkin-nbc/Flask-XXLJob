@@ -179,7 +179,7 @@ def create_app(config: Optional[Mapping[str, Any]] = None) -> Flask:
             "XXL_JOB_EXECUTOR_APP_NAME", "complete-flask-executor"
         ),
         XXL_JOB_EXECUTOR_ADDRESS=os.environ.get(
-            "XXL_JOB_EXECUTOR_ADDRESS", "http://127.0.0.1:5001/xxl-job"
+            "XXL_JOB_EXECUTOR_ADDRESS", "http://127.0.0.1:5001"
         ),
         XXL_JOB_ROUTE_PREFIX=route_prefix,
         XXL_JOB_AUTO_REGISTER=_env_bool("XXL_JOB_AUTO_REGISTER", False),

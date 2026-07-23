@@ -7,6 +7,14 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 并遵循 [语义化版本](https://semver.org/lang/zh-CN/spec/v2.0.0.html)。
 
+## [0.3.2] - 2026-07-23
+
+### 变更
+
+- `XXL_JOB_EXECUTOR_ADDRESS` 现在只需填写服务基础地址。加载配置时会自动附加
+  `XXL_JOB_ROUTE_PREFIX`，使 Admin 注册地址与执行器接口路径一致。若地址路径已以
+  该前缀结尾，则保持不变。
+
 ## [0.3.1] - 2026-07-23
 
 ### 变更

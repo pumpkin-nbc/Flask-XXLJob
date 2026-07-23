@@ -26,6 +26,26 @@ XXL-JOB -> Flask (Flask-XXLJob) -> your on_run submits the task
 
 任务路由、阻塞策略、超时与重试仍由 XXL-JOB Admin 管理。Flask-XXLJob 只负责协议中转；你的任务服务始终完全掌控执行过程。
 
+## 从 0.3.1 升级到 0.3.2
+
+`0.3.2` 会在加载配置时自动把 `XXL_JOB_ROUTE_PREFIX` 附加到
+`XXL_JOB_EXECUTOR_ADDRESS`。执行器地址只需填写服务基础地址：
+
+```python
+app.config.update(
+    XXL_JOB_EXECUTOR_ADDRESS="http://127.0.0.1:5001",
+    XXL_JOB_ROUTE_PREFIX="/xxl-job",
+)
+# 注册地址变为 http://127.0.0.1:5001/xxl-job
+```
+
+若旧配置的地址路径已以同一前缀结尾，则保持不变（不会重复附加）。后续请优先使用
+基础地址写法。
+
+```bash
+pip install --upgrade flask-xxljob==0.3.2
+```
+
 ## 从 0.3.0 升级到 0.3.1
 
 `0.3.1` 只调整发行元数据与发布配置。发行包名称改为规范化的小写形式，公开 Python

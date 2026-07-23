@@ -18,6 +18,7 @@ from typing import Any, List, Mapping
 from urllib.parse import urlsplit
 
 from .exceptions import XXLJobConfigError
+from .utils.url_utils import join_url
 
 # 默认配置值 / Default configuration values.
 DEFAULTS: dict = {
@@ -114,10 +115,11 @@ class XXLJobConfig:
         raw_access_token = _as_str(merged, "XXL_JOB_ACCESS_TOKEN")
         access_token = raw_access_token if raw_access_token.strip() else ""
         executor_app_name = _as_str(merged, "XXL_JOB_EXECUTOR_APP_NAME")
-        executor_address = _normalize_address(
-            _as_str(merged, "XXL_JOB_EXECUTOR_ADDRESS")
+        route_prefix = _normalize_prefix(_as_str(merged, "XXL_JOB_ROUTE_PREFIX"))
+        executor_address = _apply_route_prefix(
+            _normalize_address(_as_str(merged, "XXL_JOB_EXECUTOR_ADDRESS")),
+            route_prefix,
         )
-        route_prefix = _as_str(merged, "XXL_JOB_ROUTE_PREFIX")
 
         admin_addresses = [
             _normalize_address(item)
@@ -173,7 +175,7 @@ class XXLJobConfig:
             access_token=access_token,
             executor_app_name=executor_app_name,
             executor_address=executor_address,
-            route_prefix=_normalize_prefix(route_prefix),
+            route_prefix=route_prefix,
             auto_register=auto_register,
             registry_interval=registry_interval,
             http_connect_timeout=http_connect_timeout,
@@ -219,7 +221,8 @@ class XXLJobConfig:
           only when auto-registration is enabled, so scenarios that provide the
           protocol endpoints without registering still work.
         - When provided, admin/executor addresses must use the ``http``/``https``
-          scheme.
+          scheme. ``XXL_JOB_ROUTE_PREFIX`` is appended to the executor address
+          automatically when the configuration is loaded.
         """
         if not self.enabled:
             return
@@ -407,6 +410,38 @@ def _normalize_prefix(prefix: str) -> str:
     if not normalized:
         return ""
     return "/" + normalized
+
+
+def _apply_route_prefix(address: str, route_prefix: str) -> str:
+    """
+    将 ``XXL_JOB_ROUTE_PREFIX`` 自动附加到 ``XXL_JOB_EXECUTOR_ADDRESS``。
+
+    ``XXL_JOB_EXECUTOR_ADDRESS`` 只需填写服务基础地址（协议/主机/端口，可含
+    反向代理上下文路径）；路由前缀会在加载配置时自动拼接，供 Admin 回调执行器
+    接口。若地址路径已以该前缀结尾，则保持不变（兼容旧配置中已手写前缀的情况）。
+
+    Append ``XXL_JOB_ROUTE_PREFIX`` onto ``XXL_JOB_EXECUTOR_ADDRESS``.
+
+    ``XXL_JOB_EXECUTOR_ADDRESS`` should be the service base URL (scheme/host/port,
+    optional reverse-proxy context path). The route prefix is appended at load
+    time so Admin can reach the executor endpoints. If the address path already
+    ends with the prefix, it is left unchanged (compatible with older configs
+    that included the prefix manually).
+    """
+    if not address or not route_prefix:
+        return address
+    path = (urlsplit(address).path or "").rstrip("/")
+    path_segments = [segment for segment in path.split("/") if segment]
+    prefix_segments = [
+        segment for segment in route_prefix.strip("/").split("/") if segment
+    ]
+    if (
+        prefix_segments
+        and len(path_segments) >= len(prefix_segments)
+        and path_segments[-len(prefix_segments) :] == prefix_segments
+    ):
+        return address
+    return join_url(address, route_prefix)
 
 
 def _validate_log_encoding(encoding: str) -> None:

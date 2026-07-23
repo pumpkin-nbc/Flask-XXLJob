@@ -130,6 +130,47 @@ def test_executor_address_trailing_slash_normalized():
     assert config.executor_address == "http://127.0.0.1:5001"
 
 
+def test_route_prefix_appended_to_executor_address():
+    config = XXLJobConfig.from_mapping(
+        base_mapping(
+            XXL_JOB_EXECUTOR_ADDRESS="http://127.0.0.1:5001",
+            XXL_JOB_ROUTE_PREFIX="/xxl-job",
+        )
+    )
+    assert config.route_prefix == "/xxl-job"
+    assert config.executor_address == "http://127.0.0.1:5001/xxl-job"
+
+
+def test_route_prefix_appended_after_existing_context_path():
+    config = XXLJobConfig.from_mapping(
+        base_mapping(
+            XXL_JOB_EXECUTOR_ADDRESS="http://127.0.0.1:5001/myapp/",
+            XXL_JOB_ROUTE_PREFIX="xxl-job",
+        )
+    )
+    assert config.executor_address == "http://127.0.0.1:5001/myapp/xxl-job"
+
+
+def test_route_prefix_not_double_appended_when_already_present():
+    config = XXLJobConfig.from_mapping(
+        base_mapping(
+            XXL_JOB_EXECUTOR_ADDRESS="http://127.0.0.1:5001/xxl-job/",
+            XXL_JOB_ROUTE_PREFIX="/xxl-job",
+        )
+    )
+    assert config.executor_address == "http://127.0.0.1:5001/xxl-job"
+
+
+def test_empty_route_prefix_keeps_executor_address():
+    config = XXLJobConfig.from_mapping(
+        base_mapping(
+            XXL_JOB_EXECUTOR_ADDRESS="http://127.0.0.1:5001/api",
+            XXL_JOB_ROUTE_PREFIX="",
+        )
+    )
+    assert config.executor_address == "http://127.0.0.1:5001/api"
+
+
 def test_https_admin_address_supported():
     config = XXLJobConfig.from_mapping(
         base_mapping(XXL_JOB_ADMIN_ADDRESSES=["https://admin:8443/xxl-job-admin"])

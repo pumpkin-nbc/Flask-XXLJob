@@ -14,8 +14,8 @@ the constructor.
 | `XXL_JOB_ADMIN_ADDRESSES` | `[]` | List of XXL-JOB admin base URLs. |
 | `XXL_JOB_ACCESS_TOKEN` | `""` | Access token; empty means no-token mode. |
 | `XXL_JOB_EXECUTOR_APP_NAME` | `"flask-xxljob-executor"` | Executor application name. |
-| `XXL_JOB_EXECUTOR_ADDRESS` | `""` | Address the admin uses to reach this executor. |
-| `XXL_JOB_ROUTE_PREFIX` | `""` | URL prefix for the executor endpoints. |
+| `XXL_JOB_EXECUTOR_ADDRESS` | `""` | Executor service base URL (scheme/host/port). `XXL_JOB_ROUTE_PREFIX` is appended automatically. |
+| `XXL_JOB_ROUTE_PREFIX` | `""` | URL prefix for the executor endpoints; also appended to `XXL_JOB_EXECUTOR_ADDRESS`. |
 | `XXL_JOB_AUTO_REGISTER` | `True` | Start automatic registration renewal. |
 | `XXL_JOB_REGISTRY_INTERVAL` | `30` | Registration renewal interval (seconds). |
 | `XXL_JOB_HTTP_CONNECT_TIMEOUT` | `3` | HTTP connect timeout (seconds). |
@@ -75,10 +75,13 @@ not register can omit them. When provided, admin and executor addresses must use
 the `http` or `https` scheme and contain a host and valid port; context paths are
 supported. Addresses are normalized on load (surrounding whitespace and
 redundant trailing slashes are removed while context paths and order are
-preserved). A whitespace-only access token is normalized to empty (no-token
-mode), while a non-empty token is preserved. Validation messages name the
-offending key, its received type and the expected format. Bad configuration is
-never silently ignored.
+preserved). When set, `XXL_JOB_ROUTE_PREFIX` is appended to
+`XXL_JOB_EXECUTOR_ADDRESS` automatically; do not embed the route prefix in the
+executor address unless you rely on the idempotent skip for legacy values that
+already end with that prefix. A whitespace-only access token is normalized to
+empty (no-token mode), while a non-empty token is preserved. Validation messages
+name the offending key, its received type and the expected format. Bad
+configuration is never silently ignored.
 
 Logging booleans are strict booleans. Levels, encodings, rotation values and
 formats are validated during initialization; the format is
