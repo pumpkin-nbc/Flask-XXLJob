@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: [develop, master]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install --upgrade pip
+      - run: pip install ruff "mypy>=1.8,<1.15" types-requests
+      - run: ruff check .
+      - run: mypy flask_xxljob
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
+        flask-version: ["1", "2", "3"]
+        exclude:
+          # Flask 1.x does not support Python 3.10+.
+          - python-version: "3.10"
+            flask-version: "1"
+          - python-version: "3.11"
+            flask-version: "1"
+          - python-version: "3.12"
+            flask-version: "1"
+          - python-version: "3.13"
+            flask-version: "1"
+          - python-version: "3.14"
+            flask-version: "1"
+          # Flask 2.x is not tested on Python 3.13+.
+          - python-version: "3.13"
+            flask-version: "2"
+          - python-version: "3.14"
+            flask-version: "2"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install --upgrade pip
+      - name: Install Flask ${{ matrix.flask-version }}.x
+        run: |
+          case "${{ matrix.flask-version }}" in
+            1) pip install "Flask>=1.0,<2.0" "Werkzeug<2.0" "Jinja2<3.0" "itsdangerous<2.0" "click<8.0" "MarkupSafe<2.1" ;;
+            2) pip install "Flask>=2.0,<3.0" ;;
+            3) pip install "Flask>=3.0,<4.0" ;;
+          esac
+      - run: pip install . pytest pytest-mock
+      - run: pytest -q
+
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip
+      - run: pip install "Flask>=3.0,<4.0" . pytest pytest-cov pytest-mock
+      - run: pytest -q --cov=flask_xxljob --cov-report=term-missing --cov-fail-under=90
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip
+      - run: pip install build twine
+      - run: python scripts/check_docs.py
+      - run: python -m build
+      - run: python -m twine check dist/*
+      - run: python scripts/check_package.py
+      - run: python -m pip install --force-reinstall dist/*.whl
+      - name: Smoke-test installed wheel
+        run: |
+          cd "${RUNNER_TEMP}"
+          python -c "import flask_xxljob; from importlib.metadata import version; assert flask_xxljob.__version__ == version('Flask-XXLJob') == '0.3.0'"
+          flask-xxljob --version

@@ -1,0 +1,114 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "Flask-XXLJob"
+dynamic = ["version"]
+description = "A Flask extension that implements the XXL-JOB 2.4.1 executor protocol."
+readme = "README.md"
+requires-python = ">=3.8"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+keywords = ["flask", "xxl-job", "xxljob", "scheduler", "executor"]
+authors = [
+    { name = "Pumpkin" },
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: Flask",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
+dependencies = [
+    "Flask>=1.0",
+    "requests>=2.25",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "pytest-cov",
+    "pytest-mock",
+]
+dev = [
+    "build",
+    "twine",
+    "ruff",
+    "mypy>=1.8,<1.15",
+    "types-requests",
+    "pytest",
+    "pytest-cov",
+    "pytest-mock",
+]
+
+[project.urls]
+Homepage = "https://github.com/pumpkin-nbc/Flask-XXLJob"
+Documentation = "https://github.com/pumpkin-nbc/Flask-XXLJob/tree/master/docs"
+Source = "https://github.com/pumpkin-nbc/Flask-XXLJob"
+Changelog = "https://github.com/pumpkin-nbc/Flask-XXLJob/blob/master/CHANGELOG.md"
+
+[project.scripts]
+flask-xxljob = "flask_xxljob.cli.commands:main"
+
+[tool.hatch.version]
+path = "flask_xxljob/_version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["flask_xxljob"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/flask_xxljob",
+    "/tests",
+    "/docs",
+    "/examples",
+    "/scripts",
+    "/README.md",
+    "/README.zh-CN.md",
+    "/CHANGELOG.md",
+    "/CHANGELOG.zh-CN.md",
+    "/CONTRIBUTING.md",
+    "/CONTRIBUTING.zh-CN.md",
+    "/SECURITY.md",
+    "/SECURITY.zh-CN.md",
+    "/LICENSE",
+    "/NOTICE",
+    "/pyproject.toml",
+    "/MANIFEST.in",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+target-version = "py38"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "B"]
+
+[tool.mypy]
+python_version = "3.8"
+warn_unused_ignores = true
+disallow_untyped_defs = true
+ignore_missing_imports = true
+files = ["flask_xxljob"]
+
+[[tool.mypy.overrides]]
+module = [
+    "click",
+    "click.*",
+]
+follow_imports = "skip"
