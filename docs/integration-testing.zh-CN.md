@@ -46,10 +46,13 @@ $env:XXLJOB_EXECUTOR_ADDRESS = "http://127.0.0.1:5001"  # 可选
 
 ## 本地已验证矩阵（如实报告）
 
-本环境中实际执行的仅有：
+本环境在 2026-07-23 实际执行的仅有：
 
-- Python 3.8（项目 `.venv`）与已安装的 Flask 版本：完整单元与集成套件通过。
+- 在干净项目 `.venv` 中使用 Python 3.12.13 与 Flask 3.1.3：371 项离线测试通过，
+  2 项真实 Admin 测试按环境跳过，覆盖率 93.46%。
+- `pip check`、Ruff、mypy、双语文档检查、wheel/sdist 检查与干净环境 wheel
+  安装冒烟测试通过。
 
 其余 Python/Flask 组合已在 CI（`.github/workflows/ci.yml`）与 `tox.ini` 中**配置**，
 但**未在本地执行**。上述官方 XXL-JOB 2.4.1 集成测试因无可用的在线 Admin，本环境
-**未执行**。
+**未执行**；两项跳过测试即为这些选择性检查。

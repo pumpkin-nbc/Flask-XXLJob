@@ -131,7 +131,18 @@ def test_file_and_console_each_receive_one_record(tmp_path, capsys):
     assert len(_managed_handlers(app)) == 2
 
 
-def test_console_colors_every_standard_level_but_file_stays_plain(tmp_path, capsys):
+class _TTYBuffer(io.StringIO):
+    def isatty(self):
+        return True
+
+
+def test_console_colors_every_standard_level_but_file_stays_plain(
+    tmp_path, monkeypatch
+):
+    console = _TTYBuffer()
+    monkeypatch.setattr(sys, "stderr", console)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("TERM", "xterm-256color")
     app, _ = make_app(
         XXL_JOB_LOG_ENABLED=True,
         XXL_JOB_LOG_FILE_ENABLED=True,
@@ -151,15 +162,65 @@ def test_console_colors_every_standard_level_but_file_stays_plain(tmp_path, caps
     for level in colors:
         _log(app, f"color-{logging.getLevelName(level)}", level)
 
-    console = capsys.readouterr().err
+    console_output = console.getvalue()
     file_content = Path(_runtime(app).log_manager.log_file).read_text(
         encoding="utf-8"
     )
     for level, color in colors.items():
         name = logging.getLevelName(level)
-        assert f"{color}{name}|color-{name}\033[0m" in console
+        assert f"{color}{name}|color-{name}\033[0m" in console_output
         assert f"{name}|color-{name}" in file_content
     assert "\033[" not in file_content
+    _runtime(app).close()
+
+
+def test_non_tty_console_stays_plain(tmp_path, capsys):
+    app, _ = make_app(
+        XXL_JOB_LOG_ENABLED=True,
+        XXL_JOB_LOG_FILE_ENABLED=False,
+        XXL_JOB_LOG_CONSOLE_ENABLED=True,
+        XXL_JOB_LOG_PATH=str(tmp_path),
+        XXL_JOB_LOG_FORMAT="%(levelname)s|%(message)s",
+    )
+
+    _log(app, "redirected-record")
+
+    output = capsys.readouterr().err
+    assert "INFO|redirected-record" in output
+    assert "\033[" not in output
+
+
+@pytest.mark.parametrize(
+    ("environment", "value"),
+    [
+        ("NO_COLOR", ""),
+        ("NO_COLOR", "1"),
+        ("TERM", "dumb"),
+        ("TERM", "DUMB"),
+    ],
+)
+def test_environment_can_disable_tty_colors(
+    tmp_path, monkeypatch, environment, value
+):
+    console = _TTYBuffer()
+    monkeypatch.setattr(sys, "stderr", console)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("TERM", "xterm-256color")
+    monkeypatch.setenv(environment, value)
+    app, _ = make_app(
+        XXL_JOB_LOG_ENABLED=True,
+        XXL_JOB_LOG_FILE_ENABLED=False,
+        XXL_JOB_LOG_CONSOLE_ENABLED=True,
+        XXL_JOB_LOG_PATH=str(tmp_path),
+        XXL_JOB_LOG_FORMAT="%(levelname)s|%(message)s",
+    )
+
+    _log(app, "plain-tty-record")
+
+    output = console.getvalue()
+    assert "INFO|plain-tty-record" in output
+    assert "\033[" not in output
+    _runtime(app).close()
 
 
 def test_no_managed_targets_preserves_host_logger_configuration(tmp_path):

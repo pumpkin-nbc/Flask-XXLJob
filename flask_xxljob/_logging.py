@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import itertools
 import logging
+import os
 import re
 import threading
 from logging.handlers import RotatingFileHandler
@@ -72,14 +73,41 @@ class SensitiveDataFilter(logging.Filter):
 
 
 class LevelColorFormatter(logging.Formatter):
-    """Color a complete console record according to its standard level."""
+    """Color a complete console record when its output stream is interactive."""
+
+    def __init__(
+        self,
+        fmt: Optional[str] = None,
+        datefmt: Optional[str] = None,
+        *,
+        use_color: bool,
+    ) -> None:
+        super().__init__(fmt, datefmt)
+        self._use_color = use_color
 
     def format(self, record: logging.LogRecord) -> str:
         rendered = super().format(record)
+        if not self._use_color:
+            return rendered
         color = _LEVEL_COLORS.get(record.levelname)
         if color is None:
             return rendered
         return f"{color}{rendered}{_COLOR_RESET}"
+
+
+def _stream_supports_color(stream: object) -> bool:
+    """Return whether ANSI color is safe for the configured console stream."""
+    if "NO_COLOR" in os.environ:
+        return False
+    if os.environ.get("TERM", "").strip().lower() == "dumb":
+        return False
+    isatty = getattr(stream, "isatty", None)
+    if not callable(isatty):
+        return False
+    try:
+        return bool(isatty())
+    except (OSError, ValueError):
+        return False
 
 
 class XXLJobLogManager:
@@ -112,10 +140,6 @@ class XXLJobLogManager:
             self._config.log_format,
             self._config.log_date_format or None,
         )
-        console_formatter = LevelColorFormatter(
-            self._config.log_format,
-            self._config.log_date_format or None,
-        )
         level = getattr(logging, self._config.log_level)
         created: List[logging.Handler] = []
         try:
@@ -137,6 +161,11 @@ class XXLJobLogManager:
 
             if self._config.log_console_enabled:
                 console_handler = logging.StreamHandler()
+                console_formatter = LevelColorFormatter(
+                    self._config.log_format,
+                    self._config.log_date_format or None,
+                    use_color=_stream_supports_color(console_handler.stream),
+                )
                 self._prepare_handler(
                     console_handler, "console", level, console_formatter
                 )

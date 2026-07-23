@@ -51,13 +51,21 @@ def test_register_and_remove_against_admin():
     app, ext = _make_extension()
     register = ext.register_executor(app)
     assert register.success is True, register.message
-    remove = ext.remove_executor(app)
+    try:
+        assert ext.get_status(app).registered is True
+    finally:
+        remove = ext.remove_executor(app)
     assert remove.success is True, remove.message
 
 
 def test_status_reflects_registration():
     app, ext = _make_extension()
-    ext.register_executor(app)
-    status = ext.get_status(app)
-    assert status.registered is True
-    assert status.last_registry_success is True
+    register = ext.register_executor(app)
+    assert register.success is True, register.message
+    try:
+        status = ext.get_status(app)
+        assert status.registered is True
+        assert status.last_registry_success is True
+    finally:
+        remove = ext.remove_executor(app)
+    assert remove.success is True, remove.message

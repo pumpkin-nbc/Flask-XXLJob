@@ -30,11 +30,15 @@ FORBIDDEN_PATH_FRAGMENTS = [
 ]
 
 EXPECTED_REPOSITORY = "https://github.com/pumpkin-nbc/Flask-XXLJob"
+EXPECTED_DOCUMENTATION = f"{EXPECTED_REPOSITORY}/tree/master/docs"
+EXPECTED_CHANGELOG = f"{EXPECTED_REPOSITORY}/blob/master/CHANGELOG.md"
 EXPECTED_METADATA_LINES = [
     "Author: Pumpkin",
     "License-Expression: Apache-2.0",
     f"Project-URL: Homepage, {EXPECTED_REPOSITORY}",
+    f"Project-URL: Documentation, {EXPECTED_DOCUMENTATION}",
     f"Project-URL: Source, {EXPECTED_REPOSITORY}",
+    f"Project-URL: Changelog, {EXPECTED_CHANGELOG}",
 ]
 
 

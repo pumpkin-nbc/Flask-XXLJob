@@ -7,7 +7,7 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 并遵循 [语义化版本](https://semver.org/lang/zh-CN/spec/v2.0.0.html)。
 
-## [0.3.0] - 2026-07-22
+## [0.3.0] - 2026-07-23
 
 ### 新增
 
@@ -16,8 +16,9 @@
 - 开启托管日志时默认启用控制台日志，并使用一个控制台 Handler 同时输出正常与异常
   记录；新增共用等级与格式校验、敏感信息过滤、生命周期清理，以及
   `XXLJobStatus` 和 `xxljob status` 中的日志状态字段。
-- 托管控制台记录现按等级着色：`DEBUG` 蓝色、`INFO` 绿色、`WARNING` 黄色、
-  `ERROR` 红色、`CRITICAL` 加粗红色；文件日志不包含 ANSI 转义码。
+- 托管控制台记录在交互式终端中按等级着色：`DEBUG` 蓝色、`INFO` 绿色、
+  `WARNING` 黄色、`ERROR` 红色、`CRITICAL` 加粗红色；重定向输出、
+  `NO_COLOR`、`TERM=dumb` 与文件日志均不包含 ANSI 转义码。
 
 ### 变更
 

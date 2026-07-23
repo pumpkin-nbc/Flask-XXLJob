@@ -131,7 +131,11 @@ flask --app "project:create_app" xxljob status
 
 ## 兼容性
 
-目标支持 `Flask >= 1.0` 与 `Python >= 3.8`。兼容性矩阵（Python 3.8-3.13 x Flask 1/2/3）已在 `tox.ini` 与 `.github/workflows/ci.yml` 中配置。本版本已在 Python 3.12 与 Flask 3.0.3 上完成本地验证；其余组合已在 CI 中配置但未在本地执行。请在你自己的环境中运行测试后再声明特定组合可用。
+目标支持 `Flask >= 1.0` 与 `Python >= 3.8`。兼容性矩阵
+（Python 3.8-3.14 x Flask 1/2/3）已在 `tox.ini` 与
+`.github/workflows/ci.yml` 中配置。本版本已在 Python 3.12.13 与 Flask 3.1.3
+上完成本地验证；其余组合已在 CI 中配置但未在本地执行。请在你自己的环境中
+运行测试后再声明特定组合可用。
 
 当同一个 `FlaskXXLJob` 实例初始化了多个 Flask 应用时，请在应用上下文之外调用回调、注册、状态与生命周期辅助方法时显式传入 `app=`。只有恰好初始化了一个应用时才可省略；在初始化前注册的 `on_*` 装饰器仍会作为默认处理函数注入其后初始化的每个应用。
 

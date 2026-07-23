@@ -26,6 +26,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Typing :: Typed",
 ]
@@ -44,7 +45,7 @@ dev = [
     "build",
     "twine",
     "ruff",
-    "mypy",
+    "mypy>=1.8,<1.15",
     "types-requests",
     "pytest",
     "pytest-cov",
@@ -53,9 +54,9 @@ dev = [
 
 [project.urls]
 Homepage = "https://github.com/pumpkin-nbc/Flask-XXLJob"
-Documentation = "https://github.com/pumpkin-nbc/Flask-XXLJob/tree/main/docs"
+Documentation = "https://github.com/pumpkin-nbc/Flask-XXLJob/tree/master/docs"
 Source = "https://github.com/pumpkin-nbc/Flask-XXLJob"
-Changelog = "https://github.com/pumpkin-nbc/Flask-XXLJob/blob/main/CHANGELOG.md"
+Changelog = "https://github.com/pumpkin-nbc/Flask-XXLJob/blob/master/CHANGELOG.md"
 
 [project.scripts]
 flask-xxljob = "flask_xxljob.cli.commands:main"
@@ -105,3 +106,10 @@ warn_unused_ignores = true
 disallow_untyped_defs = true
 ignore_missing_imports = true
 files = ["flask_xxljob"]
+
+[[tool.mypy.overrides]]
+module = [
+    "click",
+    "click.*",
+]
+follow_imports = "skip"

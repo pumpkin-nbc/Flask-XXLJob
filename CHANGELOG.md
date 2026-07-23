@@ -7,7 +7,7 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.3.0] - 2026-07-22
+## [0.3.0] - 2026-07-23
 
 ### Added
 
@@ -18,8 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and one console handler emits both normal and error records. Added shared
   level and format validation, sensitive-data filtering, lifecycle cleanup,
   and logging fields in `XXLJobStatus` and `xxljob status`.
-- Managed console records are colorized by level: blue `DEBUG`, green `INFO`,
-  yellow `WARNING`, red `ERROR`, and bold red `CRITICAL`. File logs remain
+- Managed console records are colorized on interactive terminals by level:
+  blue `DEBUG`, green `INFO`, yellow `WARNING`, red `ERROR`, and bold red
+  `CRITICAL`. Redirected output, `NO_COLOR`, `TERM=dumb`, and file logs remain
   free of ANSI escape sequences.
 
 ### Changed

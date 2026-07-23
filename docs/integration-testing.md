@@ -53,12 +53,15 @@ compatibility:
 
 ## Locally verified matrix (honest report)
 
-Only the following was actually executed in this environment:
+Only the following was actually executed in this environment on 2026-07-23:
 
-- Python 3.8 (project `.venv`) with the installed Flask version: full unit and
-  integration suite passing.
+- Python 3.12.13 with Flask 3.1.3 in a clean project `.venv`: 371 offline tests
+  passing, 2 live-Admin tests skipped by environment, and 93.46% coverage.
+- `pip check`, Ruff, mypy, bilingual documentation checks, wheel/sdist checks,
+  and clean installed-wheel smoke tests passing.
 
 The remaining Python/Flask combinations are **configured in CI**
 (`.github/workflows/ci.yml`) and `tox.ini`, but were **not executed locally**.
 The official XXL-JOB 2.4.1 integration tests above were **not executed** here
-because no live admin was available.
+because no live admin was available; the two skipped tests are those opt-in
+checks.
