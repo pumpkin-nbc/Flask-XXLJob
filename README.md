@@ -26,7 +26,7 @@ Flask-XXLJob never executes business tasks. It does not create thread pools, pro
 ## Installation
 
 ```bash
-pip install Flask-XXLJob
+pip install flask-xxljob
 ```
 
 ## Five-minute quick start

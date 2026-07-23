@@ -15,8 +15,8 @@
 
 ```text
 dist/
-  flask_xxljob-0.3.0-py3-none-any.whl
-  flask_xxljob-0.3.0.tar.gz
+  flask_xxljob-0.3.1-py3-none-any.whl
+  flask_xxljob-0.3.1.tar.gz
 ```
 
 ## 检查
@@ -24,13 +24,14 @@ dist/
 ```bash
 .venv\Scripts\python.exe scripts\check_docs.py
 .venv\Scripts\python.exe scripts\check_package.py
-.venv\Scripts\python.exe -m twine check dist\flask_xxljob-0.3.0-py3-none-any.whl dist\flask_xxljob-0.3.0.tar.gz
+.venv\Scripts\python.exe -m twine check dist\flask_xxljob-0.3.1-py3-none-any.whl dist\flask_xxljob-0.3.1.tar.gz
 ```
 
 ## 配置 Trusted Publishing
 
 在 PyPI 与 TestPyPI 创建 Pending Trusted Publisher：
 
+- Project：`flask-xxljob`
 - Owner：`pumpkin-nbc`
 - Repository：`Flask-XXLJob`
 - Workflow：`release.yml`
@@ -49,8 +50,8 @@ dist/
 
 ```bash
 python -m pip install --index-url https://pypi.org/simple Flask requests
-python -m pip install --index-url https://test.pypi.org/simple --no-deps Flask-XXLJob==0.3.0
-python -c "import flask_xxljob; assert flask_xxljob.__version__ == '0.3.0'"
+python -m pip install --index-url https://test.pypi.org/simple --no-deps flask-xxljob==0.3.1
+python -c "import flask_xxljob; assert flask_xxljob.__version__ == '0.3.1'"
 flask-xxljob --version
 ```
 
@@ -59,11 +60,11 @@ flask-xxljob --version
 等待 `develop` 与 `master` 的完整 CI 矩阵通过后，从属于 `master` 的提交创建发布 Tag：
 
 ```bash
-git tag -a v0.3.0 -m "Release 0.3.0"
-git push origin v0.3.0
+git tag -a v0.3.1 -m "Release 0.3.1"
+git push origin v0.3.1
 ```
 
-Tag 会触发同一个 `Release` 工作流。工作流会校验 `v0.3.0`、
+Tag 会触发同一个 `Release` 工作流。工作流会校验 `v0.3.1`、
 `flask_xxljob/_version.py` 和两份 Changelog 一致，并确认 Tag 提交属于 `master`；
 随后由 `pypi` Environment 的人工审批控制最终 Trusted Publishing 步骤。
 
@@ -75,5 +76,5 @@ Tag 会触发同一个 `Release` 工作流。工作流会校验 `v0.3.0`、
 ```bash
 .venv\Scripts\python.exe scripts\check_docs.py
 .venv\Scripts\python.exe scripts\check_package.py
-.venv\Scripts\python.exe -m twine check dist\flask_xxljob-0.3.0-py3-none-any.whl dist\flask_xxljob-0.3.0.tar.gz
+.venv\Scripts\python.exe -m twine check dist\flask_xxljob-0.3.1-py3-none-any.whl dist\flask_xxljob-0.3.1.tar.gz
 ```

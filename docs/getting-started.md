@@ -21,7 +21,7 @@ Python 3.8 or newer is required:
 
 ```bash
 python --version
-python -m pip install Flask-XXLJob
+python -m pip install flask-xxljob
 ```
 
 For a new project, using a virtual environment is recommended:
@@ -30,7 +30,7 @@ For a new project, using a virtual environment is recommended:
 python -m venv .venv
 # Windows: .venv\Scripts\activate
 # macOS/Linux: source .venv/bin/activate
-python -m pip install Flask-XXLJob
+python -m pip install flask-xxljob
 ```
 
 The repository already contains a copy-and-run file at

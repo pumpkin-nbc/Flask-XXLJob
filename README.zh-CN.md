@@ -26,7 +26,7 @@ Flask-XXLJob 从不执行业务任务。它不创建线程池、进程池、任�
 ## 安装
 
 ```bash
-pip install Flask-XXLJob
+pip install flask-xxljob
 ```
 
 ## 五分钟快速开始

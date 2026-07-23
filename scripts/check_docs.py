@@ -145,8 +145,8 @@ def main() -> int:
         )
 
     # 7 & 8: 包名与导入名统一 / package and import name consistency.
-    if _pyproject_name() != "Flask-XXLJob":
-        errors.append("pyproject name must be 'Flask-XXLJob'")
+    if _pyproject_name() != "flask-xxljob":
+        errors.append("pyproject name must be 'flask-xxljob'")
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     if "flask_xxljob" not in readme:
         errors.append("README.md must reference the import package 'flask_xxljob'")

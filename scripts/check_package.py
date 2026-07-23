@@ -33,6 +33,7 @@ EXPECTED_REPOSITORY = "https://github.com/pumpkin-nbc/Flask-XXLJob"
 EXPECTED_DOCUMENTATION = f"{EXPECTED_REPOSITORY}/tree/master/docs"
 EXPECTED_CHANGELOG = f"{EXPECTED_REPOSITORY}/blob/master/CHANGELOG.md"
 EXPECTED_METADATA_LINES = [
+    "Name: flask-xxljob",
     "Author: Pumpkin",
     "License-Expression: Apache-2.0",
     f"Project-URL: Homepage, {EXPECTED_REPOSITORY}",
