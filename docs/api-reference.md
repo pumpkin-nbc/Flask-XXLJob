@@ -2,7 +2,7 @@
 
 # API reference
 
-This page documents the public API of Flask-XXLJob 0.3.0. The extension only
+This page documents the public API of Flask-XXLJob 0.3.1. The extension only
 adapts the XXL-JOB 2.4.1 protocol; it never executes business tasks.
 
 ## `FlaskXXLJob`

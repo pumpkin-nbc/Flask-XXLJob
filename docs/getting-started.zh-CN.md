@@ -20,7 +20,7 @@ Flask-XXLJob 不会替你创建任务队列，也不会自动执行后台任务�
 
 ```bash
 python --version
-python -m pip install Flask-XXLJob
+python -m pip install flask-xxljob
 ```
 
 新项目建议使用虚拟环境：
@@ -29,7 +29,7 @@ python -m pip install Flask-XXLJob
 python -m venv .venv
 # Windows：.venv\Scripts\activate
 # macOS/Linux：source .venv/bin/activate
-python -m pip install Flask-XXLJob
+python -m pip install flask-xxljob
 ```
 
 仓库中已经准备好可以直接运行的文件：

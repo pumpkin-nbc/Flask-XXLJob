@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     tags:
-      - "v0.3.0"
+      - "v0.3.1"
 
 permissions:
   contents: read
@@ -62,7 +62,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: testpypi
-      url: https://test.pypi.org/p/Flask-XXLJob
+      url: https://test.pypi.org/p/flask-xxljob
     permissions:
       id-token: write
     steps:
@@ -82,7 +82,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/p/Flask-XXLJob
+      url: https://pypi.org/p/flask-xxljob
     permissions:
       id-token: write
     steps:

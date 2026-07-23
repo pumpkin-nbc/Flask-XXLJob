@@ -7,6 +7,16 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-07-23
+
+### Changed
+
+- Changed the distribution metadata name to its normalized lowercase spelling,
+  `flask-xxljob`. This remains the same PyPI project as `Flask-XXLJob`; the
+  Python import package remains `flask_xxljob`.
+- Updated the Trusted Publishing workflow and release documentation to publish
+  `v0.3.1` after the TestPyPI `0.3.0` release.
+
 ## [0.3.0] - 2026-07-23
 
 ### Added
@@ -97,7 +107,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Upgrade note: this is a backward-compatible minor release. Upgrade with:
 
 ```bash
-pip install --upgrade Flask-XXLJob==0.2.0
+pip install --upgrade flask-xxljob==0.2.0
 ```
 
 No code or configuration changes are required. All new behaviour is opt-in via new APIs and config keys whose defaults match 0.1.2.
@@ -124,7 +134,7 @@ No code or configuration changes are required. All new behaviour is opt-in via n
 Upgrade note: this is a backward-compatible patch release. Upgrade with:
 
 ```bash
-pip install --upgrade Flask-XXLJob==0.1.2
+pip install --upgrade flask-xxljob==0.1.2
 ```
 
 No code or configuration changes are required; the only addition is the optional `error_type` field on call results.
@@ -159,7 +169,7 @@ No code or configuration changes are required; the only addition is the optional
 Upgrade note: this is a backward-compatible patch release. Upgrade with:
 
 ```bash
-pip install --upgrade Flask-XXLJob==0.1.1
+pip install --upgrade flask-xxljob==0.1.1
 ```
 
 The only behavior change to be aware of is that registering the same callback twice now raises `XXLJobError` instead of silently overwriting the earlier handler.

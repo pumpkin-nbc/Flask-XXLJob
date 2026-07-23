@@ -2,7 +2,7 @@
 
 # API 参考
 
-本页记录 Flask-XXLJob 0.3.0 的公共 API。该扩展只负责适配 XXL-JOB 2.4.1 协议，
+本页记录 Flask-XXLJob 0.3.1 的公共 API。该扩展只负责适配 XXL-JOB 2.4.1 协议，
 绝不执行业务任务。
 
 ## `FlaskXXLJob`

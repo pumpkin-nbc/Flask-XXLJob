@@ -7,6 +7,15 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 并遵循 [语义化版本](https://semver.org/lang/zh-CN/spec/v2.0.0.html)。
 
+## [0.3.1] - 2026-07-23
+
+### 变更
+
+- 发行包元数据名称改为规范化的小写形式 `flask-xxljob`。它与
+  `Flask-XXLJob` 仍是同一个 PyPI 项目，Python 导入包仍为 `flask_xxljob`。
+- TestPyPI 已发布 `0.3.0` 后，将 Trusted Publishing 工作流和发布文档更新为
+  发布 `v0.3.1`。
+
 ## [0.3.0] - 2026-07-23
 
 ### 新增
@@ -92,7 +101,7 @@
 升级说明：这是一个向后兼容的次要版本。使用以下命令升级：
 
 ```bash
-pip install --upgrade Flask-XXLJob==0.2.0
+pip install --upgrade flask-xxljob==0.2.0
 ```
 
 无需修改任何代码或配置。所有新行为均通过新 API 与新配置项选择性启用，其默认值与 0.1.2 一致。
@@ -119,7 +128,7 @@ pip install --upgrade Flask-XXLJob==0.2.0
 升级说明：这是一个向下兼容的补丁版本。使用以下命令升级：
 
 ```bash
-pip install --upgrade Flask-XXLJob==0.1.2
+pip install --upgrade flask-xxljob==0.1.2
 ```
 
 无需修改代码或配置；唯一的新增是调用结果上的可选 `error_type` 字段。
@@ -154,7 +163,7 @@ pip install --upgrade Flask-XXLJob==0.1.2
 升级说明：这是一个向下兼容的补丁版本。使用以下命令升级：
 
 ```bash
-pip install --upgrade Flask-XXLJob==0.1.1
+pip install --upgrade flask-xxljob==0.1.1
 ```
 
 唯一需要注意的行为变更是：重复注册同一处理函数现在会抛出 `XXLJobError`，而不再静默覆盖之前的处理函数。

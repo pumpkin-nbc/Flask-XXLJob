@@ -28,6 +28,16 @@ Job routing, block strategies, timeouts and retries are still managed by the
 XXL-JOB admin. Flask-XXLJob only relays the protocol; your task service keeps
 full control over execution.
 
+## Upgrading 0.3.0 to 0.3.1
+
+`0.3.1` changes only release metadata and publishing configuration. The
+distribution name now uses its normalized lowercase spelling; public Python
+imports and runtime APIs are unchanged.
+
+```bash
+pip install --upgrade flask-xxljob==0.3.1
+```
+
 ## Upgrading 0.2.1 to 0.3.0
 
 0.3.0 changes Run registration to explicit JobHandler dispatch. Replace:
@@ -68,13 +78,13 @@ the CLI now all read the same internal version source.
 ### Upgrade
 
 ```bash
-pip install --upgrade Flask-XXLJob==0.3.0
+pip install --upgrade flask-xxljob==0.3.0
 ```
 
 ### Rollback
 
 ```bash
-pip install Flask-XXLJob==0.2.1
+pip install flask-xxljob==0.2.1
 ```
 
 ## Upgrading 0.2.0 to 0.2.1
@@ -94,13 +104,13 @@ strings explicitly before upgrading.
 ### Upgrade
 
 ```bash
-pip install --upgrade Flask-XXLJob==0.2.1
+pip install --upgrade flask-xxljob==0.2.1
 ```
 
 ### Rollback
 
 ```bash
-pip install Flask-XXLJob==0.2.0
+pip install flask-xxljob==0.2.0
 ```
 
 ## Upgrading 0.1.2 to 0.2.0
@@ -134,13 +144,13 @@ No. Every new feature is opt-in, and the new configuration keys default to
 ### Upgrade
 
 ```bash
-pip install --upgrade Flask-XXLJob==0.2.0
+pip install --upgrade flask-xxljob==0.2.0
 ```
 
 ### Rollback
 
 ```bash
-pip install Flask-XXLJob==0.1.2
+pip install flask-xxljob==0.1.2
 ```
 
 ## Upgrading 0.1.1 to 0.1.2
@@ -162,7 +172,7 @@ which lets you distinguish failures (`network`, `timeout`, `http`,
 ### Upgrade
 
 ```bash
-pip install --upgrade Flask-XXLJob==0.1.2
+pip install --upgrade flask-xxljob==0.1.2
 ```
 
 ### Verify
@@ -177,7 +187,7 @@ pip install --upgrade Flask-XXLJob==0.1.2
 ### Rollback
 
 ```bash
-pip install Flask-XXLJob==0.1.1
+pip install flask-xxljob==0.1.1
 ```
 
 Business task execution stays in your Flask project; Flask-XXLJob never runs the

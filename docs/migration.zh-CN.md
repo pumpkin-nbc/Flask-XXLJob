@@ -26,6 +26,15 @@ XXL-JOB -> Flask (Flask-XXLJob) -> your on_run submits the task
 
 任务路由、阻塞策略、超时与重试仍由 XXL-JOB Admin 管理。Flask-XXLJob 只负责协议中转；你的任务服务始终完全掌控执行过程。
 
+## 从 0.3.0 升级到 0.3.1
+
+`0.3.1` 只调整发行元数据与发布配置。发行包名称改为规范化的小写形式，公开 Python
+导入路径与运行时 API 均不变。
+
+```bash
+pip install --upgrade flask-xxljob==0.3.1
+```
+
 ## 从 0.2.1 升级到 0.3.0
 
 0.3.0 将 Run 注册改为显式 JobHandler 分发。请把：
@@ -59,13 +68,13 @@ Admin 中的 JobHandler 必须完全一致，包括大小写；不再提供无�
 ### 升级
 
 ```bash
-pip install --upgrade Flask-XXLJob==0.3.0
+pip install --upgrade flask-xxljob==0.3.0
 ```
 
 ### 回滚
 
 ```bash
-pip install Flask-XXLJob==0.2.1
+pip install flask-xxljob==0.2.1
 ```
 
 ## 从 0.2.0 升级到 0.2.1
@@ -77,13 +86,13 @@ pip install Flask-XXLJob==0.2.1
 ### 升级
 
 ```bash
-pip install --upgrade Flask-XXLJob==0.2.1
+pip install --upgrade flask-xxljob==0.2.1
 ```
 
 ### 回滚
 
 ```bash
-pip install Flask-XXLJob==0.2.0
+pip install flask-xxljob==0.2.0
 ```
 
 ## 从 0.1.2 升级到 0.2.0
@@ -103,13 +112,13 @@ pip install Flask-XXLJob==0.2.0
 ### 升级
 
 ```bash
-pip install --upgrade Flask-XXLJob==0.2.0
+pip install --upgrade flask-xxljob==0.2.0
 ```
 
 ### 回滚
 
 ```bash
-pip install Flask-XXLJob==0.1.2
+pip install flask-xxljob==0.1.2
 ```
 
 ## 从 0.1.1 升级到 0.1.2
@@ -123,7 +132,7 @@ pip install Flask-XXLJob==0.1.2
 ### 升级
 
 ```bash
-pip install --upgrade Flask-XXLJob==0.1.2
+pip install --upgrade flask-xxljob==0.1.2
 ```
 
 ### 验证
@@ -138,7 +147,7 @@ pip install --upgrade Flask-XXLJob==0.1.2
 ### 回滚
 
 ```bash
-pip install Flask-XXLJob==0.1.1
+pip install flask-xxljob==0.1.1
 ```
 
 实际业务任务仍由你的 Flask 项目执行；Flask-XXLJob 从不自行运行任务。
