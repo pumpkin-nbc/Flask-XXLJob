@@ -131,7 +131,16 @@ status.last_registry_admin_address
 status.last_registry_error_type
 status.last_registry_message
 status.registry_thread_running
+status.log_enabled
+status.log_level
+status.log_file_enabled
+status.log_console_enabled
+status.log_file
+status.log_console_stream
 ```
+
+日志字段描述实际生效的托管输出目标。文件日志生效时 `log_file` 是解析后的绝对路径，
+否则为 `None`。状态与 CLI 输出绝不包含 Access Token，也不能动态修改日志配置。
 
 ## 异常
 

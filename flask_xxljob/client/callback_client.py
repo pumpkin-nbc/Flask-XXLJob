@@ -6,6 +6,7 @@ XXL-JOB task-result callback client.
 
 from __future__ import annotations
 
+import logging
 from typing import List, Optional, Sequence, Union
 
 from ..config import XXLJobConfig
@@ -36,8 +37,13 @@ class CallbackClient:
     indefinitely in the background, or create background threads.
     """
 
-    def __init__(self, config: XXLJobConfig) -> None:
+    def __init__(
+        self,
+        config: XXLJobConfig,
+        logger: Optional[logging.Logger] = None,
+    ) -> None:
         self._config = config
+        self._logger = logger
 
     def callback(
         self,
@@ -111,14 +117,31 @@ class CallbackClient:
         ]
 
         payload = [request.to_wire() for request in normalized]
-        return post_to_admins(
+        result = post_to_admins(
             self._config.admin_addresses,
             CALLBACK_PATH,
             payload,
             self._config.access_token,
             self._config.timeout,
             policy=AdminCallPolicy.from_config(self._config),
+            logger=self._logger,
         )
+        if self._logger is not None:
+            if result.success:
+                self._logger.info(
+                    "XXL-JOB callback succeeded items=%s address=%s.",
+                    len(normalized),
+                    result.address,
+                )
+            else:
+                self._logger.warning(
+                    "XXL-JOB callback failed items=%s error_type=%s "
+                    "http_status=%s.",
+                    len(normalized),
+                    result.error_type,
+                    result.http_status,
+                )
+        return result
 
     def _normalize_item(self, index: int, item: CallbackLike) -> CallbackRequest:
         if isinstance(item, CallbackRequest):

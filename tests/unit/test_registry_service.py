@@ -139,6 +139,23 @@ def test_stop_defers_remove_until_blocked_renewal_finishes():
     assert admin.remove_calls == 1
 
 
+def test_deferred_shutdown_callback_runs_after_removal():
+    admin = BlockingAdmin()
+    service = RegistryService(make_config(XXL_JOB_REGISTRY_INTERVAL=1), admin)
+    closed = threading.Event()
+    service.start()
+    assert admin.registry_started.wait(timeout=1)
+
+    service.stop(remove=True, on_stopped=closed.set)
+
+    assert closed.is_set() is False
+    assert admin.remove_calls == 0
+    admin.registry_release.set()
+    assert admin.remove_started.wait(timeout=1)
+    assert closed.wait(timeout=1)
+    assert admin.remove_calls == 1
+
+
 def test_repeated_stop_deregisters_at_most_once():
     admin = FakeAdmin()
     service = RegistryService(make_config(XXL_JOB_REGISTRY_INTERVAL=3600), admin)

@@ -6,6 +6,7 @@ HTTP clients used by Flask-XXLJob to talk to the XXL-JOB admin.
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass
 from typing import Any, List, Optional, Tuple
@@ -112,6 +113,7 @@ def post_to_admins(
     timeout: Tuple[int, int],
     stop_on_business_response: bool = False,
     policy: Optional[AdminCallPolicy] = None,
+    logger: Optional[logging.Logger] = None,
 ) -> CallResult:
     """
     依次向多个 Admin 地址发送 POST 请求，支持有限的同步重试与故障转移。
@@ -261,6 +263,15 @@ def post_to_admins(
             # transient error while retries remain.
             retryable = last_result.error_type in _RETRYABLE_ERROR_TYPES
             if retryable and attempt < policy.retry_count:
+                if logger is not None:
+                    logger.debug(
+                        "Retrying Admin request address=%s error_type=%s "
+                        "http_status=%s attempt=%s.",
+                        address,
+                        last_result.error_type,
+                        last_result.http_status,
+                        attempts,
+                    )
                 if policy.retry_backoff > 0:
                     time.sleep(policy.retry_backoff)
                 continue
@@ -270,6 +281,14 @@ def post_to_admins(
         # After retries are exhausted, decide failover per policy.
         if not _should_failover(last_result.error_type, policy):
             return last_result
+        if logger is not None and address != admin_addresses[-1]:
+            logger.warning(
+                "Failing over to the next Admin address after "
+                "address=%s error_type=%s http_status=%s.",
+                address,
+                last_result.error_type,
+                last_result.http_status,
+            )
 
     return last_result
 

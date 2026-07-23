@@ -11,6 +11,8 @@ accessed at import time.
 
 from __future__ import annotations
 
+import codecs
+import logging
 from dataclasses import dataclass, field
 from typing import Any, List, Mapping
 from urllib.parse import urlsplit
@@ -38,7 +40,25 @@ DEFAULTS: dict = {
     "XXL_JOB_ADMIN_FAILOVER_ON_HTTP_ERROR": True,
     "XXL_JOB_ADMIN_FAILOVER_ON_INVALID_JSON": False,
     "XXL_JOB_ADMIN_FAILOVER_ON_BUSINESS_ERROR": False,
+    "XXL_JOB_LOG_ENABLED": False,
+    "XXL_JOB_LOG_FILE_ENABLED": True,
+    "XXL_JOB_LOG_CONSOLE_ENABLED": False,
+    "XXL_JOB_LOG_LEVEL": "INFO",
+    "XXL_JOB_LOG_FORMAT": (
+        "%(asctime)s [%(levelname)s] [%(name)s] %(message)s"
+    ),
+    "XXL_JOB_LOG_DATE_FORMAT": "%Y-%m-%d %H:%M:%S",
+    "XXL_JOB_LOG_PATH": "./logs",
+    "XXL_JOB_LOG_FILENAME": "flask-xxljob.log",
+    "XXL_JOB_LOG_ENCODING": "utf-8",
+    "XXL_JOB_LOG_MAX_BYTES": 10 * 1024 * 1024,
+    "XXL_JOB_LOG_BACKUP_COUNT": 5,
+    "XXL_JOB_LOG_CONSOLE_STREAM": "stderr",
+    "XXL_JOB_LOG_PROPAGATE": False,
 }
+
+LOG_LEVELS = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
+LOG_CONSOLE_STREAMS = frozenset({"stdout", "stderr"})
 
 
 @dataclass
@@ -68,6 +88,19 @@ class XXLJobConfig:
     admin_failover_on_http_error: bool = True
     admin_failover_on_invalid_json: bool = False
     admin_failover_on_business_error: bool = False
+    log_enabled: bool = False
+    log_file_enabled: bool = True
+    log_console_enabled: bool = False
+    log_level: str = "INFO"
+    log_format: str = "%(asctime)s [%(levelname)s] [%(name)s] %(message)s"
+    log_date_format: str = "%Y-%m-%d %H:%M:%S"
+    log_path: str = "./logs"
+    log_filename: str = "flask-xxljob.log"
+    log_encoding: str = "utf-8"
+    log_max_bytes: int = 10 * 1024 * 1024
+    log_backup_count: int = 5
+    log_console_stream: str = "stderr"
+    log_propagate: bool = False
 
     @classmethod
     def from_mapping(cls, config: Mapping[str, Any]) -> "XXLJobConfig":
@@ -118,6 +151,30 @@ class XXLJobConfig:
         admin_failover_on_business_error = _as_bool(
             merged, "XXL_JOB_ADMIN_FAILOVER_ON_BUSINESS_ERROR"
         )
+        log_enabled = _as_bool(merged, "XXL_JOB_LOG_ENABLED")
+        log_file_enabled = _as_bool(merged, "XXL_JOB_LOG_FILE_ENABLED")
+        log_console_enabled = _as_bool(merged, "XXL_JOB_LOG_CONSOLE_ENABLED")
+        log_level = _as_choice(
+            merged, "XXL_JOB_LOG_LEVEL", LOG_LEVELS, case="upper"
+        )
+        log_format = _as_non_empty_str(merged, "XXL_JOB_LOG_FORMAT")
+        log_date_format = _as_str_strict(merged, "XXL_JOB_LOG_DATE_FORMAT")
+        log_path = _as_non_empty_str(merged, "XXL_JOB_LOG_PATH")
+        log_filename = _as_non_empty_str(merged, "XXL_JOB_LOG_FILENAME")
+        log_encoding = _as_non_empty_str(merged, "XXL_JOB_LOG_ENCODING")
+        log_max_bytes = _as_positive_int(merged, "XXL_JOB_LOG_MAX_BYTES")
+        log_backup_count = _as_non_negative_int(
+            merged, "XXL_JOB_LOG_BACKUP_COUNT"
+        )
+        log_console_stream = _as_choice(
+            merged,
+            "XXL_JOB_LOG_CONSOLE_STREAM",
+            LOG_CONSOLE_STREAMS,
+            case="lower",
+        )
+        log_propagate = _as_bool(merged, "XXL_JOB_LOG_PROPAGATE")
+        _validate_log_encoding(log_encoding)
+        _validate_log_format(log_format, log_date_format)
 
         instance = cls(
             enabled=enabled,
@@ -139,6 +196,19 @@ class XXLJobConfig:
             admin_failover_on_http_error=admin_failover_on_http_error,
             admin_failover_on_invalid_json=admin_failover_on_invalid_json,
             admin_failover_on_business_error=admin_failover_on_business_error,
+            log_enabled=log_enabled,
+            log_file_enabled=log_file_enabled,
+            log_console_enabled=log_console_enabled,
+            log_level=log_level,
+            log_format=log_format,
+            log_date_format=log_date_format,
+            log_path=log_path,
+            log_filename=log_filename,
+            log_encoding=log_encoding,
+            log_max_bytes=log_max_bytes,
+            log_backup_count=log_backup_count,
+            log_console_stream=log_console_stream,
+            log_propagate=log_propagate,
         )
         instance.validate()
         return instance
@@ -215,6 +285,39 @@ def _as_str(config: Mapping[str, Any], key: str) -> str:
             f"{key} must be a string; got type {type(value).__name__}."
         )
     return value
+
+
+def _as_non_empty_str(config: Mapping[str, Any], key: str) -> str:
+    value = _as_str(config, key)
+    if not value:
+        raise XXLJobConfigError(f"{key} must be a non-empty string.")
+    return value
+
+
+def _as_str_strict(config: Mapping[str, Any], key: str) -> str:
+    value = config[key]
+    if not isinstance(value, str):
+        raise XXLJobConfigError(
+            f"{key} must be a string; got type {type(value).__name__}."
+        )
+    return value
+
+
+def _as_choice(
+    config: Mapping[str, Any],
+    key: str,
+    allowed: frozenset,
+    *,
+    case: str,
+) -> str:
+    value = _as_str(config, key)
+    normalized = value.upper() if case == "upper" else value.lower()
+    if normalized not in allowed:
+        expected = " or ".join(repr(item) for item in sorted(allowed))
+        raise XXLJobConfigError(
+            f"Invalid {key} value {value!r}; expected {expected}."
+        )
+    return normalized
 
 
 def _as_str_list(config: Mapping[str, Any], key: str) -> List[str]:
@@ -314,3 +417,35 @@ def _normalize_prefix(prefix: str) -> str:
     if not normalized:
         return ""
     return "/" + normalized
+
+
+def _validate_log_encoding(encoding: str) -> None:
+    try:
+        codecs.lookup(encoding)
+    except LookupError as exc:
+        raise XXLJobConfigError(
+            f"XXL_JOB_LOG_ENCODING must name a valid text encoding; got {encoding!r}."
+        ) from exc
+
+
+def _validate_log_format(log_format: str, date_format: str) -> None:
+    try:
+        formatter = logging.Formatter(
+            fmt=log_format,
+            datefmt=date_format or None,
+            validate=True,
+        )
+        record = logging.LogRecord(
+            name="flask_xxljob.validation",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=1,
+            msg="validation",
+            args=(),
+            exc_info=None,
+        )
+        formatter.format(record)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise XXLJobConfigError(
+            "XXL_JOB_LOG_FORMAT is not a valid standard logging format."
+        ) from exc

@@ -28,6 +28,34 @@ def test_initial_status():
     assert status.registered is False
     assert status.last_registry_time is None
     assert status.registry_thread_running is False
+    assert status.log_enabled is False
+    assert status.log_level == "INFO"
+    assert status.log_file_enabled is False
+    assert status.log_console_enabled is False
+    assert status.log_file is None
+    assert status.log_console_stream == "stderr"
+
+
+def test_logging_status_reports_effective_outputs(tmp_path):
+    ext = FlaskXXLJob()
+    app, _ = make_app(
+        ext,
+        XXL_JOB_LOG_ENABLED=True,
+        XXL_JOB_LOG_FILE_ENABLED=True,
+        XXL_JOB_LOG_CONSOLE_ENABLED=True,
+        XXL_JOB_LOG_CONSOLE_STREAM="stdout",
+        XXL_JOB_LOG_LEVEL="DEBUG",
+        XXL_JOB_LOG_PATH=str(tmp_path),
+    )
+
+    status = ext.get_status(app)
+
+    assert status.log_enabled is True
+    assert status.log_level == "DEBUG"
+    assert status.log_file_enabled is True
+    assert status.log_console_enabled is True
+    assert status.log_file == str((tmp_path / "flask-xxljob.log").resolve())
+    assert status.log_console_stream == "stdout"
 
 
 def test_status_after_success(mocker):
@@ -85,6 +113,9 @@ def test_cli_status(mocker):
     result = runner.invoke(args=["xxljob", "status"])
     assert result.exit_code == 0
     assert "Flask-XXLJob status" in result.output
+    assert "Log enabled: False" in result.output
+    assert "File logging: False" in result.output
+    assert "Console logging: False" in result.output
 
 
 def test_cli_status_nonzero_on_failure(mocker):

@@ -35,6 +35,12 @@ class XXLJobStatus:
     last_registry_error_type: Optional[str] = None
     last_registry_message: Optional[str] = None
     registry_thread_running: bool = False
+    log_enabled: bool = False
+    log_level: str = "INFO"
+    log_file_enabled: bool = False
+    log_console_enabled: bool = False
+    log_file: Optional[str] = None
+    log_console_stream: str = "stderr"
 
 
 __all__ = ["XXLJobStatus"]

@@ -49,6 +49,12 @@ def _build_status(runtime: Any) -> XXLJobStatus:
         last_registry_error_type=snapshot["last_registry_error_type"],
         last_registry_message=snapshot["last_registry_message"],
         registry_thread_running=snapshot["registry_thread_running"],
+        log_enabled=runtime.log_manager.effective_enabled,
+        log_level=runtime.log_manager.level,
+        log_file_enabled=runtime.log_manager.file_enabled,
+        log_console_enabled=runtime.log_manager.console_enabled,
+        log_file=runtime.log_manager.log_file,
+        log_console_stream=runtime.log_manager.console_stream,
     )
 
 
@@ -60,6 +66,14 @@ def _echo_status(status: XXLJobStatus) -> None:
     click.echo(f"  Auto register: {status.auto_register}")
     click.echo(f"  Registered: {status.registered}")
     click.echo(f"  Registry thread running: {status.registry_thread_running}")
+    click.echo(f"  Log enabled: {status.log_enabled}")
+    click.echo(f"  Log level: {status.log_level}")
+    click.echo(f"  File logging: {status.log_file_enabled}")
+    if status.log_file is not None:
+        click.echo(f"  Log file: {status.log_file}")
+    click.echo(f"  Console logging: {status.log_console_enabled}")
+    if status.log_console_enabled:
+        click.echo(f"  Console stream: {status.log_console_stream}")
     if status.last_registry_time is None:
         click.echo("  Last registry: (no attempt yet)")
     else:

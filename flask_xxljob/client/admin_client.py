@@ -6,6 +6,9 @@ XXL-JOB admin registry client.
 
 from __future__ import annotations
 
+import logging
+from typing import Optional
+
 from ..config import XXLJobConfig
 from ..model.registry import RegistryRequest
 from . import CallResult, post_to_admins
@@ -28,8 +31,13 @@ class AdminClient:
     when the current address fails.
     """
 
-    def __init__(self, config: XXLJobConfig) -> None:
+    def __init__(
+        self,
+        config: XXLJobConfig,
+        logger: Optional[logging.Logger] = None,
+    ) -> None:
         self._config = config
+        self._logger = logger
 
     def registry(self, request: RegistryRequest) -> CallResult:
         """
@@ -44,6 +52,7 @@ class AdminClient:
             self._config.access_token,
             self._config.timeout,
             policy=AdminCallPolicy.from_config(self._config),
+            logger=self._logger,
         )
 
     def registry_remove(self, request: RegistryRequest) -> CallResult:
@@ -59,4 +68,5 @@ class AdminClient:
             self._config.access_token,
             self._config.timeout,
             policy=AdminCallPolicy.from_config(self._config),
+            logger=self._logger,
         )

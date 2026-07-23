@@ -15,7 +15,6 @@ error returns XXL-JOB standard JSON and never a Flask/Werkzeug HTML error page.
 
 from __future__ import annotations
 
-import logging
 from typing import Any, Callable
 
 from flask import Blueprint, Response, current_app, jsonify, request
@@ -35,8 +34,6 @@ from .parser import (
     parse_json_object,
 )
 from .validator import ACCESS_TOKEN_ERROR, check_access_token, extract_request_token
-
-logger = logging.getLogger("flask_xxljob.protocol")
 
 # 未注册处理函数时的官方错误信息 / Errors when a callback is not configured.
 RUN_NOT_CONFIGURED = "XXL-JOB run callback is not configured"
@@ -75,9 +72,14 @@ def _coerce_response(result: Any, endpoint: str) -> XXLJobResponse:
 
 
 def _token_ok(runtime: Any) -> bool:
-    return check_access_token(
+    valid = check_access_token(
         runtime.config.access_token, extract_request_token(request.headers)
     )
+    if not valid:
+        runtime.log_manager.get_logger("protocol").warning(
+            "XXL-JOB access token validation failed path=%s.", request.path
+        )
+    return valid
 
 
 def build_blueprint(name: str, url_prefix: str) -> Blueprint:
@@ -119,9 +121,16 @@ def build_blueprint(name: str, url_prefix: str) -> Blueprint:
         if isinstance(model, Response):
             return model
         if not runtime.callback_registry.has_run_callbacks:
+            runtime.log_manager.get_logger("protocol").warning(
+                "XXL-JOB run request rejected because no handlers are configured."
+            )
             return _json(XXLJobResponse.failure(RUN_NOT_CONFIGURED))
         callback = runtime.callback_registry.get_run(model.executor_handler)
         if callback is None:
+            runtime.log_manager.get_logger("protocol").warning(
+                "XXL-JOB run request rejected unsupported_handler=%s.",
+                _display_executor_handler(model.executor_handler),
+            )
             return _json(
                 XXLJobResponse.failure(
                     "Unsupported JobHandler: "
@@ -185,16 +194,24 @@ def build_blueprint(name: str, url_prefix: str) -> Blueprint:
 
         try:
             result = callback(model)
-        except Exception:  # noqa: BLE001 - 隔离用户处理函数 / isolate user callback
+        except Exception as exc:  # noqa: BLE001 - isolate user callback
             # traceback 仅写入本地日志，不返回给 XXL-JOB。
             # The traceback is logged locally only and never returned to XXL-JOB.
-            logger.exception("XXL-JOB /log callback raised an exception (logId=%s).", model.log_id)
+            runtime.log_manager.get_logger("protocol").error(
+                "XXL-JOB /log callback failed log_id=%s exception_type=%s.",
+                model.log_id,
+                type(exc).__name__,
+            )
             return _json(XXLJobResponse.failure("XXL-JOB log callback execution failed"))
 
         if isinstance(result, XXLJobResponse):
             return _json(result)
         if isinstance(result, LogResponse):
             return _json(XXLJobResponse.success(content=result.to_wire()))
+        runtime.log_manager.get_logger("protocol").warning(
+            "XXL-JOB /log callback returned unsupported_type=%s.",
+            type(result).__name__,
+        )
         return _json(
             XXLJobResponse.failure(
                 "XXL-JOB log callback returned an unsupported response type"
@@ -209,7 +226,11 @@ def build_blueprint(name: str, url_prefix: str) -> Blueprint:
 
     @blueprint.errorhandler(Exception)
     def _handle_unexpected(exc: Exception) -> Response:
-        logger.exception("Unexpected error in XXL-JOB executor endpoint.")
+        runtime = _runtime()
+        runtime.log_manager.get_logger("protocol").error(
+            "Unexpected error in XXL-JOB executor endpoint exception_type=%s.",
+            type(exc).__name__,
+        )
         return _json(XXLJobResponse.failure("XXL-JOB internal protocol error"))
 
     def _parse_body(runtime: Any) -> Any:
@@ -221,25 +242,42 @@ def build_blueprint(name: str, url_prefix: str) -> Blueprint:
             )
             return parse_json_object(raw_body, runtime.config.max_request_size)
         except RequestParseError as exc:
+            runtime.log_manager.get_logger("protocol").warning(
+                "XXL-JOB request parsing failed reason=%s.", str(exc)
+            )
             return _json(XXLJobResponse.failure(str(exc)))
 
     def _build_model(model_cls: Any, data: dict) -> Any:
         try:
             return model_cls.from_wire(data)
         except ModelParseError as exc:
+            _runtime().log_manager.get_logger("protocol").warning(
+                "XXL-JOB request model validation failed reason=%s.", str(exc)
+            )
             return _json(XXLJobResponse.failure(f"invalid request field: {exc}"))
 
     def _dispatch(callback: Callable[[Any], Any], model: Any, endpoint: str) -> Response:
         try:
             result = callback(model)
-        except Exception:  # noqa: BLE001 - 隔离用户处理函数 / isolate user callback
+        except Exception as exc:  # noqa: BLE001 - isolate user callback
             # traceback 仅写入本地日志，不返回给 XXL-JOB。
             # The traceback is logged locally only and never returned to XXL-JOB.
-            logger.exception("XXL-JOB /%s callback raised an exception.", endpoint)
+            _runtime().log_manager.get_logger("protocol").error(
+                "XXL-JOB /%s callback failed exception_type=%s.",
+                endpoint,
+                type(exc).__name__,
+            )
             return _json(
                 XXLJobResponse.failure(f"XXL-JOB {endpoint} callback execution failed")
             )
-        return _json(_coerce_response(result, endpoint))
+        response = _coerce_response(result, endpoint)
+        if not isinstance(result, XXLJobResponse):
+            _runtime().log_manager.get_logger("protocol").warning(
+                "XXL-JOB /%s callback returned unsupported_type=%s.",
+                endpoint,
+                type(result).__name__,
+            )
+        return _json(response)
 
     return blueprint
 

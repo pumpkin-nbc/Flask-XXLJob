@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.0] - 2026-07-22
 
+### Added
+
+- Added optional, per-application Flask-XXLJob managed logging using only the
+  standard library. Managed logging is disabled by default; rotating-file and
+  console targets can be enabled independently or together.
+- Added configurable `stdout` or `stderr` console output, shared level and
+  format validation, sensitive-data filtering, lifecycle cleanup, and logging
+  fields in `XXLJobStatus` and `xxljob status`.
+
 ### Changed
 
 - `/run` now dispatches by exact, case-sensitive `executorHandler` through
@@ -23,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Documentation
 
 - Updated the bilingual README, API reference and migration guide for strict string validation, route-conflict detection, delayed deregistration and the multi-application migration.
+- Added bilingual logging and deployment guidance, including a console-only
+  container setup and the multi-process limitation of `RotatingFileHandler`.
 - Added a bilingual, tested end-to-end Flask integration example covering Application Factory setup, all executor callbacks, environment configuration and final task-result reporting.
 - Reworked the primary quick start into a beginner-first, locally runnable path with a tested single-file example, PowerShell/Bash requests, Admin onboarding and troubleshooting.
 

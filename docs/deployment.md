@@ -28,6 +28,22 @@ several workers behind one address is fine; running workers with different
 addresses registers multiple executor instances. Plan your process model
 accordingly.
 
+For plugin diagnostics in containers, prefer console `stdout` and let the
+platform collect, retain and rotate logs:
+
+```python
+app.config.update(
+    XXL_JOB_LOG_ENABLED=True,
+    XXL_JOB_LOG_FILE_ENABLED=False,
+    XXL_JOB_LOG_CONSOLE_ENABLED=True,
+    XXL_JOB_LOG_CONSOLE_STREAM="stdout",
+)
+```
+
+The standard `RotatingFileHandler` is process-local and does not make a shared
+file safe for multiple Gunicorn or other worker processes. Use separate files,
+host-managed Logging, or console aggregation instead. See [Logging](logging.md).
+
 ## Manual registration
 
 You can disable auto-registration and register from the CLI instead:

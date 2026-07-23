@@ -141,7 +141,17 @@ status.last_registry_admin_address
 status.last_registry_error_type
 status.last_registry_message
 status.registry_thread_running
+status.log_enabled
+status.log_level
+status.log_file_enabled
+status.log_console_enabled
+status.log_file
+status.log_console_stream
 ```
+
+Logging fields describe the effective managed targets. `log_file` is the
+resolved absolute path when file logging is active, otherwise `None`. Status
+and CLI output never include the access token and cannot modify logging.
 
 ## Exceptions
 

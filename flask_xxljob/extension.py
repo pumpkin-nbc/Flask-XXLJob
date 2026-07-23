@@ -6,12 +6,18 @@ Flask-XXLJob main extension class.
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional
 
 from flask import Flask, current_app, has_app_context
 
 from ._app import ApplicationRegistry, ensure_executor_routes_available, executor_paths
-from ._lifecycle import should_start_registry, start_registry_with_shutdown
+from ._lifecycle import (
+    install_runtime_finalizer,
+    should_start_registry,
+    start_registry_with_shutdown,
+)
+from ._logging import XXLJobLogManager
 from .callback.registry import (
     CallbackRegistry,
     IdleBeatCallback,
@@ -38,6 +44,7 @@ if TYPE_CHECKING:
 
 # Runtime 在 app.extensions 中的键 / Runtime key in app.extensions.
 EXTENSION_KEY = "xxljob"
+logger = logging.getLogger("flask_xxljob.extension")
 
 
 class FlaskXXLJob:
@@ -103,18 +110,43 @@ class FlaskXXLJob:
                 "Call init_app(app) only once per application."
             )
 
-        config = XXLJobConfig.from_mapping(app.config)
+        try:
+            config = XXLJobConfig.from_mapping(app.config)
+        except Exception as exc:
+            logger.error(
+                "Flask-XXLJob configuration validation failed "
+                "exception_type=%s.",
+                type(exc).__name__,
+            )
+            raise
         if config.enabled:
             ensure_executor_routes_available(app, config.route_prefix)
 
+        try:
+            log_manager = XXLJobLogManager(app, config)
+        except Exception as exc:
+            logger.error(
+                "Flask-XXLJob logging initialization failed "
+                "exception_type=%s.",
+                type(exc).__name__,
+            )
+            raise
         callback_registry = CallbackRegistry()
         # 将模块级默认处理函数注入到本应用的注册表，支持在 init_app 之前注册。
         # Seed this application's registry with module-level default callbacks,
         # enabling registration before init_app.
         callback_registry.seed_from(self._deferred_callbacks)
-        admin_client = AdminClient(config)
-        callback_client = CallbackClient(config)
-        registry_service = RegistryService(config, admin_client)
+        admin_client = AdminClient(
+            config, logger=log_manager.get_logger("admin")
+        )
+        callback_client = CallbackClient(
+            config, logger=log_manager.get_logger("callback")
+        )
+        registry_service = RegistryService(
+            config,
+            admin_client,
+            logger=log_manager.get_logger("registry"),
+        )
 
         runtime = XXLJobRuntime(
             config=config,
@@ -122,18 +154,39 @@ class FlaskXXLJob:
             admin_client=admin_client,
             callback_client=callback_client,
             registry_service=registry_service,
+            log_manager=log_manager,
         )
-        if config.enabled:
-            blueprint = build_blueprint(_blueprint_name(app), config.route_prefix)
-            app.register_blueprint(blueprint)
-            self._register_protocol_error_handlers(app, config.route_prefix)
+        try:
+            if config.enabled:
+                blueprint = build_blueprint(
+                    _blueprint_name(app), config.route_prefix
+                )
+                app.register_blueprint(blueprint)
+                self._register_protocol_error_handlers(app, config.route_prefix)
 
-        self._register_cli(app)
-        app.extensions[EXTENSION_KEY] = runtime
-        self._applications.add(app)
+            self._register_cli(app)
+            app.extensions[EXTENSION_KEY] = runtime
+            self._applications.add(app)
+            runtime.attach_finalizer(install_runtime_finalizer(app, runtime))
+            log_manager.get_logger("runtime").info(
+                "Flask-XXLJob initialized enabled=%s auto_register=%s.",
+                config.enabled,
+                config.auto_register,
+            )
 
-        if config.enabled and config.auto_register and should_start_registry(app):
-            start_registry_with_shutdown(registry_service)
+            if (
+                config.enabled
+                and config.auto_register
+                and should_start_registry(app)
+            ):
+                start_registry_with_shutdown(registry_service)
+        except Exception as exc:
+            log_manager.get_logger("runtime").error(
+                "Flask-XXLJob initialization failed exception_type=%s.",
+                type(exc).__name__,
+            )
+            runtime.close()
+            raise
 
     def _register_cli(self, app: Flask) -> None:
         from .cli.commands import xxljob_cli
@@ -165,6 +218,13 @@ class FlaskXXLJob:
                 and exc.code in (404, 405)
                 and request.path in paths
             ):
+                runtime = current_app.extensions.get(EXTENSION_KEY)
+                if runtime is not None:
+                    runtime.log_manager.get_logger("protocol").warning(
+                        "XXL-JOB routing error path=%s status=%s.",
+                        request.path,
+                        exc.code,
+                    )
                 return jsonify(
                     XXLJobResponse.failure(
                         "XXL-JOB request error: " + (exc.name or "error")
@@ -454,6 +514,12 @@ class FlaskXXLJob:
             last_registry_error_type=snapshot["last_registry_error_type"],
             last_registry_message=snapshot["last_registry_message"],
             registry_thread_running=snapshot["registry_thread_running"],
+            log_enabled=runtime.log_manager.effective_enabled,
+            log_level=runtime.log_manager.level,
+            log_file_enabled=runtime.log_manager.file_enabled,
+            log_console_enabled=runtime.log_manager.console_enabled,
+            log_file=runtime.log_manager.log_file,
+            log_console_stream=runtime.log_manager.console_stream,
         )
 
     def start_registry(self, app: Optional[Flask] = None) -> None:

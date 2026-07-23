@@ -34,6 +34,8 @@ execute the actual tasks.
 
 from __future__ import annotations
 
+import logging
+
 from ._version import __version__
 from .client import AdminCallResult, CallResult
 from .exceptions import (
@@ -61,6 +63,8 @@ from .model.trigger import TriggerRequest
 from .response.executor import XXLJobResponse
 from .response.log import LogResponse
 from .status import XXLJobStatus
+
+logging.getLogger("flask_xxljob").addHandler(logging.NullHandler())
 
 __all__ = [
     "__version__",

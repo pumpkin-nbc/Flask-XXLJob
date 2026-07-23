@@ -16,6 +16,7 @@ Flask-XXLJob is a **protocol adapter**. It handles protocol integration and does
 - Multiple admin addresses with failover.
 - Flask Application Factory support and per-application runtime isolation.
 - Strict protocol string validation and startup detection of conflicting executor routes.
+- Optional, isolated rotating-file and stdout/stderr plugin diagnostics.
 - Minimal dependencies (`Flask`, `requests`), typed (`py.typed`).
 
 ## What it does not do
@@ -105,6 +106,24 @@ with app.app_context():
 | `XXL_JOB_ADMIN_FAILOVER_ON_HTTP_ERROR` | `True` | Fail over on a non-200 status. |
 | `XXL_JOB_ADMIN_FAILOVER_ON_INVALID_JSON` | `False` | Fail over on invalid JSON. |
 | `XXL_JOB_ADMIN_FAILOVER_ON_BUSINESS_ERROR` | `False` | Fail over on a business failure. |
+| `XXL_JOB_LOG_ENABLED` | `False` | Enable plugin-managed diagnostic handlers. |
+| `XXL_JOB_LOG_FILE_ENABLED` | `True` | Write managed logs to a rotating file. |
+| `XXL_JOB_LOG_CONSOLE_ENABLED` | `False` | Write managed logs to the console. |
+| `XXL_JOB_LOG_LEVEL` | `"INFO"` | Shared managed-handler level. |
+| `XXL_JOB_LOG_FORMAT` | standard format | Shared Python Logging format. |
+| `XXL_JOB_LOG_DATE_FORMAT` | `"%Y-%m-%d %H:%M:%S"` | Timestamp format. |
+| `XXL_JOB_LOG_PATH` | `"./logs"` | File-log directory, relative to the process working directory. |
+| `XXL_JOB_LOG_FILENAME` | `"flask-xxljob.log"` | File-log name. |
+| `XXL_JOB_LOG_ENCODING` | `"utf-8"` | File encoding. |
+| `XXL_JOB_LOG_MAX_BYTES` | `10485760` | Rotation size in bytes. |
+| `XXL_JOB_LOG_BACKUP_COUNT` | `5` | Number of rotated backups. |
+| `XXL_JOB_LOG_CONSOLE_STREAM` | `"stderr"` | Console target: `stdout` or `stderr`. |
+| `XXL_JOB_LOG_PROPAGATE` | `False` | Propagate records while managed handlers exist. |
+
+Managed logging is off by default and creates no directory, file or console
+handler. Enabling only `XXL_JOB_LOG_ENABLED` writes to
+`./logs/flask-xxljob.log`; for containers, disable the file target and enable
+console `stdout`. See the [logging guide](docs/logging.md).
 
 ## CLI
 
@@ -126,7 +145,7 @@ handlers for every subsequently initialized application.
 
 ## Documentation
 
-See the [docs](docs/) directory, including [getting-started.md](docs/getting-started.md), [configuration.md](docs/configuration.md), the [API reference](docs/api-reference.md) and [integration testing](docs/integration-testing.md). For an end-to-end Flask template, use the [complete integration example](examples/complete_integration/README.md). Upgrading from an earlier version? See the [migration guide](docs/migration.md) and the [CHANGELOG](CHANGELOG.md).
+See the [docs](docs/) directory, including [getting-started.md](docs/getting-started.md), [configuration.md](docs/configuration.md), the [logging guide](docs/logging.md), the [API reference](docs/api-reference.md) and [integration testing](docs/integration-testing.md). For an end-to-end Flask template, use the [complete integration example](examples/complete_integration/README.md). Upgrading from an earlier version? See the [migration guide](docs/migration.md) and the [CHANGELOG](CHANGELOG.md).
 
 ## License
 

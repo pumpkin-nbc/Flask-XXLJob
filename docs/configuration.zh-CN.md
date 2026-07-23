@@ -27,6 +27,19 @@
 | `XXL_JOB_ADMIN_FAILOVER_ON_HTTP_ERROR` | `True` | 非 200 状态时尝试下一个 Admin。 |
 | `XXL_JOB_ADMIN_FAILOVER_ON_INVALID_JSON` | `False` | 非法 JSON 响应时尝试下一个 Admin。 |
 | `XXL_JOB_ADMIN_FAILOVER_ON_BUSINESS_ERROR` | `False` | 业务码失败时尝试下一个 Admin。 |
+| `XXL_JOB_LOG_ENABLED` | `False` | 是否启用插件托管日志。 |
+| `XXL_JOB_LOG_FILE_ENABLED` | `True` | 托管日志开启时是否添加轮转文件 Handler。 |
+| `XXL_JOB_LOG_CONSOLE_ENABLED` | `False` | 托管日志开启时是否添加控制台 Handler。 |
+| `XXL_JOB_LOG_LEVEL` | `"INFO"` | 共用等级：`DEBUG`、`INFO`、`WARNING`、`ERROR` 或 `CRITICAL`。 |
+| `XXL_JOB_LOG_FORMAT` | `"%(asctime)s [%(levelname)s] [%(name)s] %(message)s"` | 共用的标准 Logging 格式。 |
+| `XXL_JOB_LOG_DATE_FORMAT` | `"%Y-%m-%d %H:%M:%S"` | Formatter 时间格式；空字符串使用 Logging 默认值。 |
+| `XXL_JOB_LOG_PATH` | `"./logs"` | 日志目录；相对路径按进程当前工作目录解析。 |
+| `XXL_JOB_LOG_FILENAME` | `"flask-xxljob.log"` | 日志文件名。 |
+| `XXL_JOB_LOG_ENCODING` | `"utf-8"` | 有效的 Python 文本编码。 |
+| `XXL_JOB_LOG_MAX_BYTES` | `10485760` | 正整数轮转字节阈值。 |
+| `XXL_JOB_LOG_BACKUP_COUNT` | `5` | 非负轮转备份数量。 |
+| `XXL_JOB_LOG_CONSOLE_STREAM` | `"stderr"` | `stdout` 或 `stderr`，不区分大小写。 |
+| `XXL_JOB_LOG_PROPAGATE` | `False` | 存在托管输出目标时是否继续传播日志。 |
 
 请求大小以**字节**计量；`handleMsg` 与 `executorParams` 长度以**字符**（Unicode
 码点）计量，因此中文等多字节字符每个计为一个字符。
@@ -52,3 +65,8 @@ app.config.update(
 ## 校验
 
 配置在 `init_app()` 时校验。类型错误会抛出 `XXLJobConfigError`。`XXL_JOB_EXECUTOR_APP_NAME`、至少一个 `XXL_JOB_ADMIN_ADDRESSES` 条目以及 `XXL_JOB_EXECUTOR_ADDRESS` 仅在启用 `XXL_JOB_AUTO_REGISTER` 时才是必填项，因此仅做协议接入而不注册的部署可以省略它们。提供 Admin/执行器地址时必须使用 `http` 或 `https` 方案，包含主机与合法端口，同时允许上下文路径。Admin 与执行器地址在加载时会被规范化（去除首尾空格与多余尾部斜杠，同时保留上下文路径与顺序）。只含空白的 Access Token 会被规范化为空（无 Token 模式），非空 Token 保持原值。校验错误信息会指明出错的配置项、其收到的类型以及期望格式。错误配置绝不会被静默忽略。
+
+日志布尔配置只接受真正的布尔值。等级、控制台流、编码、轮转值与格式均在初始化
+阶段校验；格式会使用模拟 `LogRecord` 实际格式化一次，因此未知字段会在应用启动前
+失败。托管日志关闭或两个输出目标都关闭时，扩展不会覆盖 Runtime Logger 的等级和
+传播设置，宿主可以自行配置 `flask_xxljob` Logger。详见[日志](logging.zh-CN.md)。

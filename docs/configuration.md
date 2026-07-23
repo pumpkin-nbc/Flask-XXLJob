@@ -29,6 +29,19 @@ the constructor.
 | `XXL_JOB_ADMIN_FAILOVER_ON_HTTP_ERROR` | `True` | Try the next admin on a non-200 status. |
 | `XXL_JOB_ADMIN_FAILOVER_ON_INVALID_JSON` | `False` | Try the next admin on an invalid JSON response. |
 | `XXL_JOB_ADMIN_FAILOVER_ON_BUSINESS_ERROR` | `False` | Try the next admin on a business-code failure. |
+| `XXL_JOB_LOG_ENABLED` | `False` | Enable plugin-managed logging. |
+| `XXL_JOB_LOG_FILE_ENABLED` | `True` | Add a rotating-file handler when managed logging is enabled. |
+| `XXL_JOB_LOG_CONSOLE_ENABLED` | `False` | Add a console handler when managed logging is enabled. |
+| `XXL_JOB_LOG_LEVEL` | `"INFO"` | Shared level: `DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL`. |
+| `XXL_JOB_LOG_FORMAT` | `"%(asctime)s [%(levelname)s] [%(name)s] %(message)s"` | Shared standard Logging format. |
+| `XXL_JOB_LOG_DATE_FORMAT` | `"%Y-%m-%d %H:%M:%S"` | Formatter date format; empty uses Logging's default. |
+| `XXL_JOB_LOG_PATH` | `"./logs"` | Directory; relative paths resolve from the process working directory. |
+| `XXL_JOB_LOG_FILENAME` | `"flask-xxljob.log"` | Log file name. |
+| `XXL_JOB_LOG_ENCODING` | `"utf-8"` | Valid Python text encoding. |
+| `XXL_JOB_LOG_MAX_BYTES` | `10485760` | Positive rotation threshold in bytes. |
+| `XXL_JOB_LOG_BACKUP_COUNT` | `5` | Non-negative rotated backup count. |
+| `XXL_JOB_LOG_CONSOLE_STREAM` | `"stderr"` | `stdout` or `stderr` (case-insensitive). |
+| `XXL_JOB_LOG_PROPAGATE` | `False` | Propagate records while a managed target exists. |
 
 Request size is measured in **bytes**; `handleMsg` and `executorParams` lengths
 are measured in **characters** (Unicode code points), so multi-byte characters
@@ -67,3 +80,11 @@ preserved). A whitespace-only access token is normalized to empty (no-token
 mode), while a non-empty token is preserved. Validation messages name the
 offending key, its received type and the expected format. Bad configuration is
 never silently ignored.
+
+Logging booleans are strict booleans. Levels, console streams, encodings,
+rotation values and formats are validated during initialization; the format is
+exercised against a synthetic `LogRecord`, so an unknown field fails before
+the application starts. If managed logging is disabled—or both output targets
+are disabled—the extension does not override the runtime logger's level or
+propagation, allowing the host to configure the `flask_xxljob` logger. See
+[Logging](logging.md).

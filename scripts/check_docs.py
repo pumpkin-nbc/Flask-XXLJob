@@ -31,6 +31,7 @@ PAIRED_DOCS = [
     "docs/request-callbacks",
     "docs/callback",
     "docs/deployment",
+    "docs/logging",
     "docs/migration",
     "docs/development",
     "docs/publishing",
