@@ -2,7 +2,7 @@
 
 # API 参考
 
-本页记录 Flask-XXLJob 0.2.0 的公共 API。该扩展只负责适配 XXL-JOB 2.4.1 协议，
+本页记录 Flask-XXLJob 0.3.0 的公共 API。该扩展只负责适配 XXL-JOB 2.4.1 协议，
 绝不执行业务任务。
 
 ## `FlaskXXLJob`
@@ -30,7 +30,7 @@ def handle_run(request):
 
 ### 应用级注册
 
-为指定应用注册或读取处理函数。`app=None` 时使用当前应用上下文或最近初始化的应用。
+为指定应用注册或读取处理函数。`app=None` 时优先使用当前应用上下文；在上下文之外，只有恰好初始化了一个应用时才能省略 `app`。若已初始化多个应用，必须显式传入 `app`，否则抛出 `XXLJobError`。
 
 ```python
 xxl_job.register_callbacks(app, run=handle_run, replace=False)
@@ -72,7 +72,7 @@ xxl_job.stop_registry(app)
 
 ## 请求模型
 
-传入你的处理函数；所有字段均为类型化且 Unicode 安全。
+传入你的处理函数；所有字段均为类型化且 Unicode 安全。协议字符串字段只接受字符串；字段缺失或为 `None` 时采用该字段默认值。整数、布尔、数组与对象会被拒绝：执行器端点返回 XXL-JOB `code=500` 响应，出站回调 API 则在发送前抛出 `XXLJobValidationError`。
 
 ```python
 from flask_xxljob import (

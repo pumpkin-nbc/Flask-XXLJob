@@ -51,4 +51,4 @@ app.config.update(
 
 ## 校验
 
-配置在 `init_app()` 时校验。类型错误会抛出 `XXLJobConfigError`。`XXL_JOB_EXECUTOR_APP_NAME`、至少一个 `XXL_JOB_ADMIN_ADDRESSES` 条目以及 `XXL_JOB_EXECUTOR_ADDRESS` 仅在启用 `XXL_JOB_AUTO_REGISTER` 时才是必填项，因此仅做协议接入而不注册的部署可以省略它们。提供 Admin/执行器地址时必须使用 `http` 或 `https` 方案。Admin 与执行器地址在加载时会被规范化（去除首尾空格与多余尾部斜杠，同时保留上下文路径与顺序）。校验错误信息会指明出错的配置项、其收到的类型以及期望格式。错误配置绝不会被静默忽略。
+配置在 `init_app()` 时校验。类型错误会抛出 `XXLJobConfigError`。`XXL_JOB_EXECUTOR_APP_NAME`、至少一个 `XXL_JOB_ADMIN_ADDRESSES` 条目以及 `XXL_JOB_EXECUTOR_ADDRESS` 仅在启用 `XXL_JOB_AUTO_REGISTER` 时才是必填项，因此仅做协议接入而不注册的部署可以省略它们。提供 Admin/执行器地址时必须使用 `http` 或 `https` 方案，包含主机与合法端口，同时允许上下文路径。Admin 与执行器地址在加载时会被规范化（去除首尾空格与多余尾部斜杠，同时保留上下文路径与顺序）。只含空白的 Access Token 会被规范化为空（无 Token 模式），非空 Token 保持原值。校验错误信息会指明出错的配置项、其收到的类型以及期望格式。错误配置绝不会被静默忽略。

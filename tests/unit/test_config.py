@@ -122,6 +122,25 @@ def test_https_admin_address_supported():
     assert config.admin_addresses == ["https://admin:8443/xxl-job-admin"]
 
 
+@pytest.mark.parametrize(
+    "address",
+    ["http://", "https:///missing-host", "http://admin:not-a-port", "http://admin:70000"],
+)
+def test_invalid_admin_url_components_raise(address):
+    with pytest.raises(XXLJobConfigError):
+        XXLJobConfig.from_mapping(base_mapping(XXL_JOB_ADMIN_ADDRESSES=[address]))
+
+
+def test_access_token_whitespace_only_normalized_to_empty():
+    config = XXLJobConfig.from_mapping(base_mapping(XXL_JOB_ACCESS_TOKEN=" \t "))
+    assert config.access_token == ""
+
+
+def test_nonblank_access_token_preserves_exact_value():
+    config = XXLJobConfig.from_mapping(base_mapping(XXL_JOB_ACCESS_TOKEN=" token "))
+    assert config.access_token == " token "
+
+
 def test_admin_address_order_preserved():
     config = XXLJobConfig.from_mapping(
         base_mapping(

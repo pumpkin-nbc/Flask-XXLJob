@@ -65,9 +65,9 @@ def _changelog_version(text: str) -> str:
     return match.group(1) if match else ""
 
 
-def _pyproject_version() -> str:
-    text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
-    match = re.search(r'^version\s*=\s*"([^"]+)"', text, flags=re.MULTILINE)
+def _package_version() -> str:
+    text = (ROOT / "flask_xxljob" / "_version.py").read_text(encoding="utf-8")
+    match = re.search(r'^__version__\s*=\s*"([^"]+)"', text, flags=re.MULTILINE)
     return match.group(1) if match else ""
 
 
@@ -126,8 +126,8 @@ def main() -> int:
                 diff = en_keys.symmetric_difference(zh_keys)
                 errors.append(f"Config key mismatch in {base}: {sorted(diff)}")
 
-    # 4 & 10: CHANGELOG 版本一致且与 pyproject 匹配 / changelog + pyproject version.
-    py_version = _pyproject_version()
+    # 4 & 10: CHANGELOG 版本一致且与单一版本源匹配 / changelog + version source.
+    package_version = _package_version()
     en_changelog = _changelog_version((ROOT / "CHANGELOG.md").read_text(encoding="utf-8"))
     zh_changelog = _changelog_version(
         (ROOT / "CHANGELOG.zh-CN.md").read_text(encoding="utf-8")
@@ -136,10 +136,10 @@ def main() -> int:
         errors.append(
             f"CHANGELOG version mismatch: EN={en_changelog} ZH={zh_changelog}"
         )
-    if en_changelog != py_version:
+    if en_changelog != package_version:
         errors.append(
-            f"CHANGELOG version {en_changelog} does not match pyproject "
-            f"version {py_version}"
+            f"CHANGELOG version {en_changelog} does not match package "
+            f"version {package_version}"
         )
 
     # 7 & 8: 包名与导入名统一 / package and import name consistency.

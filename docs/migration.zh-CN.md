@@ -26,6 +26,42 @@ XXL-JOB -> Flask (Flask-XXLJob) -> your on_run submits the task
 
 任务路由、阻塞策略、超时与重试仍由 XXL-JOB Admin 管理。Flask-XXLJob 只负责协议中转；你的任务服务始终完全掌控执行过程。
 
+## 从 0.2.1 升级到 0.3.0
+
+0.3.0 消除了 Flask 应用上下文之外含糊的应用选择。若扩展实例恰好初始化了一个应用，辅助方法仍可省略 `app`；一旦初始化了多个应用，在上下文之外调用回调、注册、状态与注册服务生命周期辅助方法时必须显式传入 `app`。应用上下文内的调用方式不变。
+
+初始化前注册的 `on_*` 装饰器仍会注入其后初始化的每个应用，公共导入路径也保持不变。包元数据、`__version__` 与 CLI 现统一读取同一个内部版本源。
+
+### 升级
+
+```bash
+pip install --upgrade Flask-XXLJob==0.3.0
+```
+
+### 回滚
+
+```bash
+pip install Flask-XXLJob==0.2.1
+```
+
+## 从 0.2.0 升级到 0.2.1
+
+0.2.1 是稳定性版本。协议字符串字段现会拒绝非字符串值；执行器 `POST` 路由冲突会在初始化阶段、应用出现部分配置之前失败；注册服务停止超时时，会在正在进行的续约返回后完成已请求的注销。只含空白的 Access Token 会被视为空 Token；Admin 与执行器 URL 会严格校验方案、主机和端口，同时仍支持上下文路径。
+
+现有合法请求与配置无需修改。如果应用代码在构造 `TriggerRequest`、`CallbackRequest` 或 `RegistryRequest` 时给字符串字段传入整数、布尔、数组或对象，请在升级前显式转换为字符串。
+
+### 升级
+
+```bash
+pip install --upgrade Flask-XXLJob==0.2.1
+```
+
+### 回滚
+
+```bash
+pip install Flask-XXLJob==0.2.0
+```
+
 ## 从 0.1.2 升级到 0.2.0
 
 0.2.0 是向下兼容的次要版本。它新增了应用级请求处理函数注册、批量回调、可配置的同步 Admin 重试/故障转移策略、插件状态查询与 `xxljob status` CLI 命令、更丰富的 `CallResult` 字段、常量时间 Token 比较，以及公共异常层级。0.1.2 的全部公共 API、导入路径与配置项均保持不变。

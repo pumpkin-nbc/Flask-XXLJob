@@ -4,7 +4,23 @@ from __future__ import annotations
 
 import pytest
 
-from flask_xxljob.model.coerce import ModelParseError, coerce_int
+from flask_xxljob.model.coerce import ModelParseError, coerce_int, coerce_str
+
+
+def test_string_missing_returns_default():
+    assert coerce_str(None, "executorParams") == ""
+    assert coerce_str(None, "registryGroup", default="EXECUTOR") == "EXECUTOR"
+
+
+@pytest.mark.parametrize("value", ["", "   ", "任务参数"])
+def test_string_values_are_preserved(value):
+    assert coerce_str(value, "executorParams") == value
+
+
+@pytest.mark.parametrize("value", [1, True, [], {}])
+def test_non_string_values_are_rejected(value):
+    with pytest.raises(ModelParseError, match="executorParams.*must be a string"):
+        coerce_str(value, "executorParams")
 
 
 def test_missing_returns_default():

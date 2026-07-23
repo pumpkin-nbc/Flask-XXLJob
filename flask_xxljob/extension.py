@@ -6,12 +6,12 @@ Flask-XXLJob main extension class.
 
 from __future__ import annotations
 
-import atexit
-import os
 from typing import TYPE_CHECKING, Any, Optional
 
 from flask import Flask, current_app, has_app_context
 
+from ._app import ApplicationRegistry, ensure_executor_routes_available, executor_paths
+from ._lifecycle import should_start_registry, start_registry_with_shutdown
 from .callback.registry import (
     CallbackRegistry,
     IdleBeatCallback,
@@ -68,7 +68,7 @@ class FlaskXXLJob:
 
         ``current_app`` is never accessed during construction.
         """
-        self._app: Optional[Flask] = None
+        self._applications = ApplicationRegistry()
         # 扩展级默认处理函数：在任何 app 初始化前（模块级装饰器）注册的函数暂存
         # 于此，并在 ``init_app()`` 时注入到每个应用的注册表中。
         # Extension-level default callbacks: callbacks registered before any app
@@ -103,6 +103,8 @@ class FlaskXXLJob:
             )
 
         config = XXLJobConfig.from_mapping(app.config)
+        if config.enabled:
+            ensure_executor_routes_available(app, config.route_prefix)
 
         callback_registry = CallbackRegistry()
         # 将模块级默认处理函数注入到本应用的注册表，支持在 init_app 之前注册。
@@ -120,29 +122,17 @@ class FlaskXXLJob:
             callback_client=callback_client,
             registry_service=registry_service,
         )
-        app.extensions[EXTENSION_KEY] = runtime
-
         if config.enabled:
             blueprint = build_blueprint(_blueprint_name(app), config.route_prefix)
             app.register_blueprint(blueprint)
             self._register_protocol_error_handlers(app, config.route_prefix)
 
         self._register_cli(app)
+        app.extensions[EXTENSION_KEY] = runtime
+        self._applications.add(app)
 
-        self._app = app
-
-        if config.enabled and config.auto_register and self._should_start_registry(app):
-            registry_service.start()
-            atexit.register(_safe_stop, registry_service)
-
-    @staticmethod
-    def _should_start_registry(app: Flask) -> bool:
-        # 避免在 Flask debug reloader 的父进程中重复启动注册线程。
-        # Avoid starting the registry thread twice under the Flask debug
-        # reloader: only start in the reloader child, or when not reloading.
-        if os.environ.get("WERKZEUG_RUN_MAIN") == "true":
-            return True
-        return not app.debug
+        if config.enabled and config.auto_register and should_start_registry(app):
+            start_registry_with_shutdown(registry_service)
 
     def _register_cli(self, app: Flask) -> None:
         from .cli.commands import xxljob_cli
@@ -165,18 +155,14 @@ class FlaskXXLJob:
 
         from .response.executor import XXLJobResponse
 
-        prefix = route_prefix or ""
-        executor_paths = {
-            prefix + suffix
-            for suffix in ("/beat", "/idleBeat", "/run", "/kill", "/log")
-        }
+        paths = executor_paths(route_prefix)
 
         def _handle_protocol_routing_error() -> Any:
             exc = getattr(request, "routing_exception", None)
             if (
                 isinstance(exc, HTTPException)
                 and exc.code in (404, 405)
-                and request.path in executor_paths
+                and request.path in paths
             ):
                 return jsonify(
                     XXLJobResponse.failure(
@@ -244,17 +230,16 @@ class FlaskXXLJob:
         """
         为指定 Flask 应用一次性注册一个或多个请求处理函数。
 
-        所有处理函数参数均可选。``app`` 为 ``None`` 时使用当前应用上下文或最近一次
-        初始化的应用；显式传入 ``app`` 时用于多应用场景。除非 ``replace=True``，
+        所有处理函数参数均可选。``app`` 为 ``None`` 时使用当前应用上下文或唯一一个
+        已初始化应用；多应用场景必须显式传入 ``app``。除非 ``replace=True``，
         否则重复注册会抛出 :class:`XXLJobCallbackRegistrationError`。
 
         Register one or more request-callbacks for a Flask application at once.
 
         All callback arguments are optional. When ``app`` is ``None`` the current
-        application context (or the most recently initialized app) is used;
-        passing ``app`` explicitly supports multi-application setups. Duplicate
-        registration raises :class:`XXLJobCallbackRegistrationError` unless
-        ``replace=True``.
+        application context or the only initialized application is used. In a
+        multi-application setup, pass ``app`` explicitly. Duplicate registration
+        raises :class:`XXLJobCallbackRegistrationError` unless ``replace=True``.
         """
         registry = self._registry_for(app)
         if run is not None:
@@ -360,7 +345,7 @@ class FlaskXXLJob:
             log_id=log_id,
             log_date_time=log_date_time,
             handle_code=handle_code,
-            handle_msg=handle_msg or "",
+            handle_msg=handle_msg,
         )
 
     def callback_success(
@@ -494,31 +479,28 @@ class FlaskXXLJob:
         # confusing RuntimeError when there is no application context.
         if has_app_context():
             return current_app._get_current_object()  # type: ignore[attr-defined]
-        if self._app is not None:
-            return self._app
-        raise XXLJobError(
-            "No Flask application available. Pass app=... or run within an "
-            "application context."
-        )
+        return self._applications.resolve()
 
     def _target_registry(self) -> CallbackRegistry:
         # 处理函数注册目标解析：
         # 1. 应用上下文内 -> 当前应用注册表；
-        # 2. 已初始化过应用 -> 最近一次初始化的应用注册表；
-        # 3. 尚未初始化 -> 扩展级默认注册表（延迟注入）。
+        # 2. 仅初始化一个应用 -> 该应用注册表；
+        # 3. 已初始化多个应用 -> 要求显式应用或应用上下文；
+        # 4. 尚未初始化 -> 扩展级默认注册表（延迟注入）。
         # Resolve the registration target:
         # 1. within an app context -> current application's registry;
-        # 2. an app was initialized -> the most recently initialized app's;
-        # 3. no app yet -> the extension-level deferred registry.
+        # 2. exactly one app was initialized -> that application's registry;
+        # 3. multiple initialized apps -> require an explicit app/context;
+        # 4. no app yet -> the extension-level deferred registry.
         if has_app_context():
             return self._get_runtime().callback_registry
-        if self._app is not None:
-            return self._get_runtime(self._app).callback_registry
-        return self._deferred_callbacks
+        if self._applications.is_empty:
+            return self._deferred_callbacks
+        return self._get_runtime(self._applications.resolve()).callback_registry
 
     def _registry_for(self, app: Optional[Flask]) -> CallbackRegistry:
         # 显式传入 app -> 使用该应用的注册表（要求已初始化）；
-        # 未传入 -> 与装饰器一致，使用上下文/最近应用/延迟注册表。
+        # 未传入 -> 与装饰器一致，使用上下文/唯一应用/延迟注册表。
         # Explicit app -> that application's registry (must be initialized);
         # omitted -> same as decorators: context / last-app / deferred registry.
         if app is not None:
@@ -539,13 +521,6 @@ def _blueprint_name(app: Flask) -> str:
     # 每个应用使用带应用名的唯一 Blueprint 名称。
     # Use a unique blueprint name that includes the application name.
     return "xxljob_" + app.name.replace(".", "_")
-
-
-def _safe_stop(registry_service: RegistryService) -> None:
-    try:
-        registry_service.stop()
-    except Exception:  # noqa: BLE001 - 关闭阶段静默 / stay quiet during shutdown
-        pass
 
 
 __all__ = ["FlaskXXLJob", "EXTENSION_KEY"]

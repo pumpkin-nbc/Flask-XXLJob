@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from .coerce import coerce_str
+
 # 官方执行器注册分组常量 / Official executor registry group constant.
 REGISTRY_GROUP_EXECUTOR = "EXECUTOR"
 
@@ -41,8 +43,8 @@ class RegistryRequest:
         """
         return cls(
             registry_group=REGISTRY_GROUP_EXECUTOR,
-            registry_key=app_name,
-            registry_value=address,
+            registry_key=coerce_str(app_name, "registryKey"),
+            registry_value=coerce_str(address, "registryValue"),
         )
 
     @classmethod
@@ -53,9 +55,13 @@ class RegistryRequest:
         Build the object from an official ``RegistryParam`` JSON mapping.
         """
         return cls(
-            registry_group=data.get("registryGroup") or REGISTRY_GROUP_EXECUTOR,
-            registry_key=data.get("registryKey") or "",
-            registry_value=data.get("registryValue") or "",
+            registry_group=coerce_str(
+                data.get("registryGroup"),
+                "registryGroup",
+                default=REGISTRY_GROUP_EXECUTOR,
+            ),
+            registry_key=coerce_str(data.get("registryKey"), "registryKey"),
+            registry_value=coerce_str(data.get("registryValue"), "registryValue"),
         )
 
     def to_wire(self) -> dict:

@@ -6,11 +6,12 @@ XXL-JOB task-result callback client.
 
 from __future__ import annotations
 
-from typing import List, Sequence, Union
+from typing import List, Optional, Sequence, Union
 
 from ..config import XXLJobConfig
 from ..exceptions import XXLJobValidationError
 from ..model.callback import CallbackRequest
+from ..model.coerce import ModelParseError, coerce_str
 from . import CallResult, post_to_admins
 from .policy import AdminCallPolicy
 
@@ -43,7 +44,7 @@ class CallbackClient:
         log_id: int,
         log_date_time: int,
         handle_code: int,
-        handle_msg: str = "",
+        handle_msg: Optional[str] = None,
     ) -> CallResult:
         """
         发送一次任务结果回调。
@@ -61,7 +62,7 @@ class CallbackClient:
             log_id=log_id,
             log_date_time=log_date_time,
             handle_code=handle_code,
-            handle_msg=handle_msg or "",
+            handle_msg="" if handle_msg is None else handle_msg,
         )
         return self.callback_many([request])
 
@@ -128,7 +129,9 @@ class CallbackClient:
                     log_id=item["log_id"],
                     log_date_time=item["log_date_time"],
                     handle_code=item.get("handle_code", 200),
-                    handle_msg=item.get("handle_msg") or "",
+                    handle_msg=_require_str(
+                        index, "handle_msg", item.get("handle_msg")
+                    ),
                 )
             except KeyError as exc:
                 raise XXLJobValidationError(
@@ -144,7 +147,7 @@ class CallbackClient:
         _require_int(index, "log_date_time", request.log_date_time)
         _require_int(index, "handle_code", request.handle_code)
 
-        message = request.handle_msg or ""
+        message = _require_str(index, "handle_msg", request.handle_msg)
         max_length = self._config.callback_message_max_length
         if len(message) > max_length:
             message = message[:max_length]
@@ -165,3 +168,12 @@ def _require_int(index: int, name: str, value: object) -> None:
             f"callback item at index {index}: {name} must be an integer, got "
             f"{type(value).__name__}"
         )
+
+
+def _require_str(index: int, name: str, value: object) -> str:
+    try:
+        return coerce_str(value, name)
+    except ModelParseError as exc:
+        raise XXLJobValidationError(
+            f"callback item at index {index}: {exc}"
+        ) from exc

@@ -7,6 +7,31 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-07-22
+
+### Changed
+
+- Application resolution is no longer ambiguous outside a Flask application context: omitting `app` remains valid with exactly one initialized application, while an extension shared by multiple initialized applications now requires an explicit `app`. Pre-initialization `on_*` decorators continue to seed every subsequently initialized app.
+- Package metadata, `flask_xxljob.__version__` and the CLI now use `flask_xxljob/_version.py` as their single version source.
+- Route-conflict checks, application resolution and lifecycle coordination were split into internal helpers without changing public import paths.
+
+### Documentation
+
+- Updated the bilingual README, API reference and migration guide for strict string validation, route-conflict detection, delayed deregistration and the multi-application migration.
+
+## [0.2.1] - 2026-07-22
+
+### Fixed
+
+- Trigger, callback and registry string fields now accept only strings; missing values and `None` still use the documented defaults. Invalid executor requests return an XXL-JOB `code=500` response, while invalid outgoing callbacks raise `XXLJobValidationError` before any HTTP request is sent.
+- Initialization now rejects conflicting executor `POST` paths before registering CLI commands, blueprints, extension state or registry threads. Same-path `GET` routes remain valid.
+- When registry shutdown times out behind an in-flight renewal, the worker performs the requested deregistration after renewal completes, serially and at most once.
+- Whitespace-only access tokens are normalized to empty, and Admin/executor URLs are validated with standard URL parsing for an `http`/`https` scheme, host and valid port while preserving context paths.
+
+### Testing
+
+- Added strict model-validation, route-conflict and delayed-deregistration regressions. CI now enforces at least 90% coverage on Python 3.12/Flask 3 and validates documentation, wheel/sdist contents, metadata and an installed-wheel CLI smoke test.
+
 ## [0.2.0] - 2026-07-22
 
 ### Fixed

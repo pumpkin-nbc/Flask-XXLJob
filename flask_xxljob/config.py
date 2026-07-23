@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, List, Mapping
+from urllib.parse import urlsplit
 
 from .exceptions import XXLJobConfigError
 
@@ -80,7 +81,8 @@ class XXLJobConfig:
         enabled = _as_bool(merged, "XXL_JOB_ENABLED")
         auto_register = _as_bool(merged, "XXL_JOB_AUTO_REGISTER")
 
-        access_token = _as_str(merged, "XXL_JOB_ACCESS_TOKEN")
+        raw_access_token = _as_str(merged, "XXL_JOB_ACCESS_TOKEN")
+        access_token = raw_access_token if raw_access_token.strip() else ""
         executor_app_name = _as_str(merged, "XXL_JOB_EXECUTOR_APP_NAME")
         executor_address = _normalize_address(
             _as_str(merged, "XXL_JOB_EXECUTOR_ADDRESS")
@@ -288,13 +290,18 @@ def _normalize_address(value: str) -> str:
 
 
 def _validate_http_url(key: str, value: str) -> None:
-    # 仅校验方案，不做严格 URL 解析，兼容带路径/端口的 Admin 地址。
-    # Only validate the scheme, not a strict URL parse, to stay compatible with
-    # admin addresses that carry a path or port.
-    lowered = value.strip().lower()
-    if not (lowered.startswith("http://") or lowered.startswith("https://")):
+    # Validate scheme, host and port while allowing an Admin context path.
+    try:
+        parsed = urlsplit(value)
+        _validated_port = parsed.port  # Validates the port syntax and range.
+    except ValueError as exc:
         raise XXLJobConfigError(
-            f"{key} must be an http/https URL (e.g. 'http://host:port/path'); "
+            f"{key} must be a valid http/https URL (e.g. 'http://host:port/path'); "
+            f"got '{value}'."
+        ) from exc
+    if parsed.scheme.lower() not in ("http", "https") or not parsed.hostname:
+        raise XXLJobConfigError(
+            f"{key} must be a valid http/https URL (e.g. 'http://host:port/path'); "
             f"got '{value}'."
         )
 

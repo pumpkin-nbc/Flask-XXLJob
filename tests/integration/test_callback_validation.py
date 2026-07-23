@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from flask_xxljob import FlaskXXLJob
-from flask_xxljob.exceptions import XXLJobRequestError
+from flask_xxljob.exceptions import XXLJobRequestError, XXLJobValidationError
 from tests.conftest import make_app
 
 
@@ -65,3 +65,22 @@ def test_callback_backward_compatible_handle_msg_keyword(mocker):
         ext.callback(log_id=1, log_date_time=2, handle_code=200, handle_msg="done")
     payload = post.call_args.kwargs["json"]
     assert payload[0]["handleMsg"] == "done"
+
+
+@pytest.mark.parametrize("handle_msg", [1, True, [], {}])
+def test_callback_rejects_non_string_handle_msg_without_sending(
+    mocker, handle_msg
+):
+    app, ext = build()
+    post = mocker.patch("flask_xxljob.client.requests.post")
+
+    with app.app_context():
+        with pytest.raises(XXLJobValidationError, match="handle_msg.*must be a string"):
+            ext.callback(
+                log_id=1,
+                log_date_time=2,
+                handle_code=200,
+                handle_msg=handle_msg,
+            )
+
+    post.assert_not_called()

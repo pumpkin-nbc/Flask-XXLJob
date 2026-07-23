@@ -6,7 +6,12 @@ import pytest
 from flask import Flask
 
 from flask_xxljob import FlaskXXLJob, XXLJobResponse
-from flask_xxljob.exceptions import XXLJobAlreadyInitializedError, XXLJobConfigError
+from flask_xxljob.exceptions import (
+    XXLJobAlreadyInitializedError,
+    XXLJobConfigError,
+    XXLJobError,
+    XXLJobInitializationError,
+)
 from flask_xxljob.extension import EXTENSION_KEY
 from tests.conftest import BASE_CONFIG, make_app
 
@@ -59,15 +64,29 @@ def test_multiple_app_runtime_isolation():
 
     app2, _ = make_app(ext, name="app2")
 
-    @ext.on_run
     def run2(request):
         return XXLJobResponse.failure("app2")
+
+    ext.set_run_callback(app2, run2)
 
     r1 = app1.extensions[EXTENSION_KEY].callback_registry.run
     r2 = app2.extensions[EXTENSION_KEY].callback_registry.run
     assert r1 is run1
     assert r2 is run2
     assert r1 is not r2
+
+
+def test_multiple_apps_require_explicit_app_or_context():
+    ext = FlaskXXLJob()
+    app1, _ = make_app(ext, name="ambiguous1")
+    app2, _ = make_app(ext, name="ambiguous2")
+
+    with pytest.raises(XXLJobError, match="Multiple Flask applications"):
+        ext.get_status()
+
+    assert ext.get_status(app1).enabled is True
+    with app2.app_context():
+        assert ext.get_status().enabled is True
 
 
 def test_blueprint_registered(app_ext):
@@ -128,3 +147,50 @@ def test_prefixed_run_dispatches():
 def test_cli_command_registered(app_ext):
     app, _ = app_ext
     assert "xxljob" in app.cli.commands
+
+
+@pytest.mark.parametrize("path", ["/beat", "/idleBeat", "/run", "/kill", "/log"])
+def test_post_route_conflict_fails_without_partial_initialization(path):
+    app = Flask("conflict_" + path.strip("/"))
+    app.config.update(BASE_CONFIG)
+    app.add_url_rule(path, endpoint="host", view_func=lambda: "host", methods=["POST"])
+
+    with pytest.raises(XXLJobInitializationError, match=path):
+        FlaskXXLJob(app)
+
+    assert EXTENSION_KEY not in app.extensions
+    assert "xxljob" not in app.cli.commands
+    assert not any(name.startswith("xxljob_") for name in app.blueprints)
+
+
+def test_prefixed_post_route_conflict_fails():
+    app = Flask("prefixed_conflict")
+    app.config.update(BASE_CONFIG, XXL_JOB_ROUTE_PREFIX="/executor")
+    app.add_url_rule(
+        "/executor/run", endpoint="host_run", view_func=lambda: "host", methods=["POST"]
+    )
+
+    with pytest.raises(XXLJobInitializationError, match="/executor/run"):
+        FlaskXXLJob(app)
+
+
+def test_get_only_host_route_does_not_conflict():
+    app = Flask("get_only")
+    app.config.update(BASE_CONFIG)
+    app.add_url_rule("/run", endpoint="host_get", view_func=lambda: "host", methods=["GET"])
+
+    FlaskXXLJob(app)
+
+    assert app.test_client().get("/run").data == b"host"
+
+
+def test_disabled_extension_does_not_check_route_conflicts():
+    app = Flask("disabled_conflict")
+    app.config.update(BASE_CONFIG, XXL_JOB_ENABLED=False)
+    app.add_url_rule("/run", endpoint="host_run", view_func=lambda: "host", methods=["POST"])
+
+    FlaskXXLJob(app)
+
+    assert EXTENSION_KEY in app.extensions
+    run_rules = [rule for rule in app.url_map.iter_rules() if rule.rule == "/run"]
+    assert len(run_rules) == 1

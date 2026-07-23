@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from .coerce import coerce_int
+from .coerce import coerce_int, coerce_str
 
 
 @dataclass
@@ -43,7 +43,7 @@ class CallbackRequest:
             log_id=coerce_int(data.get("logId"), "logId"),
             log_date_time=coerce_int(data.get("logDateTim"), "logDateTim"),
             handle_code=coerce_int(data.get("handleCode"), "handleCode"),
-            handle_msg=data.get("handleMsg") or "",
+            handle_msg=coerce_str(data.get("handleMsg"), "handleMsg"),
         )
 
     def to_wire(self) -> dict:

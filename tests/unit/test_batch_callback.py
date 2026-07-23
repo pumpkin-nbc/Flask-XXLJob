@@ -92,6 +92,39 @@ def test_callback_many_invalid_item_rejects_whole_batch(mocker):
     post.assert_not_called()
 
 
+@pytest.mark.parametrize("handle_msg", [1, True, [], {}])
+def test_single_callback_rejects_non_string_message_without_sending(
+    mocker, handle_msg
+):
+    post = mocker.patch("flask_xxljob.client.requests.post")
+    client = CallbackClient(make_config())
+
+    with pytest.raises(XXLJobValidationError, match="handle_msg.*must be a string"):
+        client.callback(
+            log_id=1,
+            log_date_time=2,
+            handle_code=200,
+            handle_msg=handle_msg,
+        )
+
+    post.assert_not_called()
+
+
+def test_callback_many_rejects_non_string_message_without_sending(mocker):
+    post = mocker.patch("flask_xxljob.client.requests.post")
+    client = CallbackClient(make_config())
+
+    with pytest.raises(XXLJobValidationError, match="handle_msg.*must be a string"):
+        client.callback_many(
+            [
+                CallbackRequest(log_id=1, log_date_time=2, handle_msg="ok"),
+                {"log_id": 2, "log_date_time": 3, "handle_msg": ["secret"]},
+            ]
+        )
+
+    post.assert_not_called()
+
+
 def test_callback_many_bad_type_raises(mocker):
     mocker.patch("flask_xxljob.client.requests.post")
     client = CallbackClient(make_config())

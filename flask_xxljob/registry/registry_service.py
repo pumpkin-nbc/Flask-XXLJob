@@ -43,6 +43,11 @@ class RegistryService:
         # registration and deregistration requests.
         self._lock = threading.Lock()
         self._call_lock = threading.Lock()
+        # A stop request may time out while a renewal call is still in flight.
+        # Keep the deregistration intent until the worker exits, and let exactly
+        # one caller claim it.  These flags are protected by ``_lock``.
+        self._remove_requested = False
+        self._remove_claimed = False
         # 最近一次注册/续约/注销结果（仅插件状态，绝不含 Token 或业务状态）。
         # Last registration/renewal/removal result (plugin status only; never a
         # token or any business state).
@@ -166,6 +171,8 @@ class RegistryService:
             if self._thread is not None and self._thread.is_alive():
                 return
             self._stop_event.clear()
+            self._remove_requested = False
+            self._remove_claimed = False
             thread = threading.Thread(
                 target=self._run_loop,
                 name="flask-xxljob-registry",
@@ -176,17 +183,51 @@ class RegistryService:
 
     def _run_loop(self) -> None:
         interval = self._config.registry_interval
-        # 立即注册一次，随后按间隔续约。
-        # Register immediately, then renew on the configured interval.
         try:
-            self.register_once()
-        except Exception:  # noqa: BLE001 - 保护主流程 / protect the main flow
-            logger.exception("Unexpected error during XXL-JOB registration.")
-        while not self._stop_event.wait(interval):
+            # Register immediately, then renew on the configured interval.
             try:
                 self.register_once()
-            except Exception:  # noqa: BLE001
-                logger.exception("Unexpected error during XXL-JOB registration renewal.")
+            except Exception:  # noqa: BLE001 - protect the main flow
+                logger.exception("Unexpected error during XXL-JOB registration.")
+            while not self._stop_event.wait(interval):
+                try:
+                    self.register_once()
+                except Exception:  # noqa: BLE001
+                    logger.exception(
+                        "Unexpected error during XXL-JOB registration renewal."
+                    )
+        finally:
+            # If stop() could not wait for an in-flight renewal, the worker is
+            # responsible for deregistering after that renewal has completed.
+            should_remove = self._claim_remove()
+            if should_remove:
+                self._perform_claimed_remove()
+            with self._lock:
+                if self._thread is threading.current_thread():
+                    self._thread = None
+
+    def _claim_remove(self) -> bool:
+        """Claim a pending deregistration request exactly once."""
+        with self._lock:
+            if not self._remove_requested or self._remove_claimed:
+                return False
+            self._remove_claimed = True
+            return True
+
+    def _perform_claimed_remove(self) -> None:
+        """Perform an already claimed deregistration and record exceptions."""
+        try:
+            self.remove_once()
+        except Exception as exc:  # noqa: BLE001
+            self._record(
+                CallResult(
+                    success=False,
+                    error="Unexpected error during XXL-JOB executor removal.",
+                    error_type=type(exc).__name__,
+                ),
+                is_remove=True,
+            )
+            logger.exception("Unexpected error during XXL-JOB executor removal.")
 
     def stop(self, remove: bool = True) -> None:
         """
@@ -194,37 +235,38 @@ class RegistryService:
 
         Stop the renewal thread and optionally deregister the executor.
         """
+        # Record the stop intent while holding the lifecycle lock, but never
+        # wait for the worker while holding it: the worker needs the same lock
+        # to claim a deferred deregistration request as it exits.
         with self._lock:
             self._stop_event.set()
-            thread = self._thread
-            if (
-                thread is not None
-                and thread.is_alive()
-                and thread is not threading.current_thread()
-            ):
-                thread.join(timeout=self._config.registry_interval)
-
-            if thread is not None and thread.is_alive():
-                # 仍在进行的续约无法被安全取消。此时不能发送注销，否则旧续约可能
-                # 在注销之后成功，从而把执行器重新注册。线程会在当前调用返回后看到
-                # stop_event 并自行退出；保留引用以使状态快照准确反映其仍在运行。
-                # An in-flight renewal cannot be cancelled safely. Do not send
-                # deregistration here: the old renewal could succeed afterwards
-                # and register the executor again. Keep the thread reference so
-                # status snapshots accurately report that it is still exiting.
-                logger.warning(
-                    "XXL-JOB registry thread is still stopping after %s seconds; "
-                    "skipping deregistration to avoid racing an in-flight renewal.",
-                    self._config.registry_interval,
-                )
-                return
-
-            self._thread = None
             if remove:
-                try:
-                    self.remove_once()
-                except Exception:  # noqa: BLE001
-                    logger.exception("Unexpected error during XXL-JOB executor removal.")
+                self._remove_requested = True
+            thread = self._thread
+
+        if (
+            thread is not None
+            and thread.is_alive()
+            and thread is not threading.current_thread()
+        ):
+            thread.join(timeout=self._config.registry_interval)
+
+        if thread is not None and thread.is_alive():
+            # The worker retains the pending remove request and performs it as
+            # soon as the in-flight renewal returns.
+            logger.warning(
+                "XXL-JOB registry thread is still stopping after %s seconds; "
+                "deregistration will run after the in-flight renewal finishes.",
+                self._config.registry_interval,
+            )
+            return
+
+        with self._lock:
+            if self._thread is thread:
+                self._thread = None
+
+        if self._claim_remove():
+            self._perform_claimed_remove()
 
     @property
     def is_running(self) -> bool:

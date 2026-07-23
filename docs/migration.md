@@ -28,6 +28,56 @@ Job routing, block strategies, timeouts and retries are still managed by the
 XXL-JOB admin. Flask-XXLJob only relays the protocol; your task service keeps
 full control over execution.
 
+## Upgrading 0.2.1 to 0.3.0
+
+0.3.0 removes ambiguous application selection outside a Flask application
+context. If an extension instance has initialized exactly one app, helpers may
+still omit `app`. Once it has initialized multiple apps, callback, registration,
+status and registry-lifecycle helpers must receive `app` explicitly. Calls made
+inside an application context are unchanged.
+
+Pre-initialization `on_*` decorators still seed every application initialized
+later, and public imports remain unchanged. Package metadata, `__version__` and
+the CLI now all read the same internal version source.
+
+### Upgrade
+
+```bash
+pip install --upgrade Flask-XXLJob==0.3.0
+```
+
+### Rollback
+
+```bash
+pip install Flask-XXLJob==0.2.1
+```
+
+## Upgrading 0.2.0 to 0.2.1
+
+0.2.1 is a stability release. Protocol string fields now reject non-string
+values, conflicting executor `POST` routes fail during initialization before
+the app is partially configured, and a timed-out registry shutdown completes
+its requested deregistration after an in-flight renewal returns. Access tokens
+containing only whitespace are treated as empty, and Admin/executor URLs receive
+strict scheme, host and port validation while context paths remain supported.
+
+Existing valid payloads and configurations require no changes. If application
+code constructs `TriggerRequest`, `CallbackRequest` or `RegistryRequest` with
+numbers, booleans, arrays or objects in string fields, convert those values to
+strings explicitly before upgrading.
+
+### Upgrade
+
+```bash
+pip install --upgrade Flask-XXLJob==0.2.1
+```
+
+### Rollback
+
+```bash
+pip install Flask-XXLJob==0.2.0
+```
+
 ## Upgrading 0.1.2 to 0.2.0
 
 0.2.0 is a backward-compatible minor release. It adds application-level callback

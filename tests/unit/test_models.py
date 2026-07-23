@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from flask_xxljob import (
     CallbackRequest,
     IdleBeatRequest,
@@ -10,6 +12,7 @@ from flask_xxljob import (
     RegistryRequest,
     TriggerRequest,
 )
+from flask_xxljob.model.coerce import ModelParseError
 
 
 def test_trigger_from_wire_maps_official_fields():
@@ -81,3 +84,77 @@ def test_registry_request_for_executor():
         "registryKey": "app",
         "registryValue": "http://127.0.0.1:5001",
     }
+
+
+@pytest.mark.parametrize(
+    ("field", "attribute"),
+    [
+        ("executorHandler", "executor_handler"),
+        ("executorParams", "executor_params"),
+        ("executorBlockStrategy", "executor_block_strategy"),
+        ("glueType", "glue_type"),
+        ("glueSource", "glue_source"),
+    ],
+)
+def test_trigger_string_fields_preserve_strings_and_default_none(field, attribute):
+    assert getattr(TriggerRequest.from_wire({field: None}), attribute) == ""
+    for value in ("", "   ", "任务参数"):
+        assert getattr(TriggerRequest.from_wire({field: value}), attribute) == value
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "executorHandler",
+        "executorParams",
+        "executorBlockStrategy",
+        "glueType",
+        "glueSource",
+    ],
+)
+@pytest.mark.parametrize("value", [1, True, [], {}])
+def test_trigger_string_fields_reject_non_strings(field, value):
+    with pytest.raises(ModelParseError, match=field):
+        TriggerRequest.from_wire({field: value})
+
+
+def test_callback_string_field_is_strict():
+    assert CallbackRequest.from_wire({}).handle_msg == ""
+    assert CallbackRequest.from_wire({"handleMsg": None}).handle_msg == ""
+    for value in ("", "   ", "任务完成"):
+        assert CallbackRequest.from_wire({"handleMsg": value}).handle_msg == value
+    for value in (1, True, [], {}):
+        with pytest.raises(ModelParseError, match="handleMsg"):
+            CallbackRequest.from_wire({"handleMsg": value})
+
+
+@pytest.mark.parametrize(
+    ("field", "attribute", "default"),
+    [
+        ("registryGroup", "registry_group", "EXECUTOR"),
+        ("registryKey", "registry_key", ""),
+        ("registryValue", "registry_value", ""),
+    ],
+)
+def test_registry_string_fields_preserve_strings_and_default_none(
+    field, attribute, default
+):
+    assert getattr(RegistryRequest.from_wire({}), attribute) == default
+    assert getattr(RegistryRequest.from_wire({field: None}), attribute) == default
+    for value in ("", "   ", "执行器"):
+        assert getattr(RegistryRequest.from_wire({field: value}), attribute) == value
+
+
+@pytest.mark.parametrize("field", ["registryGroup", "registryKey", "registryValue"])
+@pytest.mark.parametrize("value", [1, True, [], {}])
+def test_registry_string_fields_reject_non_strings(field, value):
+    with pytest.raises(ModelParseError, match=field):
+        RegistryRequest.from_wire({field: value})
+
+
+@pytest.mark.parametrize("value", [1, True, [], {}])
+def test_registry_for_executor_rejects_non_string_values(value):
+    with pytest.raises(ModelParseError, match="registryKey"):
+        RegistryRequest.for_executor(value, "address")
+    with pytest.raises(ModelParseError, match="registryValue"):
+        RegistryRequest.for_executor("app", value)

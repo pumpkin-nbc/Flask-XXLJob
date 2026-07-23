@@ -85,7 +85,9 @@ def create_app():
 
 Read the currently registered handler with `get_run_callback(app)` (and the
 `idle_beat`/`kill`/`log` variants). When `app=None`, the current application
-context or the most recently initialized application is used.
+context is used. Outside a context, omission is allowed with exactly one
+initialized application; when the extension has initialized multiple apps,
+pass `app` explicitly.
 
 Resolution priority when dispatching a request: the application-specific
 registry is checked first, then the extension-level defaults set by the `on_*`

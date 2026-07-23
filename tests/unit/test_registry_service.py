@@ -40,12 +40,41 @@ class BlockingAdmin(FakeAdmin):
         super().__init__()
         self.registry_started = threading.Event()
         self.registry_release = threading.Event()
+        self.remove_started = threading.Event()
+        self.registry_in_progress = False
+        self.calls_overlapped = False
 
     def registry(self, request):
         self.registry_calls += 1
+        self.registry_in_progress = True
         self.registry_started.set()
         self.registry_release.wait(timeout=5)
+        self.registry_in_progress = False
         return CallResult(success=True, address="http://a:8080")
+
+    def registry_remove(self, request):
+        self.remove_calls += 1
+        self.calls_overlapped = self.registry_in_progress
+        self.remove_started.set()
+        return CallResult(success=True, address="http://a:8080")
+
+
+class FailingRemoveAdmin(FakeAdmin):
+    def registry_remove(self, request):
+        self.remove_calls += 1
+        return CallResult(
+            success=False,
+            address="http://a:8080",
+            error="remove failed",
+            error_type="business",
+        )
+
+
+class RaisingRemoveAdmin(FakeAdmin):
+    def registry_remove(self, request):
+        self.remove_calls += 1
+        raise RuntimeError("remove exploded")
+
 
 def test_register_once_result():
     admin = FakeAdmin()
@@ -87,7 +116,7 @@ def test_stop_triggers_remove():
     assert admin.remove_calls == 1
 
 
-def test_stop_skips_remove_while_renewal_is_still_running():
+def test_stop_defers_remove_until_blocked_renewal_finishes():
     admin = BlockingAdmin()
     service = RegistryService(make_config(XXL_JOB_REGISTRY_INTERVAL=1), admin)
     service.start()
@@ -100,5 +129,63 @@ def test_stop_skips_remove_while_renewal_is_still_running():
     assert service.status_snapshot()["registry_thread_running"] is True
 
     admin.registry_release.set()
+    assert admin.remove_started.wait(timeout=1)
+    assert admin.calls_overlapped is False
+    assert admin.remove_calls == 1
+
+    # A later stop only waits for cleanup; it must not deregister again.
     service.stop(remove=False)
     assert service.is_running is False
+    assert admin.remove_calls == 1
+
+
+def test_repeated_stop_deregisters_at_most_once():
+    admin = FakeAdmin()
+    service = RegistryService(make_config(XXL_JOB_REGISTRY_INTERVAL=3600), admin)
+    service.start()
+
+    service.stop(remove=True)
+    service.stop(remove=True)
+
+    assert admin.remove_calls == 1
+
+
+def test_stop_without_remove_does_not_deregister():
+    admin = FakeAdmin()
+    service = RegistryService(make_config(XXL_JOB_REGISTRY_INTERVAL=3600), admin)
+    service.start()
+
+    service.stop(remove=False)
+    service.stop(remove=False)
+
+    assert admin.remove_calls == 0
+
+
+def test_remove_failure_is_kept_in_status_snapshot():
+    admin = FailingRemoveAdmin()
+    service = RegistryService(make_config(XXL_JOB_REGISTRY_INTERVAL=3600), admin)
+    service.start()
+
+    service.stop(remove=True)
+
+    snapshot = service.status_snapshot()
+    assert snapshot["registered"] is True
+    assert snapshot["last_registry_success"] is False
+    assert snapshot["last_registry_error_type"] == "business"
+    assert snapshot["last_registry_message"] == "remove failed"
+
+
+def test_unexpected_remove_exception_is_kept_in_status_snapshot():
+    admin = RaisingRemoveAdmin()
+    service = RegistryService(make_config(XXL_JOB_REGISTRY_INTERVAL=3600), admin)
+    service.start()
+
+    service.stop(remove=True)
+
+    snapshot = service.status_snapshot()
+    assert snapshot["registered"] is True
+    assert snapshot["last_registry_success"] is False
+    assert snapshot["last_registry_error_type"] == "RuntimeError"
+    assert snapshot["last_registry_message"] == (
+        "Unexpected error during XXL-JOB executor removal."
+    )

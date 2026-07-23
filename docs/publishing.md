@@ -14,8 +14,8 @@ This produces a wheel and a source distribution in `dist/`:
 
 ```text
 dist/
-  flask_xxljob-0.2.0-py3-none-any.whl
-  flask_xxljob-0.2.0.tar.gz
+  flask_xxljob-0.3.0-py3-none-any.whl
+  flask_xxljob-0.3.0.tar.gz
 ```
 
 ## Check

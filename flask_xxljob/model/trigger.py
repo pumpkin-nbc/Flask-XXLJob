@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 from ..utils.json_utils import try_parse_json
-from .coerce import coerce_int
+from .coerce import coerce_int, coerce_str
 
 
 @dataclass
@@ -50,14 +50,18 @@ class TriggerRequest:
         """
         return cls(
             job_id=coerce_int(data.get("jobId"), "jobId"),
-            executor_handler=data.get("executorHandler") or "",
-            executor_params=data.get("executorParams") or "",
-            executor_block_strategy=data.get("executorBlockStrategy") or "",
+            executor_handler=coerce_str(
+                data.get("executorHandler"), "executorHandler"
+            ),
+            executor_params=coerce_str(data.get("executorParams"), "executorParams"),
+            executor_block_strategy=coerce_str(
+                data.get("executorBlockStrategy"), "executorBlockStrategy"
+            ),
             executor_timeout=coerce_int(data.get("executorTimeout"), "executorTimeout"),
             log_id=coerce_int(data.get("logId"), "logId"),
             log_date_time=coerce_int(data.get("logDateTime"), "logDateTime"),
-            glue_type=data.get("glueType") or "",
-            glue_source=data.get("glueSource") or "",
+            glue_type=coerce_str(data.get("glueType"), "glueType"),
+            glue_source=coerce_str(data.get("glueSource"), "glueSource"),
             glue_update_time=coerce_int(data.get("glueUpdatetime"), "glueUpdatetime"),
             broadcast_index=coerce_int(data.get("broadcastIndex"), "broadcastIndex"),
             broadcast_total=coerce_int(data.get("broadcastTotal"), "broadcastTotal"),

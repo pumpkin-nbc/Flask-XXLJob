@@ -17,6 +17,29 @@ class ModelParseError(ValueError):
     """
 
 
+def coerce_str(value: Any, field: str, default: str = "") -> str:
+    """
+    将官方字符串字段校验为 ``str``。
+
+    缺失值（``None``）返回默认值；包括空字符串和纯空白字符串在内的
+    ``str`` 值保持原样。其他类型不进行隐式字符串转换，而是抛出
+    :class:`ModelParseError`。
+
+    Validate an official string field as ``str``.
+
+    A missing value (``None``) returns the default. String values, including
+    empty and whitespace-only strings, are preserved unchanged. Other types
+    are never converted implicitly and raise :class:`ModelParseError`.
+    """
+    if value is None:
+        return default
+    if isinstance(value, str):
+        return value
+    raise ModelParseError(
+        f"field '{field}' must be a string, got {type(value).__name__}"
+    )
+
+
 def coerce_int(value: Any, field: str, default: int = 0) -> int:
     """
     将官方数字字段转换为 ``int``。

@@ -103,6 +103,28 @@ def test_run_missing_fields_defaults():
     assert app.test_client().post("/run", json={}).json["code"] == 200
 
 
+def test_run_rejects_non_string_field_without_dispatching_or_leaking_value():
+    app, ext = build()
+    called = False
+
+    @ext.on_run
+    def handler(request):
+        nonlocal called
+        called = True
+        return XXLJobResponse.success()
+
+    secret = "must-not-appear"
+    resp = app.test_client().post(
+        "/run", json={"executorParams": {"secret": secret}}
+    )
+
+    assert resp.status_code == 200
+    assert resp.json["code"] == 500
+    assert "executorParams" in resp.json["msg"]
+    assert secret not in resp.json["msg"]
+    assert called is False
+
+
 def test_run_oversized_params_rejected():
     app, ext = build(XXL_JOB_MAX_PARAM_LENGTH=10)
 

@@ -2,7 +2,7 @@
 
 # API reference
 
-This page documents the public API of Flask-XXLJob 0.2.0. The extension only
+This page documents the public API of Flask-XXLJob 0.3.0. The extension only
 adapts the XXL-JOB 2.4.1 protocol; it never executes business tasks.
 
 ## `FlaskXXLJob`
@@ -32,7 +32,9 @@ def handle_run(request):
 ### Application-level registration
 
 Register or read handlers for a specific application. `app=None` uses the current
-application context or the most recently initialized app.
+application context. Outside a context it is accepted when exactly one app has
+been initialized; with multiple initialized apps, pass `app` explicitly or an
+`XXLJobError` is raised.
 
 ```python
 xxl_job.register_callbacks(app, run=handle_run, replace=False)
@@ -75,7 +77,11 @@ xxl_job.stop_registry(app)
 
 ## Request models
 
-Passed to your handlers; all fields are typed and Unicode-safe.
+Passed to your handlers; all fields are typed and Unicode-safe. Protocol string
+fields accept only strings; a missing value or `None` uses that field's default.
+Numbers, booleans, arrays and objects are rejected: executor endpoints return an
+XXL-JOB `code=500` response, while outgoing callback APIs raise
+`XXLJobValidationError` before sending.
 
 ```python
 from flask_xxljob import (

@@ -77,7 +77,7 @@ def create_app():
     return app
 ```
 
-使用 `get_run_callback(app)`（以及 `idle_beat`/`kill`/`log` 变体）读取当前已注册的处理函数。当 `app=None` 时，使用当前应用上下文或最近初始化的应用。
+使用 `get_run_callback(app)`（以及 `idle_beat`/`kill`/`log` 变体）读取当前已注册的处理函数。当 `app=None` 时使用当前应用上下文；在上下文之外，恰好初始化一个应用时可以省略，初始化多个应用后则必须显式传入 `app`。
 
 请求分发时的解析优先级：先检查应用级注册表，再检查由 `on_*` 装饰器设置的扩展级默认。两者都未配置时，接口返回标准的“未配置”失败。
 

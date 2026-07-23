@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "Flask-XXLJob"
-version = "0.2.0"
+dynamic = ["version"]
 description = "A Flask extension that implements the XXL-JOB 2.4.1 executor protocol."
 readme = "README.md"
 requires-python = ">=3.8"
@@ -59,6 +59,9 @@ Changelog = "https://github.com/pumpkin-nbc/Flask-XXLJob/blob/main/CHANGELOG.md"
 
 [project.scripts]
 flask-xxljob = "flask_xxljob.cli.commands:main"
+
+[tool.hatch.version]
+path = "flask_xxljob/_version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["flask_xxljob"]
