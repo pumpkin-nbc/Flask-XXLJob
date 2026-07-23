@@ -29,26 +29,19 @@ def test_defaults_applied():
     assert config.timeout == (3, 5)
     assert config.log_enabled is False
     assert config.log_file_enabled is True
-    assert config.log_console_enabled is False
+    assert config.log_console_enabled is True
     assert config.log_level == "INFO"
     assert config.log_path == "./logs"
     assert config.log_filename == "flask-xxljob.log"
     assert config.log_encoding == "utf-8"
     assert config.log_max_bytes == 10 * 1024 * 1024
     assert config.log_backup_count == 5
-    assert config.log_console_stream == "stderr"
     assert config.log_propagate is False
 
 
-def test_log_choices_are_case_insensitive():
-    config = XXLJobConfig.from_mapping(
-        base_mapping(
-            XXL_JOB_LOG_LEVEL="debug",
-            XXL_JOB_LOG_CONSOLE_STREAM="STDOUT",
-        )
-    )
+def test_log_level_is_case_insensitive():
+    config = XXLJobConfig.from_mapping(base_mapping(XXL_JOB_LOG_LEVEL="debug"))
     assert config.log_level == "DEBUG"
-    assert config.log_console_stream == "stdout"
 
 
 def test_missing_admin_addresses_raises():

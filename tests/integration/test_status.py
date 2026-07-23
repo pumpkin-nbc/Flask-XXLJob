@@ -33,7 +33,6 @@ def test_initial_status():
     assert status.log_file_enabled is False
     assert status.log_console_enabled is False
     assert status.log_file is None
-    assert status.log_console_stream == "stderr"
 
 
 def test_logging_status_reports_effective_outputs(tmp_path):
@@ -43,7 +42,6 @@ def test_logging_status_reports_effective_outputs(tmp_path):
         XXL_JOB_LOG_ENABLED=True,
         XXL_JOB_LOG_FILE_ENABLED=True,
         XXL_JOB_LOG_CONSOLE_ENABLED=True,
-        XXL_JOB_LOG_CONSOLE_STREAM="stdout",
         XXL_JOB_LOG_LEVEL="DEBUG",
         XXL_JOB_LOG_PATH=str(tmp_path),
     )
@@ -55,7 +53,6 @@ def test_logging_status_reports_effective_outputs(tmp_path):
     assert status.log_file_enabled is True
     assert status.log_console_enabled is True
     assert status.log_file == str((tmp_path / "flask-xxljob.log").resolve())
-    assert status.log_console_stream == "stdout"
 
 
 def test_status_after_success(mocker):

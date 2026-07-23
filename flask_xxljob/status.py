@@ -40,7 +40,6 @@ class XXLJobStatus:
     log_file_enabled: bool = False
     log_console_enabled: bool = False
     log_file: Optional[str] = None
-    log_console_stream: str = "stderr"
 
 
 __all__ = ["XXLJobStatus"]

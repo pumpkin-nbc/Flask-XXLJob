@@ -5,7 +5,6 @@ from __future__ import annotations
 import itertools
 import logging
 import re
-import sys
 import threading
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -112,12 +111,7 @@ class XXLJobLogManager:
                 self._log_file = str(path)
 
             if self._config.log_console_enabled:
-                stream = (
-                    sys.stdout
-                    if self._config.log_console_stream == "stdout"
-                    else sys.stderr
-                )
-                console_handler = logging.StreamHandler(stream)
+                console_handler = logging.StreamHandler()
                 self._prepare_handler(
                     console_handler, "console", level, formatter
                 )
@@ -165,10 +159,6 @@ class XXLJobLogManager:
     @property
     def log_file(self) -> Optional[str]:
         return self._log_file if self.file_enabled else None
-
-    @property
-    def console_stream(self) -> str:
-        return self._config.log_console_stream
 
     @property
     def level(self) -> str:

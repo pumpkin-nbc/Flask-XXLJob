@@ -519,7 +519,6 @@ class FlaskXXLJob:
             log_file_enabled=runtime.log_manager.file_enabled,
             log_console_enabled=runtime.log_manager.console_enabled,
             log_file=runtime.log_manager.log_file,
-            log_console_stream=runtime.log_manager.console_stream,
         )
 
     def start_registry(self, app: Optional[Flask] = None) -> None:

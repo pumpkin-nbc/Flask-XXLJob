@@ -18,14 +18,13 @@
 
 每个初始化扩展的工作进程都会使用相同的执行器应用名称与地址进行注册。由于注册键是地址，在同一地址后运行多个工作进程没有问题；使用不同地址运行的工作进程会注册为多个执行器实例。请据此规划你的进程模型。
 
-容器中的插件诊断日志建议输出到控制台 `stdout`，由平台统一采集、保留与轮转：
+容器中的插件诊断日志建议仅输出到控制台，由平台统一采集、保留与轮转：
 
 ```python
 app.config.update(
     XXL_JOB_LOG_ENABLED=True,
     XXL_JOB_LOG_FILE_ENABLED=False,
     XXL_JOB_LOG_CONSOLE_ENABLED=True,
-    XXL_JOB_LOG_CONSOLE_STREAM="stdout",
 )
 ```
 

@@ -16,7 +16,7 @@ Flask-XXLJob 是一个**协议适配插件**。它只负责协议接入，**不�
 - 支持多个 Admin 地址并具备故障转移。
 - 支持 Flask Application Factory 及应用间 Runtime 隔离。
 - 严格校验协议字符串字段，并在启动时检测执行器路由冲突。
-- 提供可选、应用隔离的轮转文件与 stdout/stderr 插件诊断日志。
+- 提供可选、应用隔离的轮转文件与控制台插件诊断日志。
 - 依赖最小化（`Flask`、`requests`），带类型标注（`py.typed`）。
 
 ## 不负责的内容
@@ -106,7 +106,7 @@ with app.app_context():
 | `XXL_JOB_ADMIN_FAILOVER_ON_BUSINESS_ERROR` | `False` | 业务失败时故障转移。 |
 | `XXL_JOB_LOG_ENABLED` | `False` | 是否启用插件托管的诊断日志 Handler。 |
 | `XXL_JOB_LOG_FILE_ENABLED` | `True` | 是否写入轮转日志文件。 |
-| `XXL_JOB_LOG_CONSOLE_ENABLED` | `False` | 是否写入控制台。 |
+| `XXL_JOB_LOG_CONSOLE_ENABLED` | `True` | 是否将正常与异常日志统一写入控制台。 |
 | `XXL_JOB_LOG_LEVEL` | `"INFO"` | 托管 Handler 共用的日志等级。 |
 | `XXL_JOB_LOG_FORMAT` | 标准格式 | 共用的 Python Logging 格式。 |
 | `XXL_JOB_LOG_DATE_FORMAT` | `"%Y-%m-%d %H:%M:%S"` | 时间格式。 |
@@ -115,12 +115,11 @@ with app.app_context():
 | `XXL_JOB_LOG_ENCODING` | `"utf-8"` | 文件编码。 |
 | `XXL_JOB_LOG_MAX_BYTES` | `10485760` | 单个日志文件的轮转字节数。 |
 | `XXL_JOB_LOG_BACKUP_COUNT` | `5` | 轮转备份数量。 |
-| `XXL_JOB_LOG_CONSOLE_STREAM` | `"stderr"` | 控制台目标：`stdout` 或 `stderr`。 |
 | `XXL_JOB_LOG_PROPAGATE` | `False` | 存在托管 Handler 时是否继续传播。 |
 
 托管日志默认关闭，不创建目录、文件或控制台 Handler。只开启
-`XXL_JOB_LOG_ENABLED` 时默认写入 `./logs/flask-xxljob.log`；容器环境建议关闭文件
-目标并启用控制台 `stdout`。详见[日志指南](docs/logging.zh-CN.md)。
+`XXL_JOB_LOG_ENABLED` 时默认同时写入 `./logs/flask-xxljob.log` 和控制台；容器环境
+建议关闭文件目标并保留默认控制台目标。详见[日志指南](docs/logging.zh-CN.md)。
 
 ## 命令行
 

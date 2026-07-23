@@ -9,7 +9,7 @@ creates no directory or file, and adds no console handler.
 
 ## Output modes
 
-File only (also the result of setting only `XXL_JOB_LOG_ENABLED=True`):
+File only:
 
 ```python
 app.config.update(
@@ -26,7 +26,6 @@ app.config.update(
     XXL_JOB_LOG_ENABLED=True,
     XXL_JOB_LOG_FILE_ENABLED=False,
     XXL_JOB_LOG_CONSOLE_ENABLED=True,
-    XXL_JOB_LOG_CONSOLE_STREAM="stderr",
 )
 ```
 
@@ -39,6 +38,11 @@ app.config.update(
     XXL_JOB_LOG_CONSOLE_ENABLED=True,
 )
 ```
+
+Because file and console outputs both default to enabled, setting only
+`XXL_JOB_LOG_ENABLED=True` selects the third mode. The console handler uses the
+standard Python Logging console stream and emits both normal and error records
+that meet `XXL_JOB_LOG_LEVEL`; there is no separate stream configuration.
 
 If both targets are disabled, or the total switch is off, Flask-XXLJob leaves
 the runtime logger's level and propagation unchanged. The host can then attach
@@ -84,7 +88,6 @@ app.config.update(
     XXL_JOB_LOG_ENABLED=True,
     XXL_JOB_LOG_FILE_ENABLED=False,
     XXL_JOB_LOG_CONSOLE_ENABLED=True,
-    XXL_JOB_LOG_CONSOLE_STREAM="stdout",
 )
 ```
 

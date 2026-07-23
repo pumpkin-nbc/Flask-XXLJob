@@ -8,7 +8,7 @@ Flask-XXLJob 记录初始化、注册、续约、注销、Admin 故障转移、C
 
 ## 输出模式
 
-仅文件（只设置 `XXL_JOB_LOG_ENABLED=True` 时也是此结果）：
+仅文件：
 
 ```python
 app.config.update(
@@ -25,7 +25,6 @@ app.config.update(
     XXL_JOB_LOG_ENABLED=True,
     XXL_JOB_LOG_FILE_ENABLED=False,
     XXL_JOB_LOG_CONSOLE_ENABLED=True,
-    XXL_JOB_LOG_CONSOLE_STREAM="stderr",
 )
 ```
 
@@ -38,6 +37,10 @@ app.config.update(
     XXL_JOB_LOG_CONSOLE_ENABLED=True,
 )
 ```
+
+由于文件与控制台输出都默认开启，因此只设置 `XXL_JOB_LOG_ENABLED=True` 时会采用第三种
+模式。控制台 Handler 使用 Python Logging 的标准控制台流，将满足
+`XXL_JOB_LOG_LEVEL` 的正常与异常记录统一输出；不再提供单独的流配置。
 
 两个目标都关闭或总开关关闭时，Flask-XXLJob 不修改 Runtime Logger 的等级和传播
 设置。宿主可使用标准 Python Logging 在 `flask_xxljob` Logger 上添加 Handler。
@@ -74,7 +77,6 @@ app.config.update(
     XXL_JOB_LOG_ENABLED=True,
     XXL_JOB_LOG_FILE_ENABLED=False,
     XXL_JOB_LOG_CONSOLE_ENABLED=True,
-    XXL_JOB_LOG_CONSOLE_STREAM="stdout",
 )
 ```
 

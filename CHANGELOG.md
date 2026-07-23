@@ -14,9 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added optional, per-application Flask-XXLJob managed logging using only the
   standard library. Managed logging is disabled by default; rotating-file and
   console targets can be enabled independently or together.
-- Added configurable `stdout` or `stderr` console output, shared level and
-  format validation, sensitive-data filtering, lifecycle cleanup, and logging
-  fields in `XXLJobStatus` and `xxljob status`.
+- Console logging is enabled whenever managed logging is enabled by default,
+  and one console handler emits both normal and error records. Added shared
+  level and format validation, sensitive-data filtering, lifecycle cleanup,
+  and logging fields in `XXLJobStatus` and `xxljob status`.
 
 ### Changed
 

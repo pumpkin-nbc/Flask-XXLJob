@@ -146,7 +146,6 @@ status.log_level
 status.log_file_enabled
 status.log_console_enabled
 status.log_file
-status.log_console_stream
 ```
 
 Logging fields describe the effective managed targets. `log_file` is the

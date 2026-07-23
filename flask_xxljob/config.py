@@ -42,7 +42,7 @@ DEFAULTS: dict = {
     "XXL_JOB_ADMIN_FAILOVER_ON_BUSINESS_ERROR": False,
     "XXL_JOB_LOG_ENABLED": False,
     "XXL_JOB_LOG_FILE_ENABLED": True,
-    "XXL_JOB_LOG_CONSOLE_ENABLED": False,
+    "XXL_JOB_LOG_CONSOLE_ENABLED": True,
     "XXL_JOB_LOG_LEVEL": "INFO",
     "XXL_JOB_LOG_FORMAT": (
         "%(asctime)s [%(levelname)s] [%(name)s] %(message)s"
@@ -53,12 +53,10 @@ DEFAULTS: dict = {
     "XXL_JOB_LOG_ENCODING": "utf-8",
     "XXL_JOB_LOG_MAX_BYTES": 10 * 1024 * 1024,
     "XXL_JOB_LOG_BACKUP_COUNT": 5,
-    "XXL_JOB_LOG_CONSOLE_STREAM": "stderr",
     "XXL_JOB_LOG_PROPAGATE": False,
 }
 
 LOG_LEVELS = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
-LOG_CONSOLE_STREAMS = frozenset({"stdout", "stderr"})
 
 
 @dataclass
@@ -90,7 +88,7 @@ class XXLJobConfig:
     admin_failover_on_business_error: bool = False
     log_enabled: bool = False
     log_file_enabled: bool = True
-    log_console_enabled: bool = False
+    log_console_enabled: bool = True
     log_level: str = "INFO"
     log_format: str = "%(asctime)s [%(levelname)s] [%(name)s] %(message)s"
     log_date_format: str = "%Y-%m-%d %H:%M:%S"
@@ -99,7 +97,6 @@ class XXLJobConfig:
     log_encoding: str = "utf-8"
     log_max_bytes: int = 10 * 1024 * 1024
     log_backup_count: int = 5
-    log_console_stream: str = "stderr"
     log_propagate: bool = False
 
     @classmethod
@@ -166,12 +163,6 @@ class XXLJobConfig:
         log_backup_count = _as_non_negative_int(
             merged, "XXL_JOB_LOG_BACKUP_COUNT"
         )
-        log_console_stream = _as_choice(
-            merged,
-            "XXL_JOB_LOG_CONSOLE_STREAM",
-            LOG_CONSOLE_STREAMS,
-            case="lower",
-        )
         log_propagate = _as_bool(merged, "XXL_JOB_LOG_PROPAGATE")
         _validate_log_encoding(log_encoding)
         _validate_log_format(log_format, log_date_format)
@@ -207,7 +198,6 @@ class XXLJobConfig:
             log_encoding=log_encoding,
             log_max_bytes=log_max_bytes,
             log_backup_count=log_backup_count,
-            log_console_stream=log_console_stream,
             log_propagate=log_propagate,
         )
         instance.validate()

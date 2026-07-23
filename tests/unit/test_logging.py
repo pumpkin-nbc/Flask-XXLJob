@@ -72,6 +72,7 @@ def test_disabled_extension_never_creates_managed_logging(tmp_path):
 def test_file_logging_uses_absolute_path_and_no_console(tmp_path, capsys):
     app, _ = make_app(
         XXL_JOB_LOG_ENABLED=True,
+        XXL_JOB_LOG_CONSOLE_ENABLED=False,
         XXL_JOB_LOG_PATH=str(tmp_path / "logs"),
         XXL_JOB_LOG_FORMAT="%(levelname)s|%(name)s|%(message)s",
     )
@@ -89,29 +90,24 @@ def test_file_logging_uses_absolute_path_and_no_console(tmp_path, capsys):
     assert capsys.readouterr() == ("", "")
 
 
-@pytest.mark.parametrize(
-    ("stream_name", "expected_stream"),
-    [("stdout", "out"), ("stderr", "err"), ("STDOUT", "out")],
-)
-def test_console_only_uses_selected_stream(
-    tmp_path, capsys, stream_name, expected_stream
-):
+def test_console_only_prints_normal_and_error_records(tmp_path, capsys):
     log_dir = tmp_path / "must-not-exist"
     app, _ = make_app(
         XXL_JOB_LOG_ENABLED=True,
         XXL_JOB_LOG_FILE_ENABLED=False,
         XXL_JOB_LOG_CONSOLE_ENABLED=True,
-        XXL_JOB_LOG_CONSOLE_STREAM=stream_name,
         XXL_JOB_LOG_PATH=str(log_dir),
+        XXL_JOB_LOG_LEVEL="DEBUG",
         XXL_JOB_LOG_FORMAT="%(levelname)s|%(message)s",
     )
 
-    _log(app)
+    _log(app, "normal-record", logging.INFO)
+    _log(app, "error-record", logging.ERROR)
 
     captured = capsys.readouterr()
-    assert getattr(captured, expected_stream).count("INFO|logging-test-marker") == 1
-    other = "err" if expected_stream == "out" else "out"
-    assert getattr(captured, other) == ""
+    assert captured.err.count("INFO|normal-record") == 1
+    assert captured.err.count("ERROR|error-record") == 1
+    assert captured.out == ""
     assert not log_dir.exists()
     assert len(_managed_handlers(app)) == 1
     assert not isinstance(_managed_handlers(app)[0], RotatingFileHandler)
@@ -122,14 +118,13 @@ def test_file_and_console_each_receive_one_record(tmp_path, capsys):
         XXL_JOB_LOG_ENABLED=True,
         XXL_JOB_LOG_FILE_ENABLED=True,
         XXL_JOB_LOG_CONSOLE_ENABLED=True,
-        XXL_JOB_LOG_CONSOLE_STREAM="stdout",
         XXL_JOB_LOG_PATH=str(tmp_path),
         XXL_JOB_LOG_FORMAT="COMMON|%(levelname)s|%(message)s",
     )
 
     _log(app)
 
-    output = capsys.readouterr().out
+    output = capsys.readouterr().err
     content = Path(_runtime(app).log_manager.log_file).read_text(encoding="utf-8")
     assert output.count("COMMON|INFO|logging-test-marker") == 1
     assert content.count("COMMON|INFO|logging-test-marker") == 1
@@ -173,7 +168,6 @@ def test_log_level_applies_to_all_managed_targets(tmp_path, capsys):
     app, _ = make_app(
         XXL_JOB_LOG_ENABLED=True,
         XXL_JOB_LOG_CONSOLE_ENABLED=True,
-        XXL_JOB_LOG_CONSOLE_STREAM="stdout",
         XXL_JOB_LOG_PATH=str(tmp_path),
         XXL_JOB_LOG_LEVEL="warning",
         XXL_JOB_LOG_FORMAT="%(levelname)s|%(message)s",
@@ -182,7 +176,7 @@ def test_log_level_applies_to_all_managed_targets(tmp_path, capsys):
     _log(app, "hidden-debug", logging.DEBUG)
     _log(app, "visible-warning", logging.WARNING)
 
-    output = capsys.readouterr().out
+    output = capsys.readouterr().err
     content = Path(_runtime(app).log_manager.log_file).read_text(encoding="utf-8")
     assert "hidden-debug" not in output + content
     assert output.count("WARNING|visible-warning") == 1
@@ -193,6 +187,7 @@ def test_log_level_applies_to_all_managed_targets(tmp_path, capsys):
 def test_rotating_file_handler_rotates(tmp_path):
     app, _ = make_app(
         XXL_JOB_LOG_ENABLED=True,
+        XXL_JOB_LOG_CONSOLE_ENABLED=False,
         XXL_JOB_LOG_PATH=str(tmp_path),
         XXL_JOB_LOG_MAX_BYTES=120,
         XXL_JOB_LOG_BACKUP_COUNT=2,
@@ -253,6 +248,7 @@ def test_same_named_apps_have_isolated_unique_loggers(tmp_path, capsys):
     app_a, _ = make_app(
         name="same/name",
         XXL_JOB_LOG_ENABLED=True,
+        XXL_JOB_LOG_CONSOLE_ENABLED=False,
         XXL_JOB_LOG_PATH=str(tmp_path / "a"),
     )
     app_b, _ = make_app(
@@ -260,7 +256,6 @@ def test_same_named_apps_have_isolated_unique_loggers(tmp_path, capsys):
         XXL_JOB_LOG_ENABLED=True,
         XXL_JOB_LOG_FILE_ENABLED=False,
         XXL_JOB_LOG_CONSOLE_ENABLED=True,
-        XXL_JOB_LOG_CONSOLE_STREAM="stdout",
         XXL_JOB_LOG_LEVEL="ERROR",
     )
     manager_a = _runtime(app_a).log_manager
@@ -276,7 +271,7 @@ def test_same_named_apps_have_isolated_unique_loggers(tmp_path, capsys):
     manager_a.close()
     _log(app_b, "still-console", logging.ERROR)
 
-    output = capsys.readouterr().out
+    output = capsys.readouterr().err
     file_content = Path(manager_a.log_file).read_text(encoding="utf-8")
     assert "only-file" in file_content
     assert "only-file" not in output
@@ -295,7 +290,6 @@ def test_managed_outputs_redact_sensitive_values(
         XXL_JOB_ACCESS_TOKEN=token,
         XXL_JOB_LOG_ENABLED=True,
         XXL_JOB_LOG_CONSOLE_ENABLED=console_enabled,
-        XXL_JOB_LOG_CONSOLE_STREAM="stdout",
         XXL_JOB_LOG_PATH=str(tmp_path),
         XXL_JOB_LOG_LEVEL="DEBUG",
         XXL_JOB_LOG_FORMAT="%(message)s",
@@ -321,7 +315,7 @@ def test_managed_outputs_redact_sensitive_values(
 
     outputs = Path(runtime.log_manager.log_file).read_text(encoding="utf-8")
     if console_enabled:
-        outputs += capsys.readouterr().out
+        outputs += capsys.readouterr().err
     for secret in (
         token,
         "Bearer Secret",
@@ -344,7 +338,6 @@ def test_protocol_logs_safe_failure_categories(tmp_path, capsys):
         XXL_JOB_LOG_ENABLED=True,
         XXL_JOB_LOG_FILE_ENABLED=False,
         XXL_JOB_LOG_CONSOLE_ENABLED=True,
-        XXL_JOB_LOG_CONSOLE_STREAM="stdout",
         XXL_JOB_LOG_FORMAT="%(message)s",
     )
 
@@ -373,7 +366,7 @@ def test_protocol_logs_safe_failure_categories(tmp_path, capsys):
         headers={"XXL-JOB-ACCESS-TOKEN": token},
     )
 
-    output = capsys.readouterr().out
+    output = capsys.readouterr().err
     assert "access token validation failed" in output
     assert "request parsing failed" in output
     assert "unsupported_handler=unknown" in output
@@ -396,7 +389,6 @@ def test_protocol_logs_safe_failure_categories(tmp_path, capsys):
         ("XXL_JOB_LOG_CONSOLE_ENABLED", 1),
         ("XXL_JOB_LOG_PROPAGATE", 0),
         ("XXL_JOB_LOG_LEVEL", "TRACE"),
-        ("XXL_JOB_LOG_CONSOLE_STREAM", "file"),
         ("XXL_JOB_LOG_ENCODING", "not-an-encoding"),
         ("XXL_JOB_LOG_MAX_BYTES", 0),
         ("XXL_JOB_LOG_BACKUP_COUNT", -1),
@@ -444,7 +436,6 @@ def test_callback_event_does_not_log_handle_message(tmp_path, capsys, mocker):
         XXL_JOB_LOG_ENABLED=True,
         XXL_JOB_LOG_FILE_ENABLED=False,
         XXL_JOB_LOG_CONSOLE_ENABLED=True,
-        XXL_JOB_LOG_CONSOLE_STREAM="stdout",
         XXL_JOB_LOG_FORMAT="%(message)s",
     )
     response = mocker.Mock(status_code=200)
@@ -454,7 +445,7 @@ def test_callback_event_does_not_log_handle_message(tmp_path, capsys, mocker):
     result = ext.callback_success(1, 2, "handle-message-secret", app=app)
 
     assert result.success is True
-    output = capsys.readouterr().out
+    output = capsys.readouterr().err
     assert "callback succeeded" in output
     assert "handle-message-secret" not in output
 
@@ -475,7 +466,6 @@ def test_admin_failover_registry_renewal_removal_and_callback_events(
         XXL_JOB_LOG_ENABLED=True,
         XXL_JOB_LOG_FILE_ENABLED=False,
         XXL_JOB_LOG_CONSOLE_ENABLED=True,
-        XXL_JOB_LOG_CONSOLE_STREAM="stdout",
         XXL_JOB_LOG_FORMAT="%(message)s",
     )
     post = mocker.patch(
@@ -497,7 +487,7 @@ def test_admin_failover_registry_renewal_removal_and_callback_events(
     assert ext.callback_success(1, 2, "handle-message-secret", app=app).success is False
     assert ext.remove_executor(app).success is True
 
-    output = capsys.readouterr().out
+    output = capsys.readouterr().err
     assert "Failing over to the next Admin address" in output
     assert "executor registration succeeded" in output
     assert "executor renewal succeeded" in output
