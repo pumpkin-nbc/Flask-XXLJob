@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Documentation
 
 - Updated the bilingual README, API reference and migration guide for strict string validation, route-conflict detection, delayed deregistration and the multi-application migration.
+- Added a bilingual, tested end-to-end Flask integration example covering Application Factory setup, all executor callbacks, environment configuration and final task-result reporting.
+- Reworked the primary quick start into a beginner-first, locally runnable path with a tested single-file example, PowerShell/Bash requests, Admin onboarding and troubleshooting.
 
 ## [0.2.1] - 2026-07-22
 

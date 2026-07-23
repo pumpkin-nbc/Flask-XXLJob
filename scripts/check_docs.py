@@ -39,6 +39,7 @@ PAIRED_DOCS = [
     "examples/basic/README",
     "examples/application_factory/README",
     "examples/batch_callback/README",
+    "examples/complete_integration/README",
     "examples/multiple_apps/README",
     "examples/registry_status/README",
 ]

@@ -28,42 +28,41 @@ Flask-XXLJob 从不执行业务任务。它不创建线程池、进程池、任�
 pip install Flask-XXLJob
 ```
 
-## 快速开始（Application Factory）
+## 五分钟快速开始
+
+如果你刚开始学习 Python、Flask 或 XXL-JOB，请直接按照
+[Python 入门者指南](docs/getting-started.zh-CN.md)操作。教程第一阶段不要求安装 XXL-JOB Admin。
 
 ```python
 from flask import Flask
 from flask_xxljob import FlaskXXLJob, XXLJobResponse
 
-xxl_job = FlaskXXLJob()
+app = Flask(__name__)
+app.config.update(
+    XXL_JOB_AUTO_REGISTER=False,  # 先在本地运行，不连接 Admin
+    XXL_JOB_ROUTE_PREFIX="/xxl-job",
+)
+xxl_job = FlaskXXLJob(app)
 
 
-def create_app(config=None):
-    app = Flask(__name__)
-    app.config.from_mapping(
-        XXL_JOB_ADMIN_ADDRESSES=["http://127.0.0.1:8080/xxl-job-admin"],
-        XXL_JOB_ACCESS_TOKEN="",
-        XXL_JOB_EXECUTOR_APP_NAME="project-executor",
-        XXL_JOB_EXECUTOR_ADDRESS="http://127.0.0.1:5001",
-    )
-    if config:
-        app.config.update(config)
+@xxl_job.on_run
+def handle_run(request):
+    print("任务：", request.job_id, "参数：", request.parse_params())
+    return XXLJobResponse.success(content="任务已收到")
 
-    xxl_job.init_app(app)
 
-    @xxl_job.on_run
-    def handle_run(request):
-        # 将任务提交到你自己的任务服务，不要在这里执行任务。
-        project_task_service.submit(
-            handler=request.executor_handler,
-            params=request.executor_params,
-            job_id=request.job_id,
-            log_id=request.log_id,
-            log_date_time=request.log_date_time,
-        )
-        return XXLJobResponse.success()
-
-    return app
+app.run(port=5001)
 ```
+
+保存为 `app.py`，然后运行：
+
+```bash
+python app.py
+```
+
+仓库中提供了经过测试的版本：
+[`examples/beginner/app.py`](examples/beginner/app.py)。先确认本地
+`/xxl-job/run` 测试成功，再连接 Admin。
 
 ## 任务结果回调
 
@@ -118,7 +117,7 @@ flask --app "project:create_app" xxljob status
 
 ## 文档
 
-参见 [docs](docs/) 目录，包括 [getting-started.md](docs/getting-started.md)、[configuration.md](docs/configuration.md)、[API 参考](docs/api-reference.zh-CN.md)与[集成测试](docs/integration-testing.zh-CN.md)。从旧版本升级？请参阅[迁移指南](docs/migration.zh-CN.md)与 [CHANGELOG](CHANGELOG.zh-CN.md)。
+参见 [docs](docs/) 目录，包括 [getting-started.md](docs/getting-started.md)、[configuration.md](docs/configuration.md)、[API 参考](docs/api-reference.zh-CN.md)与[集成测试](docs/integration-testing.zh-CN.md)。端到端 Flask 接入可直接参考[完整接入案例](examples/complete_integration/README.zh-CN.md)。从旧版本升级？请参阅[迁移指南](docs/migration.zh-CN.md)与 [CHANGELOG](CHANGELOG.zh-CN.md)。
 
 ## 许可证
 

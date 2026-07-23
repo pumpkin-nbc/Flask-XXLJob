@@ -28,42 +28,42 @@ Flask-XXLJob never executes business tasks. It does not create thread pools, pro
 pip install Flask-XXLJob
 ```
 
-## Quick start (Application Factory)
+## Five-minute quick start
+
+New to Python, Flask, or XXL-JOB? Follow the step-by-step
+[beginner's guide](docs/getting-started.md). It starts locally without requiring
+XXL-JOB Admin.
 
 ```python
 from flask import Flask
 from flask_xxljob import FlaskXXLJob, XXLJobResponse
 
-xxl_job = FlaskXXLJob()
+app = Flask(__name__)
+app.config.update(
+    XXL_JOB_AUTO_REGISTER=False,  # Start locally without Admin.
+    XXL_JOB_ROUTE_PREFIX="/xxl-job",
+)
+xxl_job = FlaskXXLJob(app)
 
 
-def create_app(config=None):
-    app = Flask(__name__)
-    app.config.from_mapping(
-        XXL_JOB_ADMIN_ADDRESSES=["http://127.0.0.1:8080/xxl-job-admin"],
-        XXL_JOB_ACCESS_TOKEN="",
-        XXL_JOB_EXECUTOR_APP_NAME="project-executor",
-        XXL_JOB_EXECUTOR_ADDRESS="http://127.0.0.1:5001",
-    )
-    if config:
-        app.config.update(config)
+@xxl_job.on_run
+def handle_run(request):
+    print("job:", request.job_id, "params:", request.parse_params())
+    return XXLJobResponse.success(content="job received")
 
-    xxl_job.init_app(app)
 
-    @xxl_job.on_run
-    def handle_run(request):
-        # Submit the task to your own task service; do not execute it here.
-        project_task_service.submit(
-            handler=request.executor_handler,
-            params=request.executor_params,
-            job_id=request.job_id,
-            log_id=request.log_id,
-            log_date_time=request.log_date_time,
-        )
-        return XXLJobResponse.success()
-
-    return app
+app.run(port=5001)
 ```
+
+Save it as `app.py`, then run:
+
+```bash
+python app.py
+```
+
+The tested copy is available at
+[`examples/beginner/app.py`](examples/beginner/app.py). Connect Admin only after
+the local `/xxl-job/run` test succeeds.
 
 ## Task-result callback
 
@@ -122,7 +122,7 @@ handlers for every subsequently initialized application.
 
 ## Documentation
 
-See the [docs](docs/) directory, including [getting-started.md](docs/getting-started.md), [configuration.md](docs/configuration.md), the [API reference](docs/api-reference.md) and [integration testing](docs/integration-testing.md). Upgrading from an earlier version? See the [migration guide](docs/migration.md) and the [CHANGELOG](CHANGELOG.md).
+See the [docs](docs/) directory, including [getting-started.md](docs/getting-started.md), [configuration.md](docs/configuration.md), the [API reference](docs/api-reference.md) and [integration testing](docs/integration-testing.md). For an end-to-end Flask template, use the [complete integration example](examples/complete_integration/README.md). Upgrading from an earlier version? See the [migration guide](docs/migration.md) and the [CHANGELOG](CHANGELOG.md).
 
 ## License
 
