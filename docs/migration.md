@@ -28,6 +28,28 @@ Job routing, block strategies, timeouts and retries are still managed by the
 XXL-JOB admin. Flask-XXLJob only relays the protocol; your task service keeps
 full control over execution.
 
+## Upgrading 0.3.1 to 0.3.2
+
+`0.3.2` always appends `XXL_JOB_ROUTE_PREFIX` to `XXL_JOB_EXECUTOR_ADDRESS`
+when the configuration is loaded. Set the executor address to the service base
+URL only:
+
+```python
+app.config.update(
+    XXL_JOB_EXECUTOR_ADDRESS="http://127.0.0.1:5001",
+    XXL_JOB_ROUTE_PREFIX="/xxl-job",
+)
+# Registered address becomes http://127.0.0.1:5001/xxl-job
+```
+
+Do not include the route prefix in `XXL_JOB_EXECUTOR_ADDRESS`; values such as
+`http://127.0.0.1:5001/xxl-job` with `XXL_JOB_ROUTE_PREFIX="/xxl-job"` become
+`http://127.0.0.1:5001/xxl-job/xxl-job`.
+
+```bash
+pip install --upgrade flask-xxljob==0.3.2
+```
+
 ## Upgrading 0.3.0 to 0.3.1
 
 `0.3.1` changes only release metadata and publishing configuration. The

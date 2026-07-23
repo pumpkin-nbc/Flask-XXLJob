@@ -44,8 +44,8 @@ compatibility:
    `callback_failure` and `callback_many`; confirm the log status updates.
 4. **Access token on and off**: verify a correct token passes, a wrong token is
    rejected, and no-token mode works when the admin has no token configured.
-5. **Route prefix**: set `XXL_JOB_ROUTE_PREFIX` and confirm the admin reaches
-   the prefixed endpoints.
+5. **Route prefix**: set `XXL_JOB_ROUTE_PREFIX` (keep `XXL_JOB_EXECUTOR_ADDRESS`
+   as the base URL) and confirm the admin reaches the prefixed endpoints.
 6. **Chinese executor params**: dispatch a job with Chinese `executorParams` and
    confirm correct decoding.
 7. **Multiple admin addresses**: configure two admins and confirm failover for

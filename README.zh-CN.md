@@ -89,8 +89,8 @@ with app.app_context():
 | `XXL_JOB_ADMIN_ADDRESSES` | `[]` | XXL-JOB Admin 基础地址列表。 |
 | `XXL_JOB_ACCESS_TOKEN` | `""` | Access Token，空表示无 Token 模式。 |
 | `XXL_JOB_EXECUTOR_APP_NAME` | `"flask-xxljob-executor"` | 执行器应用名称。 |
-| `XXL_JOB_EXECUTOR_ADDRESS` | `""` | Admin 访问本执行器的地址。 |
-| `XXL_JOB_ROUTE_PREFIX` | `""` | 执行器接口的 URL 前缀。 |
+| `XXL_JOB_EXECUTOR_ADDRESS` | `""` | 执行器服务基础地址（协议/主机/端口）；会自动附加 `XXL_JOB_ROUTE_PREFIX`。 |
+| `XXL_JOB_ROUTE_PREFIX` | `""` | 执行器接口的 URL 前缀；同时会附加到 `XXL_JOB_EXECUTOR_ADDRESS`。 |
 | `XXL_JOB_AUTO_REGISTER` | `True` | 是否启动自动注册续约。 |
 | `XXL_JOB_REGISTRY_INTERVAL` | `30` | 注册续约间隔（秒）。 |
 | `XXL_JOB_HTTP_CONNECT_TIMEOUT` | `3` | HTTP 连接超时（秒）。 |

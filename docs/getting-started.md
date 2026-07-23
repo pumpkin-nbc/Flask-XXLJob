@@ -106,7 +106,7 @@ app.config.update(
     XXL_JOB_ADMIN_ADDRESSES=["http://127.0.0.1:8080/xxl-job-admin"],
     XXL_JOB_ACCESS_TOKEN="",  # Use the same token as Admin.
     XXL_JOB_EXECUTOR_APP_NAME="beginner-flask-executor",
-    XXL_JOB_EXECUTOR_ADDRESS="http://127.0.0.1:5001/xxl-job",
+    XXL_JOB_EXECUTOR_ADDRESS="http://127.0.0.1:5001",
     XXL_JOB_ROUTE_PREFIX="/xxl-job",
     XXL_JOB_AUTO_REGISTER=True,
 )

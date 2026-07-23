@@ -64,13 +64,13 @@ deployment.
 | `XXL_JOB_ADMIN_ADDRESSES` | `http://127.0.0.1:8080/xxl-job-admin` | Comma-separated Admin base URLs. |
 | `XXL_JOB_ACCESS_TOKEN` | empty | Must match the Admin access token. |
 | `XXL_JOB_EXECUTOR_APP_NAME` | `complete-flask-executor` | Executor AppName configured in XXL-JOB. |
-| `XXL_JOB_EXECUTOR_ADDRESS` | `http://127.0.0.1:5001/xxl-job` | Address Admin uses to reach the executor, including the route prefix. |
+| `XXL_JOB_EXECUTOR_ADDRESS` | `http://127.0.0.1:5001` | Base URL Admin uses to reach the executor. `XXL_JOB_ROUTE_PREFIX` is appended automatically. |
 | `XXL_JOB_ROUTE_PREFIX` | `/xxl-job` | Mount point for `/beat`, `/run`, `/idleBeat`, `/kill`, and `/log`. |
 | `XXL_JOB_AUTO_REGISTER` | `false` | Set to `true` after Admin and the public executor address are reachable. |
 | `INTERNAL_RESULT_TOKEN` | empty | Required `X-Internal-Token` for the internal result endpoint. |
 
-If `XXL_JOB_ROUTE_PREFIX` changes, update `XXL_JOB_EXECUTOR_ADDRESS` so it ends
-with the same prefix.
+When `XXL_JOB_ROUTE_PREFIX` changes, you do not need to rewrite
+`XXL_JOB_EXECUTOR_ADDRESS`; the prefix is appended on load.
 
 ## Configure XXL-JOB Admin
 

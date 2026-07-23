@@ -60,12 +60,12 @@ flask --app 'examples.complete_integration.app:create_app' run --host 0.0.0.0 --
 | `XXL_JOB_ADMIN_ADDRESSES` | `http://127.0.0.1:8080/xxl-job-admin` | Admin 基础地址，多个地址用逗号分隔。 |
 | `XXL_JOB_ACCESS_TOKEN` | 空 | 必须与 Admin Access Token 一致。 |
 | `XXL_JOB_EXECUTOR_APP_NAME` | `complete-flask-executor` | XXL-JOB 中配置的执行器 AppName。 |
-| `XXL_JOB_EXECUTOR_ADDRESS` | `http://127.0.0.1:5001/xxl-job` | Admin 访问执行器的地址，包含路由前缀。 |
+| `XXL_JOB_EXECUTOR_ADDRESS` | `http://127.0.0.1:5001` | Admin 访问执行器的基础地址；会自动附加 `XXL_JOB_ROUTE_PREFIX`。 |
 | `XXL_JOB_ROUTE_PREFIX` | `/xxl-job` | `/beat`、`/run`、`/idleBeat`、`/kill`、`/log` 的挂载前缀。 |
 | `XXL_JOB_AUTO_REGISTER` | `false` | Admin 与外部执行器地址可达后设置为 `true`。 |
 | `INTERNAL_RESULT_TOKEN` | 空 | 内部结果接口要求的 `X-Internal-Token`。 |
 
-修改 `XXL_JOB_ROUTE_PREFIX` 时，必须同步修改 `XXL_JOB_EXECUTOR_ADDRESS`，使其以相同前缀结尾。
+修改 `XXL_JOB_ROUTE_PREFIX` 时无需再同步改写 `XXL_JOB_EXECUTOR_ADDRESS`；前缀会在加载配置时自动附加。
 
 ## 配置 XXL-JOB Admin
 
