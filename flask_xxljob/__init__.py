@@ -25,7 +25,7 @@ execute the actual tasks.
         )
         xxl_job.init_app(app)
 
-        @xxl_job.on_run
+        @xxl_job.on_run("demoJobHandler")
         def handle_run(request):
             return XXLJobResponse.success()
 

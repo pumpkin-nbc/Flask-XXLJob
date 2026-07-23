@@ -90,7 +90,7 @@ connection is involved yet.
 - `Flask(__name__)` creates the web application.
 - `FlaskXXLJob(app)` adds the five executor HTTP endpoints.
 - `XXL_JOB_ROUTE_PREFIX="/xxl-job"` mounts them below `/xxl-job`.
-- `@xxl_job.on_run` marks the function called for a scheduled job.
+- `@xxl_job.on_run("demoJobHandler")` binds that exact JobHandler to the function.
 - `request.parse_params()` converts JSON parameters into a Python object.
 - `XXLJobResponse.success()` tells Admin that the trigger was accepted.
 
@@ -119,7 +119,9 @@ Then:
 3. Make sure Admin can reach `XXL_JOB_EXECUTOR_ADDRESS`. In Docker or on another
    machine, `127.0.0.1` is usually wrong; use the Flask machine's reachable IP.
 4. Restart Flask and check the Admin executor registry.
-5. Create a BEAN job. Its JobHandler value becomes `request.executor_handler`.
+5. Create a BEAN job and set JobHandler to exactly `demoJobHandler`. It must
+   match the decorator string, including capitalization. Flask-XXLJob rejects
+   unknown names before your function is called.
 
 If Admin has an access token, set the identical value in Flask and include it
 in manual test requests with the `XXL-JOB-ACCESS-TOKEN` header.
@@ -149,6 +151,7 @@ shows a task service reporting its result back through a protected Flask endpoin
 | --- | --- | --- |
 | Flask cannot start | Auto-registration is enabled but addresses are missing | Keep `XXL_JOB_AUTO_REGISTER=False` during the local stage. |
 | `/run` returns 404 | Wrong route prefix | Use `/xxl-job/run` for the beginner example. |
+| `/run` says `Unsupported JobHandler` | Admin name does not exactly match the decorator | Use the same case-sensitive name, such as `demoJobHandler`, in both places. |
 | Response says access token is wrong | Flask and Admin tokens differ | Configure the same token on both sides. |
 | Admin cannot discover the executor | Address is unreachable from Admin | Do not use `127.0.0.1` across containers or machines. |
 | `/run` succeeds but no task runs | The example only prints/submits | Replace `handle_run` with your business-task submission. |

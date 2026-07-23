@@ -42,6 +42,24 @@ def test_complete_example_protocol_endpoints(complete_app):
     ).get_json()
     assert trigger == {"code": 200, "msg": None, "content": "accepted"}
 
+    report = client.post(
+        "/xxl-job/run",
+        headers=_headers(),
+        json={"jobId": 2, "executorHandler": "reportJobHandler"},
+    ).get_json()
+    assert report == {"code": 200, "msg": None, "content": "report accepted"}
+
+    unknown = client.post(
+        "/xxl-job/run",
+        headers=_headers(),
+        json={"jobId": 3, "executorHandler": "unknownJobHandler"},
+    ).get_json()
+    assert unknown == {
+        "code": 500,
+        "msg": "Unsupported JobHandler: unknownJobHandler",
+        "content": None,
+    }
+
     idle = client.post(
         "/xxl-job/idleBeat", headers=_headers(), json={"jobId": 1}
     ).get_json()

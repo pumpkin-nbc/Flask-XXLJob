@@ -9,7 +9,7 @@ Flask-XXLJob 是一个**协议适配插件**。它只负责协议接入，**不�
 ## 功能特性
 
 - 实现官方 XXL-JOB 2.4.1 执行器接口：`/beat`、`/idleBeat`、`/run`、`/kill`、`/log`。
-- 使用普通请求处理函数（`on_run`、`on_idle_beat`、`on_kill`、`on_log`），不使用执行器适配器。
+- 使用命名的 `on_run("名称")` 按 JobHandler 精确、区分大小写地自动分发。
 - 执行器注册 / 注销，并支持自动续约。
 - 任务结果回调客户端（`callback`、`callback_success`、`callback_failure`）。
 - 支持官方 `XXL-JOB-ACCESS-TOKEN` 请求头的 Access Token。
@@ -45,7 +45,7 @@ app.config.update(
 xxl_job = FlaskXXLJob(app)
 
 
-@xxl_job.on_run
+@xxl_job.on_run("demoJobHandler")
 def handle_run(request):
     print("任务：", request.job_id, "参数：", request.parse_params())
     return XXLJobResponse.success(content="任务已收到")
@@ -53,6 +53,9 @@ def handle_run(request):
 
 app.run(port=5001)
 ```
+
+在 Admin 中把任务的 JobHandler 填为完全一致的 `demoJobHandler`。Flask-XXLJob 会自动
+校验并分发；未知名称返回 XXL-JOB `code=500`，不会误调用其他处理函数。
 
 保存为 `app.py`，然后运行：
 

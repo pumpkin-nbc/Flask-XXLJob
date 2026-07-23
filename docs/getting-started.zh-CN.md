@@ -88,7 +88,7 @@ curl -X POST http://127.0.0.1:5001/xxl-job/run \
 - `Flask(__name__)`：创建 Flask Web 应用。
 - `FlaskXXLJob(app)`：给 Flask 添加五个 XXL-JOB 执行器接口。
 - `XXL_JOB_ROUTE_PREFIX="/xxl-job"`：接口统一放在 `/xxl-job` 路径下。
-- `@xxl_job.on_run`：标记收到调度任务时调用的函数。
+- `@xxl_job.on_run("demoJobHandler")`：把这个 JobHandler 精确绑定到该函数。
 - `request.parse_params()`：如果执行参数是 JSON，则转换为 Python 对象。
 - `XXLJobResponse.success()`：告诉 Admin 本次触发请求已经被接受。
 
@@ -116,7 +116,8 @@ app.config.update(
 3. 确认 Admin 能访问 `XXL_JOB_EXECUTOR_ADDRESS`。如果使用 Docker 或不同电脑，
    `127.0.0.1` 通常是错误的，请填写 Flask 所在机器可被访问的 IP。
 4. 重启 Flask，在 Admin 的执行器注册页面查看在线地址。
-5. 新建 BEAN 模式任务；JobHandler 会出现在 `request.executor_handler` 中。
+5. 新建 BEAN 模式任务，把 JobHandler 填为完全一致的 `demoJobHandler`。它必须与
+   装饰器字符串一致，包括大小写；未知名称会在进入你的函数前被自动拒绝。
 
 如果 Admin 配置了 Access Token，Flask 必须填写完全相同的值。手工测试接口时还要增加
 `XXL-JOB-ACCESS-TOKEN` 请求头。
@@ -145,6 +146,7 @@ xxl_job.callback_success(
 | --- | --- | --- |
 | Flask 无法启动 | 开启了自动注册，但没有填写地址 | 本地阶段保持 `XXL_JOB_AUTO_REGISTER=False`。 |
 | 请求 `/run` 返回 404 | 使用了错误的路由前缀 | 入门案例应请求 `/xxl-job/run`。 |
+| `/run` 返回 `Unsupported JobHandler` | Admin 名称与装饰器不完全一致 | 两处使用相同且区分大小写的名称，例如 `demoJobHandler`。 |
 | 返回 Access Token 错误 | Flask 与 Admin Token 不一致 | 两边配置完全相同的 Token。 |
 | Admin 找不到执行器 | Admin 无法访问执行器地址 | 跨容器或跨机器时不要使用 `127.0.0.1`。 |
 | `/run` 成功但业务没有执行 | 入门案例只打印/提交任务 | 将 `handle_run` 替换为你的业务任务提交逻辑。 |

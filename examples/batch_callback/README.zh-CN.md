@@ -3,6 +3,7 @@
 # 批量回调示例
 
 演示如何使用 `callback_many` 在一次官方请求中上报多个任务结果。
+示例中的 Run Handler 名称为 `batchJobHandler`。
 
 ## 运行
 

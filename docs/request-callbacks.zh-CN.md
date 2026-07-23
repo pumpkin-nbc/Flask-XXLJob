@@ -6,13 +6,13 @@ Flask-XXLJob 不使用执行器适配器。你只需注册接收类型化请求�
 
 ## 注册
 
-四个处理函数都可以作为方法或装饰器使用：
+`on_run` 必须提供精确的 JobHandler 名称；其他三个处理函数仍使用普通装饰器：
 
 ```python
-@xxl_job.on_run
-def handle_run(request):
+@xxl_job.on_run("demoJobHandler")
+def handle_demo(request):
     task_id = project_task_service.submit(
-        task_name=request.executor_handler,
+        task_name="demo",
         task_params=request.executor_params,
         job_id=request.job_id,
         log_id=request.log_id,
@@ -20,6 +20,12 @@ def handle_run(request):
     )
     if task_id is None:
         return XXLJobResponse.failure("submit task failed")
+    return XXLJobResponse.success()
+
+
+@xxl_job.on_run("reportJobHandler")
+def handle_report(request):
+    project_task_service.submit_report(request.executor_params)
     return XXLJobResponse.success()
 
 
@@ -52,7 +58,7 @@ def handle_log(request):
 ```python
 xxl_job = FlaskXXLJob()
 
-@xxl_job.on_run
+@xxl_job.on_run("demoJobHandler")
 def handle_run(request):
     return XXLJobResponse.success()
 
@@ -72,18 +78,35 @@ def create_app():
 def create_app():
     app = Flask(__name__)
     xxl_job.init_app(app)
-    xxl_job.register_callbacks(app, run=handle_run, log=handle_log)
-    # 或：xxl_job.set_run_callback(app, handle_run, replace=True)
+    xxl_job.register_callbacks(
+        app,
+        run={
+            "demoJobHandler": handle_run,
+            "reportJobHandler": handle_report,
+        },
+        log=handle_log,
+    )
+    # 或：xxl_job.set_run_callback(
+    #     app, "demoJobHandler", handle_run, replace=True
+    # )
     return app
 ```
 
-使用 `get_run_callback(app)`（以及 `idle_beat`/`kill`/`log` 变体）读取当前已注册的处理函数。当 `app=None` 时使用当前应用上下文；在上下文之外，恰好初始化一个应用时可以省略，初始化多个应用后则必须显式传入 `app`。
+使用 `get_run_callback(app, "demoJobHandler")` 读取命名 Run Handler；
+`idle_beat`/`kill`/`log` 变体仍不带名称。当 `app=None` 时使用当前应用上下文；
+在上下文之外，恰好初始化一个应用时可以省略，初始化多个应用后必须显式传入 `app`。
 
-请求分发时的解析优先级：先检查应用级注册表，再检查由 `on_*` 装饰器设置的扩展级默认。两者都未配置时，接口返回标准的“未配置”失败。
+Run 请求会先解析 `TriggerRequest`，再按 `request.executor_handler` 精确且区分大小写地
+查找。未匹配时返回 HTTP 200、XXL-JOB `code=500` 和
+`Unsupported JobHandler: <name>`，不会调用任何 Handler，也不存在无名称兜底。
+完全没有注册 Run Handler 时，接口返回标准“未配置”失败。
 
 ## 重复注册
 
-重复注册同一处理函数会抛出 `XXLJobCallbackRegistrationError`（`FlaskXXLJobError` 的子类）。向 `register_callbacks`/`set_*_callback` 传入 `replace=True` 可有意覆盖已有处理函数。
+Run 名称必须是没有首尾空格的非空字符串。非法名称或重复名称会抛出
+`XXLJobCallbackRegistrationError`（`FlaskXXLJobError` 的子类）。向
+`register_callbacks`/`set_run_callback` 传入 `replace=True` 可有意覆盖同名 Handler。
+批量注册是全有或全无，任一项失败都不会留下部分修改。
 
 ## 返回值
 

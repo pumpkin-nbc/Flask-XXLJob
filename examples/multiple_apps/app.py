@@ -47,7 +47,7 @@ def create_reports_app() -> Flask:
     def handle_run(request):
         return XXLJobResponse.success(content="reports ran")
 
-    xxl_job.set_run_callback(app, handle_run)
+    xxl_job.set_run_callback(app, "reportsJobHandler", handle_run)
     return app
 
 
@@ -59,7 +59,7 @@ def create_billing_app() -> Flask:
     def handle_run(request):
         return XXLJobResponse.success(content="billing ran")
 
-    xxl_job.set_run_callback(app, handle_run)
+    xxl_job.set_run_callback(app, "billingJobHandler", handle_run)
     return app
 
 
@@ -70,7 +70,11 @@ billing_app = create_billing_app()
 if __name__ == "__main__":
     # 每个应用拥有独立的处理函数与运行时。
     # Each application has its own handlers and runtime.
-    r = reports_app.test_client().post("/run", json={"jobId": 1})
-    b = billing_app.test_client().post("/run", json={"jobId": 1})
+    r = reports_app.test_client().post(
+        "/run", json={"jobId": 1, "executorHandler": "reportsJobHandler"}
+    )
+    b = billing_app.test_client().post(
+        "/run", json={"jobId": 1, "executorHandler": "billingJobHandler"}
+    )
     print("reports:", r.json["content"])
     print("billing:", b.json["content"])

@@ -33,7 +33,7 @@ app.config.update(
 xxl_job = FlaskXXLJob(app)
 
 
-@xxl_job.on_run
+@xxl_job.on_run("demoJobHandler")
 def handle_run(request):
     # 将任务提交给你自己的任务服务，这里仅作演示。
     # Submit the task to your own task service; this is only a demo.

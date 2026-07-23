@@ -12,7 +12,7 @@ def build(**overrides):
     ext = FlaskXXLJob()
     app, _ = make_app(ext, name="err_" + str(id(ext)), **overrides)
 
-    @ext.on_run
+    @ext.on_run("demoJobHandler")
     def handler(request):
         return XXLJobResponse.success()
 
@@ -53,7 +53,9 @@ def test_bad_numeric_field_returns_failure():
 
 def test_zero_numeric_is_accepted():
     app, _ = build()
-    resp = app.test_client().post("/run", json={"jobId": 0})
+    resp = app.test_client().post(
+        "/run", json={"jobId": 0, "executorHandler": "demoJobHandler"}
+    )
     assert resp.json["code"] == 200
 
 
@@ -61,11 +63,13 @@ def test_unsupported_return_type_is_failure():
     ext = FlaskXXLJob()
     app, _ = make_app(ext, name="unsup_" + str(id(ext)))
 
-    @ext.on_run
+    @ext.on_run("demoJobHandler")
     def handler(request):
         return {"not": "a response"}
 
-    resp = app.test_client().post("/run", json={"jobId": 1})
+    resp = app.test_client().post(
+        "/run", json={"jobId": 1, "executorHandler": "demoJobHandler"}
+    )
     assert resp.json["code"] == 500
     assert "unsupported response type" in resp.json["msg"]
 
@@ -74,11 +78,13 @@ def test_none_return_type_is_failure():
     ext = FlaskXXLJob()
     app, _ = make_app(ext, name="none_" + str(id(ext)))
 
-    @ext.on_run
+    @ext.on_run("demoJobHandler")
     def handler(request):
         return None
 
-    resp = app.test_client().post("/run", json={"jobId": 1})
+    resp = app.test_client().post(
+        "/run", json={"jobId": 1, "executorHandler": "demoJobHandler"}
+    )
     assert resp.json["code"] == 500
     assert "unsupported response type" in resp.json["msg"]
 
@@ -136,7 +142,7 @@ def test_content_type_with_charset_is_parsed():
     app, _ = build()
     resp = app.test_client().post(
         "/run",
-        data=b'{"jobId": 5}',
+        data=b'{"jobId": 5, "executorHandler": "demoJobHandler"}',
         content_type="application/json; charset=UTF-8",
     )
     assert resp.json["code"] == 200
@@ -147,14 +153,17 @@ def test_chinese_executor_params_parsed():
     app, _ = make_app(ext, name="zh_" + str(id(ext)))
     seen = {}
 
-    @ext.on_run
+    @ext.on_run("demoJobHandler")
     def handler(request):
         seen["params"] = request.executor_params
         return XXLJobResponse.success()
 
     resp = app.test_client().post(
         "/run",
-        data='{"jobId": 1, "executorParams": "\u4efb\u52a1\u53c2\u6570"}'.encode("utf-8"),
+        data=(
+            '{"jobId": 1, "executorHandler": "demoJobHandler", '
+            '"executorParams": "\u4efb\u52a1\u53c2\u6570"}'
+        ).encode("utf-8"),
         content_type="application/json; charset=UTF-8",
     )
     assert resp.json["code"] == 200

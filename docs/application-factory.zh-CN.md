@@ -11,6 +11,11 @@ from flask_xxljob import FlaskXXLJob, XXLJobResponse
 xxl_job = FlaskXXLJob()
 
 
+@xxl_job.on_run("demoJobHandler")
+def handle_run(request):
+    return XXLJobResponse.success()
+
+
 def create_app(config=None):
     app = Flask(__name__)
     app.config.from_mapping(
@@ -23,15 +28,11 @@ def create_app(config=None):
         app.config.update(config)
 
     xxl_job.init_app(app)
-    register_xxljob_callbacks()
     return app
-
-
-def register_xxljob_callbacks():
-    @xxl_job.on_run
-    def handle_run(request):
-        return XXLJobResponse.success()
 ```
+
+Admin 中的 JobHandler 必须完全等于 `demoJobHandler`。模块级命名 Handler 会在
+`init_app` 时复制到每个 Flask 应用。
 
 ## 应用间隔离
 

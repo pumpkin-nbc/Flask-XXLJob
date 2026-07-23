@@ -3,6 +3,7 @@
 # 基础示例
 
 使用直接初始化（`FlaskXXLJob(app)`）的单文件示例。
+Admin 中的 JobHandler 请填写完全一致的 `demoJobHandler`。
 
 ## 运行
 

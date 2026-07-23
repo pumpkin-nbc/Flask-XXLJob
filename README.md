@@ -9,7 +9,7 @@ Flask-XXLJob is a **protocol adapter**. It handles protocol integration and does
 ## Features
 
 - Implements the official XXL-JOB 2.4.1 executor endpoints: `/beat`, `/idleBeat`, `/run`, `/kill`, `/log`.
-- Plain request callbacks (`on_run`, `on_idle_beat`, `on_kill`, `on_log`) instead of an executor adapter.
+- Exact, case-sensitive JobHandler dispatch through named `on_run("name")` callbacks.
 - Executor registration / deregistration with automatic renewal.
 - Task-result callback client (`callback`, `callback_success`, `callback_failure`).
 - Access token support using the official `XXL-JOB-ACCESS-TOKEN` header.
@@ -46,7 +46,7 @@ app.config.update(
 xxl_job = FlaskXXLJob(app)
 
 
-@xxl_job.on_run
+@xxl_job.on_run("demoJobHandler")
 def handle_run(request):
     print("job:", request.job_id, "params:", request.parse_params())
     return XXLJobResponse.success(content="job received")
@@ -54,6 +54,10 @@ def handle_run(request):
 
 app.run(port=5001)
 ```
+
+Set the Admin job's JobHandler to exactly `demoJobHandler`. Flask-XXLJob
+validates and dispatches it automatically; an unknown name returns an XXL-JOB
+`code=500` response without calling another handler.
 
 Save it as `app.py`, then run:
 

@@ -43,6 +43,7 @@ RUN_NOT_CONFIGURED = "XXL-JOB run callback is not configured"
 IDLE_BEAT_NOT_CONFIGURED = "XXL-JOB idleBeat callback is not configured"
 KILL_NOT_CONFIGURED = "XXL-JOB kill callback is not configured"
 LOG_NOT_CONFIGURED = "XXL-JOB log callback is not configured"
+MAX_HANDLER_DISPLAY_LENGTH = 128
 
 
 def _runtime() -> Any:
@@ -107,10 +108,6 @@ def build_blueprint(name: str, url_prefix: str) -> Blueprint:
         if not _token_ok(runtime):
             return _json(XXLJobResponse.failure(ACCESS_TOKEN_ERROR))
 
-        callback = runtime.callback_registry.run
-        if callback is None:
-            return _json(XXLJobResponse.failure(RUN_NOT_CONFIGURED))
-
         data = _parse_body(runtime)
         if isinstance(data, Response):
             return data
@@ -121,6 +118,16 @@ def build_blueprint(name: str, url_prefix: str) -> Blueprint:
         model = _build_model(TriggerRequest, data)
         if isinstance(model, Response):
             return model
+        if not runtime.callback_registry.has_run_callbacks:
+            return _json(XXLJobResponse.failure(RUN_NOT_CONFIGURED))
+        callback = runtime.callback_registry.get_run(model.executor_handler)
+        if callback is None:
+            return _json(
+                XXLJobResponse.failure(
+                    "Unsupported JobHandler: "
+                    + _display_executor_handler(model.executor_handler)
+                )
+            )
         return _dispatch(callback, model, "run")
 
     @blueprint.route("/idleBeat", methods=["POST"])
@@ -235,6 +242,15 @@ def build_blueprint(name: str, url_prefix: str) -> Blueprint:
         return _json(_coerce_response(result, endpoint))
 
     return blueprint
+
+
+def _display_executor_handler(executor_handler: str) -> str:
+    """Render an unmatched JobHandler without returning unbounded input."""
+    if not executor_handler.strip():
+        return "<empty>"
+    if len(executor_handler) <= MAX_HANDLER_DISPLAY_LENGTH:
+        return executor_handler
+    return executor_handler[: MAX_HANDLER_DISPLAY_LENGTH - 3] + "..."
 
 
 __all__ = ["build_blueprint"]

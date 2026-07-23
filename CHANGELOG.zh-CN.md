@@ -11,6 +11,10 @@
 
 ### 变更
 
+- `/run` 现通过 `@xxl_job.on_run("名称")` 按 `executorHandler` 精确、区分大小写地
+  自动分发，支持注册多个命名 Handler；移除裸装饰器与无名称兜底。应用级 Run API
+  统一为 `set_run_callback(app, name, func)`、`get_run_callback(app, name)` 与映射式
+  `register_callbacks(run={name: func})`，并提供批量原子校验。
 - Flask 应用上下文之外的应用解析不再含糊：恰好初始化一个应用时仍可省略 `app`；同一扩展初始化多个应用后则必须显式传入 `app`。初始化前注册的 `on_*` 装饰器仍会注入其后初始化的每个应用。
 - 包元数据、`flask_xxljob.__version__` 与 CLI 现统一使用 `flask_xxljob/_version.py` 作为唯一版本源。
 - 路由冲突检查、应用解析和生命周期协调已拆分为内部辅助模块，公共导入路径不变。

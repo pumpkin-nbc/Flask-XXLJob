@@ -28,7 +28,31 @@ XXL-JOB -> Flask (Flask-XXLJob) -> your on_run submits the task
 
 ## 从 0.2.1 升级到 0.3.0
 
-0.3.0 消除了 Flask 应用上下文之外含糊的应用选择。若扩展实例恰好初始化了一个应用，辅助方法仍可省略 `app`；一旦初始化了多个应用，在上下文之外调用回调、注册、状态与注册服务生命周期辅助方法时必须显式传入 `app`。应用上下文内的调用方式不变。
+0.3.0 将 Run 注册改为显式 JobHandler 分发。请把：
+
+```python
+@xxl_job.on_run
+def handle_run(request):
+    ...
+```
+
+改为一个或多个命名 Handler：
+
+```python
+@xxl_job.on_run("demoJobHandler")
+def handle_demo(request):
+    ...
+
+@xxl_job.on_run("reportJobHandler")
+def handle_report(request):
+    ...
+```
+
+Admin 中的 JobHandler 必须完全一致，包括大小写；不再提供无名称兜底。应用级调用改为
+`set_run_callback(app, "名称", func)`、`get_run_callback(app, "名称")` 和
+`register_callbacks(app, run={"名称": func})`。
+
+0.3.0 还消除了 Flask 应用上下文之外含糊的应用选择。若扩展实例恰好初始化了一个应用，辅助方法仍可省略 `app`；一旦初始化了多个应用，在上下文之外调用回调、注册、状态与注册服务生命周期辅助方法时必须显式传入 `app`。应用上下文内的调用方式不变。
 
 初始化前注册的 `on_*` 装饰器仍会注入其后初始化的每个应用，公共导入路径也保持不变。包元数据、`__version__` 与 CLI 现统一读取同一个内部版本源。
 

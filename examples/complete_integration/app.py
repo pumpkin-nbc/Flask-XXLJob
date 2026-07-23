@@ -54,15 +54,26 @@ def _gateway() -> TaskGateway:
     return current_app.extensions["complete_example_task_gateway"]
 
 
-@xxl_job.on_run
-def handle_run(trigger: TriggerRequest) -> XXLJobResponse:
+def _submit_task(trigger: TriggerRequest, content: str) -> XXLJobResponse:
     """接收调度请求并提交任务，切勿在此执行耗时任务。 / Submit, do not execute here."""
     try:
         _gateway().submit(trigger)
     except Exception:  # noqa: BLE001 - the example isolates the business adapter
         current_app.logger.exception("Failed to submit XXL-JOB task")
         return XXLJobResponse.failure("task submission failed")
-    return XXLJobResponse.success(content="accepted")
+    return XXLJobResponse.success(content=content)
+
+
+@xxl_job.on_run("demoJobHandler")
+def handle_demo(trigger: TriggerRequest) -> XXLJobResponse:
+    """自动接收 ``demoJobHandler``。 / Automatically handle this JobHandler."""
+    return _submit_task(trigger, "accepted")
+
+
+@xxl_job.on_run("reportJobHandler")
+def handle_report(trigger: TriggerRequest) -> XXLJobResponse:
+    """自动接收 ``reportJobHandler``。 / Automatically handle this JobHandler."""
+    return _submit_task(trigger, "report accepted")
 
 
 @xxl_job.on_idle_beat

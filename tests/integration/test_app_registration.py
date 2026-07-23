@@ -29,8 +29,13 @@ def test_register_callbacks_default_app():
     ext = FlaskXXLJob()
     app, _ = make_app(ext)
     with app.app_context():
-        ext.register_callbacks(run=_run, idle_beat=_idle, kill=_kill, log=_log)
-    assert ext.get_run_callback(app) is _run
+        ext.register_callbacks(
+            run={"demoJobHandler": _run},
+            idle_beat=_idle,
+            kill=_kill,
+            log=_log,
+        )
+    assert ext.get_run_callback(app, "demoJobHandler") is _run
     assert ext.get_idle_beat_callback(app) is _idle
     assert ext.get_kill_callback(app) is _kill
     assert ext.get_log_callback(app) is _log
@@ -39,18 +44,18 @@ def test_register_callbacks_default_app():
 def test_register_callbacks_explicit_app():
     ext = FlaskXXLJob()
     app, _ = make_app(ext)
-    ext.register_callbacks(app, run=_run)
-    assert ext.get_run_callback(app) is _run
+    ext.register_callbacks(app, run={"demoJobHandler": _run})
+    assert ext.get_run_callback(app, "demoJobHandler") is _run
 
 
 def test_set_callbacks_explicit_app():
     ext = FlaskXXLJob()
     app, _ = make_app(ext)
-    ext.set_run_callback(app, _run)
+    ext.set_run_callback(app, "demoJobHandler", _run)
     ext.set_idle_beat_callback(app, _idle)
     ext.set_kill_callback(app, _kill)
     ext.set_log_callback(app, _log)
-    assert ext.get_run_callback(app) is _run
+    assert ext.get_run_callback(app, "demoJobHandler") is _run
     assert ext.get_idle_beat_callback(app) is _idle
     assert ext.get_kill_callback(app) is _kill
     assert ext.get_log_callback(app) is _log
@@ -67,20 +72,21 @@ def test_multi_app_isolation():
     def r2(request):
         return XXLJobResponse.success(content="two")
 
-    ext.set_run_callback(app1, r1)
-    ext.set_run_callback(app2, r2)
-    assert ext.get_run_callback(app1) is r1
-    assert ext.get_run_callback(app2) is r2
-    assert app1.test_client().post("/run", json={"jobId": 1}).json["content"] == "one"
-    assert app2.test_client().post("/run", json={"jobId": 1}).json["content"] == "two"
+    ext.set_run_callback(app1, "demoJobHandler", r1)
+    ext.set_run_callback(app2, "demoJobHandler", r2)
+    assert ext.get_run_callback(app1, "demoJobHandler") is r1
+    assert ext.get_run_callback(app2, "demoJobHandler") is r2
+    payload = {"jobId": 1, "executorHandler": "demoJobHandler"}
+    assert app1.test_client().post("/run", json=payload).json["content"] == "one"
+    assert app2.test_client().post("/run", json=payload).json["content"] == "two"
 
 
 def test_duplicate_registration_raises():
     ext = FlaskXXLJob()
     app, _ = make_app(ext)
-    ext.set_run_callback(app, _run)
+    ext.set_run_callback(app, "demoJobHandler", _run)
     with pytest.raises(XXLJobCallbackRegistrationError):
-        ext.set_run_callback(app, _run)
+        ext.set_run_callback(app, "demoJobHandler", _run)
 
 
 def test_replace_true_overrides():
@@ -90,27 +96,28 @@ def test_replace_true_overrides():
     def r2(request):
         return XXLJobResponse.success(content="two")
 
-    ext.set_run_callback(app, _run)
-    ext.set_run_callback(app, r2, replace=True)
-    assert ext.get_run_callback(app) is r2
+    ext.set_run_callback(app, "demoJobHandler", _run)
+    ext.set_run_callback(app, "demoJobHandler", r2, replace=True)
+    assert ext.get_run_callback(app, "demoJobHandler") is r2
 
 
 def test_module_level_decorator_seeds_factory_apps():
     ext = FlaskXXLJob()
 
-    @ext.on_run
+    @ext.on_run("demoJobHandler")
     def run(request):
         return XXLJobResponse.success(content="seeded")
 
     app, _ = make_app(ext)
-    assert ext.get_run_callback(app) is run
-    assert app.test_client().post("/run", json={"jobId": 1}).json["content"] == "seeded"
+    assert ext.get_run_callback(app, "demoJobHandler") is run
+    payload = {"jobId": 1, "executorHandler": "demoJobHandler"}
+    assert app.test_client().post("/run", json=payload).json["content"] == "seeded"
 
 
 def test_dispatch_uses_app_specific_priority():
     ext = FlaskXXLJob()
 
-    @ext.on_run
+    @ext.on_run("demoJobHandler")
     def default_run(request):
         return XXLJobResponse.success(content="default")
 
@@ -119,8 +126,9 @@ def test_dispatch_uses_app_specific_priority():
     def app_run(request):
         return XXLJobResponse.success(content="app")
 
-    ext.set_run_callback(app, app_run, replace=True)
-    assert app.test_client().post("/run", json={"jobId": 1}).json["content"] == "app"
+    ext.set_run_callback(app, "demoJobHandler", app_run, replace=True)
+    payload = {"jobId": 1, "executorHandler": "demoJobHandler"}
+    assert app.test_client().post("/run", json=payload).json["content"] == "app"
 
 
 def test_handler_exception_returns_failure():
@@ -130,8 +138,10 @@ def test_handler_exception_returns_failure():
     def boom(request):
         raise RuntimeError("kaboom")
 
-    ext.set_run_callback(app, boom)
-    body = app.test_client().post("/run", json={"jobId": 1}).json
+    ext.set_run_callback(app, "demoJobHandler", boom)
+    body = app.test_client().post(
+        "/run", json={"jobId": 1, "executorHandler": "demoJobHandler"}
+    ).json
     assert body["code"] == 500
     assert "kaboom" not in (body.get("msg") or "")
 
@@ -139,6 +149,10 @@ def test_handler_exception_returns_failure():
 def test_handler_bad_return_type_returns_failure():
     ext = FlaskXXLJob()
     app, _ = make_app(ext)
-    ext.set_run_callback(app, lambda request: {"not": "a response"})
-    body = app.test_client().post("/run", json={"jobId": 1}).json
+    ext.set_run_callback(
+        app, "demoJobHandler", lambda request: {"not": "a response"}
+    )
+    body = app.test_client().post(
+        "/run", json={"jobId": 1, "executorHandler": "demoJobHandler"}
+    ).json
     assert body["code"] == 500

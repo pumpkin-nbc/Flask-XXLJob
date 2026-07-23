@@ -4,6 +4,7 @@
 
 演示如何用 `get_status` 查询插件运行状态、用 `start_registry` / `stop_registry`
 控制自动注册线程，以及 `xxljob status` CLI 命令。
+示例中的 Run Handler 名称为 `registryStatusJobHandler`。
 
 ## 运行
 

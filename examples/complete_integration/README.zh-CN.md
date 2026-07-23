@@ -15,7 +15,8 @@ Celery、消息队列、RPC 或现有任务服务客户端。案例不会创建�
 XXL-JOB Admin
     -> POST /xxl-job/run
     -> Flask-XXLJob 校验并解析 TriggerParam
-    -> handle_run 把完整 TriggerRequest 提交给业务任务服务
+    -> 精确 JobHandler 自动选择 handle_demo 或 handle_report
+    -> 被选中的函数把完整 TriggerRequest 提交给业务任务服务
     -> 业务任务异步完成
     -> POST /internal/task-result 回传到 Flask
     -> callback_success/callback_failure
@@ -72,8 +73,9 @@ flask --app 'examples.complete_integration.app:create_app' run --host 0.0.0.0 --
 2. 设置 `XXL_JOB_AUTO_REGISTER=true` 使用自动注册；或者手动填写执行器地址
    `http://<flask-host>:5001/xxl-job`。
 3. 在 Admin 配置 Access Token，并将相同值写入 `XXL_JOB_ACCESS_TOKEN`。
-4. 新建任务并选择 BEAN 运行模式。`executorHandler` 会传入 `TaskGateway.submit`，
-   请在该适配层分发到对应业务任务。
+4. 新建 BEAN 模式任务，JobHandler 填写完全一致的 `demoJobHandler` 或
+   `reportJobHandler`。它们分别对应两个 `@xxl_job.on_run("名称")` 装饰器，
+   插件会自动、区分大小写地匹配。
 5. 执行参数可填写普通文本或 JSON；使用 `trigger.parse_params()` 可自动解析合法 JSON。
 
 ## 本地协议验证
@@ -82,6 +84,13 @@ flask --app 'examples.complete_integration.app:create_app' run --host 0.0.0.0 --
 
 ```bash
 curl http://127.0.0.1:5001/healthz
+```
+
+把 `executorHandler` 改为 `reportJobHandler` 即可自动进入第二个函数。未知名称不会进入
+任何业务函数，并返回：
+
+```json
+{"code":500,"msg":"Unsupported JobHandler: unknownJobHandler","content":null}
 ```
 
 执行器心跳：

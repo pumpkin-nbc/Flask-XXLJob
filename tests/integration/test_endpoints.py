@@ -47,14 +47,20 @@ def test_run_dispatches_and_parses():
     app, ext = build()
     seen = {}
 
-    @ext.on_run
+    @ext.on_run("demoJobHandler")
     def handler(request):
         seen["job_id"] = request.job_id
         seen["params"] = request.parse_params()
         return XXLJobResponse.success()
 
     resp = app.test_client().post(
-        "/run", json={"jobId": 9, "executorParams": '{"k": 1}', "logId": 3}
+        "/run",
+        json={
+            "jobId": 9,
+            "executorHandler": "demoJobHandler",
+            "executorParams": '{"k": 1}',
+            "logId": 3,
+        },
     )
     assert resp.json["code"] == 200
     assert seen["job_id"] == 9
@@ -64,50 +70,60 @@ def test_run_dispatches_and_parses():
 def test_run_failure_result():
     app, ext = build()
 
-    @ext.on_run
+    @ext.on_run("demoJobHandler")
     def handler(request):
         return XXLJobResponse.failure("submit task failed")
 
-    resp = app.test_client().post("/run", json={"jobId": 1})
+    resp = app.test_client().post(
+        "/run", json={"jobId": 1, "executorHandler": "demoJobHandler"}
+    )
     assert resp.json["code"] == 500
     assert resp.json["msg"] == "submit task failed"
 
 
 def test_run_unconfigured():
     app, _ = build()
-    resp = app.test_client().post("/run", json={"jobId": 1})
+    resp = app.test_client().post(
+        "/run", json={"jobId": 1, "executorHandler": "demoJobHandler"}
+    )
     assert resp.json["msg"] == "XXL-JOB run callback is not configured"
 
 
 def test_run_handler_exception():
     app, ext = build()
 
-    @ext.on_run
+    @ext.on_run("demoJobHandler")
     def handler(request):
         raise RuntimeError("boom")
 
-    resp = app.test_client().post("/run", json={"jobId": 1})
+    resp = app.test_client().post(
+        "/run", json={"jobId": 1, "executorHandler": "demoJobHandler"}
+    )
     assert resp.json["code"] == 500
     assert resp.json["msg"] == "XXL-JOB run callback execution failed"
 
 
-def test_run_missing_fields_defaults():
+def test_run_missing_handler_is_not_dispatched():
     app, ext = build()
+    called = False
 
-    @ext.on_run
+    @ext.on_run("demoJobHandler")
     def handler(request):
-        assert request.job_id == 0
-        assert request.executor_params == ""
+        nonlocal called
+        called = True
         return XXLJobResponse.success()
 
-    assert app.test_client().post("/run", json={}).json["code"] == 200
+    body = app.test_client().post("/run", json={}).json
+    assert body["code"] == 500
+    assert body["msg"] == "Unsupported JobHandler: <empty>"
+    assert called is False
 
 
 def test_run_rejects_non_string_field_without_dispatching_or_leaking_value():
     app, ext = build()
     called = False
 
-    @ext.on_run
+    @ext.on_run("demoJobHandler")
     def handler(request):
         nonlocal called
         called = True
@@ -128,7 +144,7 @@ def test_run_rejects_non_string_field_without_dispatching_or_leaking_value():
 def test_run_oversized_params_rejected():
     app, ext = build(XXL_JOB_MAX_PARAM_LENGTH=10)
 
-    @ext.on_run
+    @ext.on_run("demoJobHandler")
     def handler(request):
         return XXLJobResponse.success()
 
@@ -140,14 +156,18 @@ def test_run_oversized_params_rejected():
 def test_run_token_validation():
     app, ext = build(XXL_JOB_ACCESS_TOKEN="tok")
 
-    @ext.on_run
+    @ext.on_run("demoJobHandler")
     def handler(request):
         return XXLJobResponse.success()
 
-    bad = app.test_client().post("/run", json={"jobId": 1})
+    bad = app.test_client().post(
+        "/run", json={"jobId": 1, "executorHandler": "demoJobHandler"}
+    )
     assert bad.json["code"] == 500
     ok = app.test_client().post(
-        "/run", json={"jobId": 1}, headers={ACCESS_TOKEN_HEADER: "tok"}
+        "/run",
+        json={"jobId": 1, "executorHandler": "demoJobHandler"},
+        headers={ACCESS_TOKEN_HEADER: "tok"},
     )
     assert ok.json["code"] == 200
 
@@ -156,11 +176,13 @@ def test_run_does_not_spawn_threads():
     app, ext = build()
     before = threading.active_count()
 
-    @ext.on_run
+    @ext.on_run("demoJobHandler")
     def handler(request):
         return XXLJobResponse.success()
 
-    app.test_client().post("/run", json={"jobId": 1})
+    app.test_client().post(
+        "/run", json={"jobId": 1, "executorHandler": "demoJobHandler"}
+    )
     assert threading.active_count() == before
 
 
@@ -168,11 +190,13 @@ def test_run_does_not_auto_callback(mocker):
     app, ext = build()
     post = mocker.patch("flask_xxljob.client.requests.post")
 
-    @ext.on_run
+    @ext.on_run("demoJobHandler")
     def handler(request):
         return XXLJobResponse.success()
 
-    app.test_client().post("/run", json={"jobId": 1})
+    app.test_client().post(
+        "/run", json={"jobId": 1, "executorHandler": "demoJobHandler"}
+    )
     post.assert_not_called()
 
 

@@ -13,6 +13,11 @@ from flask_xxljob import FlaskXXLJob, XXLJobResponse
 xxl_job = FlaskXXLJob()
 
 
+@xxl_job.on_run("demoJobHandler")
+def handle_run(request):
+    return XXLJobResponse.success()
+
+
 def create_app(config=None):
     app = Flask(__name__)
     app.config.from_mapping(
@@ -25,15 +30,11 @@ def create_app(config=None):
         app.config.update(config)
 
     xxl_job.init_app(app)
-    register_xxljob_callbacks()
     return app
-
-
-def register_xxljob_callbacks():
-    @xxl_job.on_run
-    def handle_run(request):
-        return XXLJobResponse.success()
 ```
+
+The Admin JobHandler must be exactly `demoJobHandler`. Module-level named
+handlers are copied into each application when `init_app` runs.
 
 ## Per-application isolation
 

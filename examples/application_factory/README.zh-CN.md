@@ -3,6 +3,7 @@
 # Application Factory 示例
 
 使用推荐的 Application Factory 模式，并配合模块级扩展实例的示例。
+示例中的 Run Handler 名称为 `demoJobHandler`。
 
 ## 运行
 

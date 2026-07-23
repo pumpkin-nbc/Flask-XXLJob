@@ -3,7 +3,7 @@
 # 多应用示例
 
 演示一个共享的 `FlaskXXLJob` 实例服务两个 Flask 应用，每个应用通过
-`set_run_callback(app, ...)` 注册各自的请求处理函数。
+`set_run_callback(app, "名称", func)` 注册各自的命名请求处理函数。
 
 ## 运行
 

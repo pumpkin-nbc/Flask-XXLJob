@@ -7,22 +7,26 @@ from flask_xxljob.extension import EXTENSION_KEY
 from tests.conftest import make_app
 
 
-def test_on_run_as_method():
+def test_on_run_returns_named_decorator():
     ext = FlaskXXLJob()
     app, _ = make_app(ext)
 
     def handler(request):
         return XXLJobResponse.success()
 
-    ext.on_run(handler)
-    assert app.extensions[EXTENSION_KEY].callback_registry.run is handler
+    ext.on_run("demoJobHandler")(handler)
+    assert (
+        app.extensions[EXTENSION_KEY]
+        .callback_registry.get_run("demoJobHandler")
+        is handler
+    )
 
 
 def test_on_all_as_decorators():
     ext = FlaskXXLJob()
     app, _ = make_app(ext)
 
-    @ext.on_run
+    @ext.on_run("demoJobHandler")
     def run(request):
         return XXLJobResponse.success()
 
@@ -39,7 +43,7 @@ def test_on_all_as_decorators():
         return LogResponse()
 
     registry = app.extensions[EXTENSION_KEY].callback_registry
-    assert registry.run is run
+    assert registry.get_run("demoJobHandler") is run
     assert registry.idle_beat is idle
     assert registry.kill is kill
     assert registry.log is log

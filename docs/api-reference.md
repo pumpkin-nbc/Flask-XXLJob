@@ -18,11 +18,13 @@ xxl_job.init_app(app)            # or FlaskXXLJob(app)
 
 ### Request-callback registration (decorators)
 
-The `on_*` decorators register the default (extension-level) handlers, which are
-seeded into every application initialized afterwards.
+`on_run(executor_handler)` registers a named, extension-level Run handler.
+Names must be non-empty strings without leading or trailing whitespace and are
+matched exactly and case-sensitively. Other `on_*` decorators remain unnamed.
+Handlers registered before initialization are seeded into every later app.
 
 ```python
-@xxl_job.on_run
+@xxl_job.on_run("demoJobHandler")
 def handle_run(request):
     return XXLJobResponse.success()
 
@@ -37,15 +39,22 @@ been initialized; with multiple initialized apps, pass `app` explicitly or an
 `XXLJobError` is raised.
 
 ```python
-xxl_job.register_callbacks(app, run=handle_run, replace=False)
-xxl_job.set_run_callback(app, handle_run, replace=True)
-handler = xxl_job.get_run_callback(app)
+xxl_job.register_callbacks(
+    app,
+    run={"demoJobHandler": handle_run, "reportJobHandler": handle_report},
+    replace=False,
+)
+xxl_job.set_run_callback(app, "demoJobHandler", handle_run, replace=True)
+handler = xxl_job.get_run_callback(app, "demoJobHandler")
 # also: set_idle_beat_callback / set_kill_callback / set_log_callback
 #       get_idle_beat_callback / get_kill_callback / get_log_callback
 ```
 
-Registering the same handler twice raises `XXLJobCallbackRegistrationError`
-unless `replace=True`.
+An invalid name, non-callable value, or duplicate name raises
+`XXLJobCallbackRegistrationError` unless a duplicate uses `replace=True`.
+`register_callbacks` validates the full batch before changing the registry.
+An unmatched request returns HTTP 200 with XXL-JOB `code=500` and
+`Unsupported JobHandler: <name>`; no fallback Run handler exists.
 
 ### Executor registration
 

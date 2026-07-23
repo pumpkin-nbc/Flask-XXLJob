@@ -27,7 +27,7 @@ def index():
     )
 
 
-@xxl_job.on_run
+@xxl_job.on_run("demoJobHandler")
 def handle_run(request):
     """接收任务；这里只打印参数，方便先看懂流程。 / Print the received task."""
     print("收到任务 / Received job")

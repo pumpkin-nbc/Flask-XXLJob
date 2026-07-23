@@ -41,7 +41,7 @@ app.config.update(
 xxl_job = FlaskXXLJob(app)
 
 
-@xxl_job.on_run
+@xxl_job.on_run("batchJobHandler")
 def handle_run(request):
     return XXLJobResponse.success()
 

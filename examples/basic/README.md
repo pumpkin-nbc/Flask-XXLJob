@@ -3,6 +3,7 @@
 # Basic example
 
 A single-file example using direct initialization (`FlaskXXLJob(app)`).
+Configure the Admin JobHandler as exactly `demoJobHandler`.
 
 ## Run
 

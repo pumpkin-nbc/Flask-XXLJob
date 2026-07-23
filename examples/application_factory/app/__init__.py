@@ -40,7 +40,7 @@ def create_app(config=None):
 
 
 def _register_callbacks():
-    @xxl_job.on_run
+    @xxl_job.on_run("demoJobHandler")
     def handle_run(request):
         # 提交到你自己的任务服务，不要在此执行任务。
         # Submit to your own task service; do not execute the task here.

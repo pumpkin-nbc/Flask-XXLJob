@@ -17,7 +17,8 @@ the `/run` request.
 XXL-JOB Admin
     -> POST /xxl-job/run
     -> Flask-XXLJob validates and parses TriggerParam
-    -> handle_run submits the full TriggerRequest to your task service
+    -> exact JobHandler selects handle_demo or handle_report
+    -> the selected callback submits the full TriggerRequest to your task service
     -> task service completes asynchronously
     -> POST /internal/task-result to this Flask app
     -> callback_success/callback_failure
@@ -78,8 +79,9 @@ with the same prefix.
    its manual address to `http://<flask-host>:5001/xxl-job`.
 3. Configure the Admin access token and set the same value in
    `XXL_JOB_ACCESS_TOKEN`.
-4. Create a job using the BEAN glue type. `executorHandler` is passed to
-   `TaskGateway.submit`; dispatch it to the corresponding business task there.
+4. Create BEAN jobs whose JobHandler is exactly `demoJobHandler` or
+   `reportJobHandler`. Those names match the two `@xxl_job.on_run("name")`
+   decorators; matching is automatic and case-sensitive.
 5. Put plain text or JSON in Executor Parameters. Call
    `trigger.parse_params()` to receive parsed JSON when applicable.
 
@@ -113,6 +115,13 @@ curl -X POST http://127.0.0.1:5001/xxl-job/run \
     "logId": 10001,
     "logDateTime": 1784736000000
   }'
+```
+
+Change `executorHandler` to `reportJobHandler` to select the second callback.
+An unknown name is not passed to either callback and returns:
+
+```json
+{"code":500,"msg":"Unsupported JobHandler: unknownJobHandler","content":null}
 ```
 
 Simulate the business task service reporting completion:

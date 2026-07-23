@@ -4,6 +4,7 @@
 
 An example using the recommended Application Factory pattern with a
 module-level extension instance.
+Its sample Run callback is named `demoJobHandler`.
 
 ## Run
 

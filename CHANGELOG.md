@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `/run` now dispatches by exact, case-sensitive `executorHandler` through
+  `@xxl_job.on_run("name")`. Multiple named handlers are supported; the bare
+  decorator and unnamed fallback were removed. Application-level Run APIs now
+  use `set_run_callback(app, name, func)`, `get_run_callback(app, name)` and
+  mapping-style `register_callbacks(run={name: func})`, with atomic validation.
 - Application resolution is no longer ambiguous outside a Flask application context: omitting `app` remains valid with exactly one initialized application, while an extension shared by multiple initialized applications now requires an explicit `app`. Pre-initialization `on_*` decorators continue to seed every subsequently initialized app.
 - Package metadata, `flask_xxljob.__version__` and the CLI now use `flask_xxljob/_version.py` as their single version source.
 - Route-conflict checks, application resolution and lifecycle coordination were split into internal helpers without changing public import paths.

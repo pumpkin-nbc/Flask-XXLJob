@@ -18,10 +18,12 @@ xxl_job.init_app(app)            # 或 FlaskXXLJob(app)
 
 ### 请求处理函数注册（装饰器）
 
-`on_*` 装饰器注册默认（扩展级）处理函数，并在其后初始化的每个应用中被注入。
+`on_run(executor_handler)` 注册命名的扩展级 Run Handler。名称必须是没有首尾空格的
+非空字符串，并按精确、区分大小写的方式匹配；其他 `on_*` 装饰器仍不带名称。
+初始化前注册的 Handler 会注入其后初始化的每个应用。
 
 ```python
-@xxl_job.on_run
+@xxl_job.on_run("demoJobHandler")
 def handle_run(request):
     return XXLJobResponse.success()
 
@@ -33,15 +35,21 @@ def handle_run(request):
 为指定应用注册或读取处理函数。`app=None` 时优先使用当前应用上下文；在上下文之外，只有恰好初始化了一个应用时才能省略 `app`。若已初始化多个应用，必须显式传入 `app`，否则抛出 `XXLJobError`。
 
 ```python
-xxl_job.register_callbacks(app, run=handle_run, replace=False)
-xxl_job.set_run_callback(app, handle_run, replace=True)
-handler = xxl_job.get_run_callback(app)
+xxl_job.register_callbacks(
+    app,
+    run={"demoJobHandler": handle_run, "reportJobHandler": handle_report},
+    replace=False,
+)
+xxl_job.set_run_callback(app, "demoJobHandler", handle_run, replace=True)
+handler = xxl_job.get_run_callback(app, "demoJobHandler")
 # 另有：set_idle_beat_callback / set_kill_callback / set_log_callback
 #       get_idle_beat_callback / get_kill_callback / get_log_callback
 ```
 
-除非 `replace=True`，否则重复注册同一处理函数会抛出
-`XXLJobCallbackRegistrationError`。
+非法名称、不可调用的值或重复名称会抛出 `XXLJobCallbackRegistrationError`；
+重复名称只有在 `replace=True` 时才会覆盖。`register_callbacks` 会先校验完整批次，
+失败时注册表保持不变。请求名称未匹配时返回 HTTP 200、XXL-JOB `code=500` 及
+`Unsupported JobHandler: <name>`；不存在默认兜底 Run Handler。
 
 ### 执行器注册
 

@@ -6,7 +6,7 @@ Flask-XXLJob main extension class.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional
 
 from flask import Flask, current_app, has_app_context
 
@@ -18,6 +18,7 @@ from .callback.registry import (
     KillCallback,
     LogCallback,
     RunCallback,
+    validate_executor_handler,
 )
 from .client.admin_client import AdminClient
 from .client.callback_client import CallbackClient
@@ -177,14 +178,20 @@ class FlaskXXLJob:
     # 请求处理函数注册 / Request-callback registration
     # ------------------------------------------------------------------
 
-    def on_run(self, func: RunCallback) -> RunCallback:
+    def on_run(self, executor_handler: str) -> Callable[[RunCallback], RunCallback]:
         """
-        注册 XXL-JOB ``/run`` 请求处理函数，可作为方法或装饰器使用。
+        注册 XXL-JOB ``/run`` 命名请求处理函数。
 
-        Register the request callback for the XXL-JOB ``/run`` endpoint. Can be
-        used as a method or a decorator.
+        Register a named request callback for the XXL-JOB ``/run`` endpoint.
+        The name is matched exactly and case-sensitively against
+        ``executorHandler``.
         """
-        return self._target_registry().set_run(func)
+        name = validate_executor_handler(executor_handler)
+
+        def decorator(func: RunCallback) -> RunCallback:
+            return self._target_registry().set_run(name, func)
+
+        return decorator
 
     def on_idle_beat(self, func: IdleBeatCallback) -> IdleBeatCallback:
         """
@@ -221,7 +228,7 @@ class FlaskXXLJob:
         self,
         app: Optional[Flask] = None,
         *,
-        run: Optional[RunCallback] = None,
+        run: Optional[Mapping[str, RunCallback]] = None,
         idle_beat: Optional[IdleBeatCallback] = None,
         kill: Optional[KillCallback] = None,
         log: Optional[LogCallback] = None,
@@ -236,26 +243,32 @@ class FlaskXXLJob:
 
         Register one or more request-callbacks for a Flask application at once.
 
-        All callback arguments are optional. When ``app`` is ``None`` the current
+        All callback arguments are optional. ``run`` is a mapping from exact
+        JobHandler names to callbacks. When ``app`` is ``None`` the current
         application context or the only initialized application is used. In a
-        multi-application setup, pass ``app`` explicitly. Duplicate registration
-        raises :class:`XXLJobCallbackRegistrationError` unless ``replace=True``.
+        multi-application setup, pass ``app`` explicitly. The complete batch is
+        validated before mutation. Duplicate registration raises
+        :class:`XXLJobCallbackRegistrationError` unless ``replace=True``.
         """
-        registry = self._registry_for(app)
-        if run is not None:
-            registry.set_run(run, replace=replace)
-        if idle_beat is not None:
-            registry.set_idle_beat(idle_beat, replace=replace)
-        if kill is not None:
-            registry.set_kill(kill, replace=replace)
-        if log is not None:
-            registry.set_log(log, replace=replace)
+        self._registry_for(app).register_callbacks(
+            run=run,
+            idle_beat=idle_beat,
+            kill=kill,
+            log=log,
+            replace=replace,
+        )
 
     def set_run_callback(
-        self, app: Optional[Flask], func: RunCallback, replace: bool = False
+        self,
+        app: Optional[Flask],
+        executor_handler: str,
+        func: RunCallback,
+        replace: bool = False,
     ) -> RunCallback:
-        """为指定应用注册 ``/run`` 处理函数。 / Register the ``/run`` callback for an app."""
-        return self._registry_for(app).set_run(func, replace=replace)
+        """为应用注册命名 ``/run`` 处理函数。 / Register a named callback."""
+        return self._registry_for(app).set_run(
+            executor_handler, func, replace=replace
+        )
 
     def set_idle_beat_callback(
         self, app: Optional[Flask], func: IdleBeatCallback, replace: bool = False
@@ -275,9 +288,12 @@ class FlaskXXLJob:
         """为指定应用注册 ``/log`` 处理函数。 / Register the ``/log`` callback."""
         return self._registry_for(app).set_log(func, replace=replace)
 
-    def get_run_callback(self, app: Optional[Flask] = None) -> Optional[RunCallback]:
-        """返回指定应用的 ``/run`` 处理函数。 / Return the app's ``/run`` callback."""
-        return self._registry_for(app).run
+    def get_run_callback(
+        self, app: Optional[Flask], executor_handler: str
+    ) -> Optional[RunCallback]:
+        """返回精确 JobHandler 对应的函数。 / Return an exact named callback."""
+        name = validate_executor_handler(executor_handler)
+        return self._registry_for(app).get_run(name)
 
     def get_idle_beat_callback(
         self, app: Optional[Flask] = None

@@ -53,7 +53,7 @@ def test_token_not_in_endpoint_response():
 def test_body_over_limit_returns_json():
     ext = FlaskXXLJob()
     app, _ = make_app(ext, XXL_JOB_MAX_REQUEST_SIZE=10)
-    ext.set_run_callback(app, lambda r: None)
+    ext.set_run_callback(app, "demoJobHandler", lambda r: None)
     resp = app.test_client().post(
         "/run", data=b'{"jobId": 123456789012345}', content_type="application/json"
     )
@@ -91,7 +91,9 @@ def test_param_over_limit_returns_json():
 
     ext = FlaskXXLJob()
     app, _ = make_app(ext, XXL_JOB_MAX_PARAM_LENGTH=3)
-    ext.set_run_callback(app, lambda r: XXLJobResponse.success())
+    ext.set_run_callback(
+        app, "demoJobHandler", lambda r: XXLJobResponse.success()
+    )
     resp = app.test_client().post(
         "/run", json={"jobId": 1, "executorParams": "toolong"}
     )
@@ -104,9 +106,18 @@ def test_chinese_param_length_counts_characters():
 
     ext = FlaskXXLJob()
     app, _ = make_app(ext, XXL_JOB_MAX_PARAM_LENGTH=3)
-    ext.set_run_callback(app, lambda r: XXLJobResponse.success())
+    ext.set_run_callback(
+        app, "demoJobHandler", lambda r: XXLJobResponse.success()
+    )
     # 3 Chinese characters -> within limit (measured in characters).
-    ok = app.test_client().post("/run", json={"jobId": 1, "executorParams": "参数值"})
+    ok = app.test_client().post(
+        "/run",
+        json={
+            "jobId": 1,
+            "executorHandler": "demoJobHandler",
+            "executorParams": "参数值",
+        },
+    )
     assert ok.json["code"] == 200
     # 4 characters -> over limit.
     bad = app.test_client().post("/run", json={"jobId": 1, "executorParams": "参数值多"})

@@ -3,7 +3,8 @@
 # Multiple applications example
 
 Shows a single shared `FlaskXXLJob` instance serving two Flask applications,
-each with its own request handler registered via `set_run_callback(app, ...)`.
+each with its own named request handler registered via
+`set_run_callback(app, "name", func)`.
 
 ## Run
 

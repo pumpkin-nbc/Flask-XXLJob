@@ -58,7 +58,7 @@ def test_multiple_app_runtime_isolation():
     ext = FlaskXXLJob()
     app1, _ = make_app(ext, name="app1")
 
-    @ext.on_run
+    @ext.on_run("demoJobHandler")
     def run1(request):
         return XXLJobResponse.success(content="app1")
 
@@ -67,10 +67,10 @@ def test_multiple_app_runtime_isolation():
     def run2(request):
         return XXLJobResponse.failure("app2")
 
-    ext.set_run_callback(app2, run2)
+    ext.set_run_callback(app2, "demoJobHandler", run2)
 
-    r1 = app1.extensions[EXTENSION_KEY].callback_registry.run
-    r2 = app2.extensions[EXTENSION_KEY].callback_registry.run
+    r1 = app1.extensions[EXTENSION_KEY].callback_registry.get_run("demoJobHandler")
+    r2 = app2.extensions[EXTENSION_KEY].callback_registry.get_run("demoJobHandler")
     assert r1 is run1
     assert r2 is run2
     assert r1 is not r2
@@ -136,11 +136,14 @@ def test_prefixed_run_dispatches():
     ext = FlaskXXLJob()
     app, _ = make_app(ext, name="pfxrun_" + str(id(ext)), XXL_JOB_ROUTE_PREFIX="/xxl-job/")
 
-    @ext.on_run
+    @ext.on_run("demoJobHandler")
     def handler(request):
         return XXLJobResponse.success(content="prefixed")
 
-    resp = app.test_client().post("/xxl-job/run", json={"jobId": 1})
+    resp = app.test_client().post(
+        "/xxl-job/run",
+        json={"jobId": 1, "executorHandler": "demoJobHandler"},
+    )
     assert resp.json["content"] == "prefixed"
 
 

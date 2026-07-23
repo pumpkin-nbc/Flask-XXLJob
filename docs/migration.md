@@ -30,7 +30,32 @@ full control over execution.
 
 ## Upgrading 0.2.1 to 0.3.0
 
-0.3.0 removes ambiguous application selection outside a Flask application
+0.3.0 changes Run registration to explicit JobHandler dispatch. Replace:
+
+```python
+@xxl_job.on_run
+def handle_run(request):
+    ...
+```
+
+with one or more named handlers:
+
+```python
+@xxl_job.on_run("demoJobHandler")
+def handle_demo(request):
+    ...
+
+@xxl_job.on_run("reportJobHandler")
+def handle_report(request):
+    ...
+```
+
+The Admin JobHandler must match exactly, including capitalization. There is no
+unnamed fallback. Application-level calls change to
+`set_run_callback(app, "name", func)`, `get_run_callback(app, "name")` and
+`register_callbacks(app, run={"name": func})`.
+
+0.3.0 also removes ambiguous application selection outside a Flask application
 context. If an extension instance has initialized exactly one app, helpers may
 still omit `app`. Once it has initialized multiple apps, callback, registration,
 status and registry-lifecycle helpers must receive `app` explicitly. Calls made

@@ -4,6 +4,7 @@
 
 Shows how to report several task results in a single official request using
 `callback_many`.
+Its sample Run callback is named `batchJobHandler`.
 
 ## Run
 
