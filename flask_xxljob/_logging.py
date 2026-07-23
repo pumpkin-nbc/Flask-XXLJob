@@ -25,6 +25,14 @@ _PRIVATE_KEY = re.compile(
     r"-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----",
     re.DOTALL,
 )
+_LEVEL_COLORS = {
+    "DEBUG": "\033[34m",
+    "INFO": "\033[32m",
+    "WARNING": "\033[33m",
+    "ERROR": "\033[31m",
+    "CRITICAL": "\033[1;31m",
+}
+_COLOR_RESET = "\033[0m"
 
 
 def _next_runtime_id() -> int:
@@ -63,6 +71,17 @@ class SensitiveDataFilter(logging.Filter):
         return True
 
 
+class LevelColorFormatter(logging.Formatter):
+    """Color a complete console record according to its standard level."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        rendered = super().format(record)
+        color = _LEVEL_COLORS.get(record.levelname)
+        if color is None:
+            return rendered
+        return f"{color}{rendered}{_COLOR_RESET}"
+
+
 class XXLJobLogManager:
     """Own the managed handlers for one Flask application runtime."""
 
@@ -89,7 +108,11 @@ class XXLJobLogManager:
         ):
             return
 
-        formatter = logging.Formatter(
+        file_formatter = logging.Formatter(
+            self._config.log_format,
+            self._config.log_date_format or None,
+        )
+        console_formatter = LevelColorFormatter(
             self._config.log_format,
             self._config.log_date_format or None,
         )
@@ -106,14 +129,16 @@ class XXLJobLogManager:
                     backupCount=self._config.log_backup_count,
                     encoding=self._config.log_encoding,
                 )
-                self._prepare_handler(file_handler, "file", level, formatter)
+                self._prepare_handler(
+                    file_handler, "file", level, file_formatter
+                )
                 created.append(file_handler)
                 self._log_file = str(path)
 
             if self._config.log_console_enabled:
                 console_handler = logging.StreamHandler()
                 self._prepare_handler(
-                    console_handler, "console", level, formatter
+                    console_handler, "console", level, console_formatter
                 )
                 created.append(console_handler)
         except Exception as exc:
@@ -209,6 +234,7 @@ class XXLJobLogManager:
 
 
 __all__ = [
+    "LevelColorFormatter",
     "SensitiveDataFilter",
     "XXLJobLogManager",
     "redact_text",

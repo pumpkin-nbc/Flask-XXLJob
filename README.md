@@ -16,7 +16,7 @@ Flask-XXLJob is a **protocol adapter**. It handles protocol integration and does
 - Multiple admin addresses with failover.
 - Flask Application Factory support and per-application runtime isolation.
 - Strict protocol string validation and startup detection of conflicting executor routes.
-- Optional, isolated rotating-file and console plugin diagnostics.
+- Optional, isolated rotating-file and level-colored console plugin diagnostics.
 - Minimal dependencies (`Flask`, `requests`), typed (`py.typed`).
 
 ## What it does not do

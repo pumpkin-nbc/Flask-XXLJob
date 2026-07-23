@@ -44,6 +44,23 @@ Because file and console outputs both default to enabled, setting only
 standard Python Logging console stream and emits both normal and error records
 that meet `XXL_JOB_LOG_LEVEL`; there is no separate stream configuration.
 
+## Console colors
+
+Managed console records use ANSI colors by level:
+
+| Level | Color |
+| --- | --- |
+| `DEBUG` | blue |
+| `INFO` | green |
+| `WARNING` | yellow |
+| `ERROR` | red |
+| `CRITICAL` | bold red |
+
+The color wraps the complete formatted console record and is reset immediately
+after it. File logs remain plain text without ANSI escape sequences. Coloring
+does not change level filtering, formatting fields or sensitive-data redaction.
+The terminal must support ANSI colors to render them visually.
+
 If both targets are disabled, or the total switch is off, Flask-XXLJob leaves
 the runtime logger's level and propagation unchanged. The host can then attach
 a handler to `flask_xxljob` using ordinary Python Logging. The package
@@ -55,8 +72,9 @@ to a host handler.
 Relative `XXL_JOB_LOG_PATH` values resolve from the process current working
 directory. `XXLJobStatus.log_file` reports the resulting absolute path.
 File and console handlers share `XXL_JOB_LOG_LEVEL`, `XXL_JOB_LOG_FORMAT` and
-`XXL_JOB_LOG_DATE_FORMAT`. The level, encoding, stream, rotation values and
-format are strictly validated during `init_app()`.
+`XXL_JOB_LOG_DATE_FORMAT`; the console then adds its level color around that
+formatted text. The level, encoding, rotation values and format are strictly
+validated during `init_app()`.
 
 Each Flask runtime owns a unique `flask_xxljob.app.<app>.<sequence>.<component>`
 logger hierarchy. Even same-named Flask apps remain isolated. The extension

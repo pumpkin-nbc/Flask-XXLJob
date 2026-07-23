@@ -131,6 +131,37 @@ def test_file_and_console_each_receive_one_record(tmp_path, capsys):
     assert len(_managed_handlers(app)) == 2
 
 
+def test_console_colors_every_standard_level_but_file_stays_plain(tmp_path, capsys):
+    app, _ = make_app(
+        XXL_JOB_LOG_ENABLED=True,
+        XXL_JOB_LOG_FILE_ENABLED=True,
+        XXL_JOB_LOG_CONSOLE_ENABLED=True,
+        XXL_JOB_LOG_PATH=str(tmp_path),
+        XXL_JOB_LOG_LEVEL="DEBUG",
+        XXL_JOB_LOG_FORMAT="%(levelname)s|%(message)s",
+    )
+    colors = {
+        logging.DEBUG: "\033[34m",
+        logging.INFO: "\033[32m",
+        logging.WARNING: "\033[33m",
+        logging.ERROR: "\033[31m",
+        logging.CRITICAL: "\033[1;31m",
+    }
+
+    for level in colors:
+        _log(app, f"color-{logging.getLevelName(level)}", level)
+
+    console = capsys.readouterr().err
+    file_content = Path(_runtime(app).log_manager.log_file).read_text(
+        encoding="utf-8"
+    )
+    for level, color in colors.items():
+        name = logging.getLevelName(level)
+        assert f"{color}{name}|color-{name}\033[0m" in console
+        assert f"{name}|color-{name}" in file_content
+    assert "\033[" not in file_content
+
+
 def test_no_managed_targets_preserves_host_logger_configuration(tmp_path):
     package_logger = logging.getLogger("flask_xxljob")
     previous_level = package_logger.level

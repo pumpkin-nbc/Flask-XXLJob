@@ -42,6 +42,22 @@ app.config.update(
 模式。控制台 Handler 使用 Python Logging 的标准控制台流，将满足
 `XXL_JOB_LOG_LEVEL` 的正常与异常记录统一输出；不再提供单独的流配置。
 
+## 控制台颜色
+
+插件托管的控制台记录按等级使用 ANSI 颜色：
+
+| 等级 | 颜色 |
+| --- | --- |
+| `DEBUG` | 蓝色 |
+| `INFO` | 绿色 |
+| `WARNING` | 黄色 |
+| `ERROR` | 红色 |
+| `CRITICAL` | 加粗红色 |
+
+颜色包裹整条格式化后的控制台记录，并在记录末尾立即重置。文件日志保持纯文本，不包含
+ANSI 转义码。着色不会改变等级过滤、格式字段或敏感信息脱敏。终端需要支持 ANSI 颜色
+才能显示实际颜色。
+
 两个目标都关闭或总开关关闭时，Flask-XXLJob 不修改 Runtime Logger 的等级和传播
 设置。宿主可使用标准 Python Logging 在 `flask_xxljob` Logger 上添加 Handler。
 包级 `NullHandler` 避免意外的默认输出，但不会阻止日志传播到宿主 Handler。
@@ -50,7 +66,8 @@ app.config.update(
 
 相对 `XXL_JOB_LOG_PATH` 按进程当前工作目录解析，`XXLJobStatus.log_file` 返回最终
 绝对路径。文件与控制台共用 `XXL_JOB_LOG_LEVEL`、`XXL_JOB_LOG_FORMAT` 和
-`XXL_JOB_LOG_DATE_FORMAT`。等级、编码、流、轮转值与格式均在 `init_app()` 时严格校验。
+`XXL_JOB_LOG_DATE_FORMAT`，控制台再在格式化文本外添加等级颜色。等级、编码、轮转值
+与格式均在 `init_app()` 时严格校验。
 
 每个 Flask Runtime 拥有唯一的
 `flask_xxljob.app.<应用名>.<序号>.<组件>` Logger 层级，同名 Flask 应用也相互隔离。

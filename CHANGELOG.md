@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and one console handler emits both normal and error records. Added shared
   level and format validation, sensitive-data filtering, lifecycle cleanup,
   and logging fields in `XXLJobStatus` and `xxljob status`.
+- Managed console records are colorized by level: blue `DEBUG`, green `INFO`,
+  yellow `WARNING`, red `ERROR`, and bold red `CRITICAL`. File logs remain
+  free of ANSI escape sequences.
 
 ### Changed
 
