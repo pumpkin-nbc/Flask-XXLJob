@@ -75,10 +75,9 @@ not register can omit them. When provided, admin and executor addresses must use
 the `http` or `https` scheme and contain a host and valid port; context paths are
 supported. Addresses are normalized on load (surrounding whitespace and
 redundant trailing slashes are removed while context paths and order are
-preserved). When set, `XXL_JOB_ROUTE_PREFIX` is appended to
-`XXL_JOB_EXECUTOR_ADDRESS` automatically; do not embed the route prefix in the
-executor address unless you rely on the idempotent skip for legacy values that
-already end with that prefix. A whitespace-only access token is normalized to
+preserved). When set, `XXL_JOB_ROUTE_PREFIX` is always appended to
+`XXL_JOB_EXECUTOR_ADDRESS`; do not embed the route prefix in the executor
+address. A whitespace-only access token is normalized to
 empty (no-token mode), while a non-empty token is preserved. Validation messages
 name the offending key, its received type and the expected format. Bad
 configuration is never silently ignored.

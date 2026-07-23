@@ -28,7 +28,7 @@ XXL-JOB -> Flask (Flask-XXLJob) -> your on_run submits the task
 
 ## 从 0.3.1 升级到 0.3.2
 
-`0.3.2` 会在加载配置时自动把 `XXL_JOB_ROUTE_PREFIX` 附加到
+`0.3.2` 会在加载配置时始终把 `XXL_JOB_ROUTE_PREFIX` 附加到
 `XXL_JOB_EXECUTOR_ADDRESS`。执行器地址只需填写服务基础地址：
 
 ```python
@@ -39,8 +39,9 @@ app.config.update(
 # 注册地址变为 http://127.0.0.1:5001/xxl-job
 ```
 
-若旧配置的地址路径已以同一前缀结尾，则保持不变（不会重复附加）。后续请优先使用
-基础地址写法。
+请勿在 `XXL_JOB_EXECUTOR_ADDRESS` 中再手写路由前缀；例如地址写成
+`http://127.0.0.1:5001/xxl-job` 且前缀为 `/xxl-job` 时，结果会变成
+`http://127.0.0.1:5001/xxl-job/xxl-job`。
 
 ```bash
 pip install --upgrade flask-xxljob==0.3.2

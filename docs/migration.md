@@ -30,8 +30,9 @@ full control over execution.
 
 ## Upgrading 0.3.1 to 0.3.2
 
-`0.3.2` appends `XXL_JOB_ROUTE_PREFIX` to `XXL_JOB_EXECUTOR_ADDRESS`
-automatically. Set the executor address to the service base URL only:
+`0.3.2` always appends `XXL_JOB_ROUTE_PREFIX` to `XXL_JOB_EXECUTOR_ADDRESS`
+when the configuration is loaded. Set the executor address to the service base
+URL only:
 
 ```python
 app.config.update(
@@ -41,8 +42,9 @@ app.config.update(
 # Registered address becomes http://127.0.0.1:5001/xxl-job
 ```
 
-If an older config already ends with the same prefix, the value is left
-unchanged (no double append). Prefer the base-URL form going forward.
+Do not include the route prefix in `XXL_JOB_EXECUTOR_ADDRESS`; values such as
+`http://127.0.0.1:5001/xxl-job` with `XXL_JOB_ROUTE_PREFIX="/xxl-job"` become
+`http://127.0.0.1:5001/xxl-job/xxl-job`.
 
 ```bash
 pip install --upgrade flask-xxljob==0.3.2

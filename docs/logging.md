@@ -57,11 +57,9 @@ Managed console records use ANSI colors by level:
 | `CRITICAL` | bold red |
 
 The color wraps the complete formatted console record and is reset immediately
-after it. Color is added only when the console stream reports `isatty() == True`.
-Setting `NO_COLOR` (even to an empty value) or `TERM=dumb` disables color.
-Redirected output, CI/container log collection and file logs therefore remain
-plain text without ANSI escape sequences. Coloring does not change level
-filtering, formatting fields or sensitive-data redaction.
+after it. File logs remain plain text without ANSI escape sequences. Coloring
+does not change level filtering, formatting fields or sensitive-data redaction.
+The terminal must support ANSI colors to render them visually.
 
 If both targets are disabled, or the total switch is off, Flask-XXLJob leaves
 the runtime logger's level and propagation unchanged. The host can then attach

@@ -11,9 +11,8 @@
 
 ### 变更
 
-- `XXL_JOB_EXECUTOR_ADDRESS` 现在只需填写服务基础地址。加载配置时会自动附加
-  `XXL_JOB_ROUTE_PREFIX`，使 Admin 注册地址与执行器接口路径一致。若地址路径已以
-  该前缀结尾，则保持不变。
+- `XXL_JOB_EXECUTOR_ADDRESS` 现在只需填写服务基础地址。加载配置时会始终附加
+  `XXL_JOB_ROUTE_PREFIX`，使 Admin 注册地址与执行器接口路径一致。
 
 ## [0.3.1] - 2026-07-23
 
@@ -33,9 +32,8 @@
 - 开启托管日志时默认启用控制台日志，并使用一个控制台 Handler 同时输出正常与异常
   记录；新增共用等级与格式校验、敏感信息过滤、生命周期清理，以及
   `XXLJobStatus` 和 `xxljob status` 中的日志状态字段。
-- 托管控制台记录在交互式终端中按等级着色：`DEBUG` 蓝色、`INFO` 绿色、
-  `WARNING` 黄色、`ERROR` 红色、`CRITICAL` 加粗红色；重定向输出、
-  `NO_COLOR`、`TERM=dumb` 与文件日志均不包含 ANSI 转义码。
+- 托管控制台记录现按等级着色：`DEBUG` 蓝色、`INFO` 绿色、`WARNING` 黄色、
+  `ERROR` 红色、`CRITICAL` 加粗红色；文件日志不包含 ANSI 转义码。
 
 ### 变更
 

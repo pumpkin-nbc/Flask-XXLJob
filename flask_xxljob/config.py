@@ -221,8 +221,8 @@ class XXLJobConfig:
           only when auto-registration is enabled, so scenarios that provide the
           protocol endpoints without registering still work.
         - When provided, admin/executor addresses must use the ``http``/``https``
-          scheme. ``XXL_JOB_ROUTE_PREFIX`` is appended to the executor address
-          automatically when the configuration is loaded.
+          scheme. ``XXL_JOB_ROUTE_PREFIX`` is always appended to the executor
+          address when the configuration is loaded.
         """
         if not self.enabled:
             return
@@ -417,29 +417,17 @@ def _apply_route_prefix(address: str, route_prefix: str) -> str:
     将 ``XXL_JOB_ROUTE_PREFIX`` 自动附加到 ``XXL_JOB_EXECUTOR_ADDRESS``。
 
     ``XXL_JOB_EXECUTOR_ADDRESS`` 只需填写服务基础地址（协议/主机/端口，可含
-    反向代理上下文路径）；路由前缀会在加载配置时自动拼接，供 Admin 回调执行器
-    接口。若地址路径已以该前缀结尾，则保持不变（兼容旧配置中已手写前缀的情况）。
+    反向代理上下文路径）；路由前缀会在加载配置时始终拼接，供 Admin 回调执行器
+    接口。地址中若已手写同名路径段，仍会再附加一次前缀。
 
     Append ``XXL_JOB_ROUTE_PREFIX`` onto ``XXL_JOB_EXECUTOR_ADDRESS``.
 
     ``XXL_JOB_EXECUTOR_ADDRESS`` should be the service base URL (scheme/host/port,
-    optional reverse-proxy context path). The route prefix is appended at load
-    time so Admin can reach the executor endpoints. If the address path already
-    ends with the prefix, it is left unchanged (compatible with older configs
-    that included the prefix manually).
+    optional reverse-proxy context path). The route prefix is always appended at
+    load time so Admin can reach the executor endpoints. If the address already
+    contains the same path segment, the prefix is still appended again.
     """
     if not address or not route_prefix:
-        return address
-    path = (urlsplit(address).path or "").rstrip("/")
-    path_segments = [segment for segment in path.split("/") if segment]
-    prefix_segments = [
-        segment for segment in route_prefix.strip("/").split("/") if segment
-    ]
-    if (
-        prefix_segments
-        and len(path_segments) >= len(prefix_segments)
-        and path_segments[-len(prefix_segments) :] == prefix_segments
-    ):
         return address
     return join_url(address, route_prefix)
 

@@ -12,9 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - `XXL_JOB_EXECUTOR_ADDRESS` is now treated as the service base URL only.
-  `XXL_JOB_ROUTE_PREFIX` is appended automatically when the configuration is
-  loaded, so Admin registers against the same path the executor endpoints use.
-  Addresses that already end with the route prefix are left unchanged.
+  `XXL_JOB_ROUTE_PREFIX` is always appended when the configuration is loaded,
+  so Admin registers against the same path the executor endpoints use.
 
 ## [0.3.1] - 2026-07-23
 
@@ -37,9 +36,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and one console handler emits both normal and error records. Added shared
   level and format validation, sensitive-data filtering, lifecycle cleanup,
   and logging fields in `XXLJobStatus` and `xxljob status`.
-- Managed console records are colorized on interactive terminals by level:
-  blue `DEBUG`, green `INFO`, yellow `WARNING`, red `ERROR`, and bold red
-  `CRITICAL`. Redirected output, `NO_COLOR`, `TERM=dumb`, and file logs remain
+- Managed console records are colorized by level: blue `DEBUG`, green `INFO`,
+  yellow `WARNING`, red `ERROR`, and bold red `CRITICAL`. File logs remain
   free of ANSI escape sequences.
 
 ### Changed

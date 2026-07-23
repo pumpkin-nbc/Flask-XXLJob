@@ -151,14 +151,14 @@ def test_route_prefix_appended_after_existing_context_path():
     assert config.executor_address == "http://127.0.0.1:5001/myapp/xxl-job"
 
 
-def test_route_prefix_not_double_appended_when_already_present():
+def test_route_prefix_always_appended_even_when_already_present():
     config = XXLJobConfig.from_mapping(
         base_mapping(
             XXL_JOB_EXECUTOR_ADDRESS="http://127.0.0.1:5001/xxl-job/",
             XXL_JOB_ROUTE_PREFIX="/xxl-job",
         )
     )
-    assert config.executor_address == "http://127.0.0.1:5001/xxl-job"
+    assert config.executor_address == "http://127.0.0.1:5001/xxl-job/xxl-job"
 
 
 def test_empty_route_prefix_keeps_executor_address():
