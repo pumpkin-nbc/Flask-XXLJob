@@ -26,6 +26,16 @@ XXL-JOB -> Flask (Flask-XXLJob) -> your on_run submits the task
 
 任务路由、阻塞策略、超时与重试仍由 XXL-JOB Admin 管理。Flask-XXLJob 只负责协议中转；你的任务服务始终完全掌控执行过程。
 
+## 从 0.3.3 升级到 0.3.4
+
+`0.3.4` 仅根据配置（`XXL_JOB_ENABLED` + `XXL_JOB_AUTO_REGISTER`）启动自动注册，
+不再参考 `app.debug` 或 `WERKZEUG_RUN_MAIN`，因此 Gunicorn 等在 `DEBUG=True`
+下也会正常注册。
+
+```bash
+pip install --upgrade flask-xxljob==0.3.4
+```
+
 ## 从 0.3.2 升级到 0.3.3
 
 `0.3.3` 允许成功响应携带可选消息，`msg` 为第一个参数：

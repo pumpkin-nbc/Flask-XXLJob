@@ -14,11 +14,12 @@ Celery 等异步 worker 时，请将该超时调到大于最长执行时间，�
 
 ## 自动注册
 
-当 `XXL_JOB_AUTO_REGISTER=True` 时，扩展会启动一个守护线程，注册执行器并每隔 `XXL_JOB_REGISTRY_INTERVAL` 秒续约一次。注册失败会记录日志，且绝不会导致应用崩溃。
+当 `XXL_JOB_ENABLED=True` 且 `XXL_JOB_AUTO_REGISTER=True` 时，扩展在 `init_app()`
+阶段启动守护注册线程。是否启动**只看配置开关**，不依赖 `app.debug` 或
+`WERKZEUG_RUN_MAIN`，因此 Gunicorn（等）在 `DEBUG=True` 下也会正常注册。注册失败会记录日志，且绝不会导致应用崩溃。
 
-## Flask debug reloader
-
-在 Flask debug reloader 下，注册线程只在 reloader 子进程中启动（此时 `WERKZEUG_RUN_MAIN=true`），因此不会重复启动。
+使用 `flask run --debug` 时，Werkzeug reloader 可能在父进程与子进程各启动一次注册线程。Admin 侧按地址注册是幂等的；若本地介意重复启动，可设
+`XXL_JOB_AUTO_REGISTER=False` 并改为手动注册。
 
 ## 多进程
 

@@ -14,7 +14,6 @@ from flask import Flask, current_app, has_app_context
 from ._app import ApplicationRegistry, ensure_executor_routes_available, executor_paths
 from ._lifecycle import (
     install_runtime_finalizer,
-    should_start_registry,
     start_registry_with_shutdown,
 )
 from ._logging import XXLJobLogManager
@@ -174,11 +173,7 @@ class FlaskXXLJob:
                 config.auto_register,
             )
 
-            if (
-                config.enabled
-                and config.auto_register
-                and should_start_registry(app)
-            ):
+            if config.enabled and config.auto_register:
                 start_registry_with_shutdown(registry_service)
         except Exception as exc:
             log_manager.get_logger("runtime").error(

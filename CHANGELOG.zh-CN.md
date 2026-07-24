@@ -7,6 +7,14 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 并遵循 [语义化版本](https://semver.org/lang/zh-CN/spec/v2.0.0.html)。
 
+## [0.3.4] - 2026-07-25
+
+### 变更
+
+- `init_app()` 阶段的自动注册现在只依赖 `XXL_JOB_ENABLED` 与
+  `XXL_JOB_AUTO_REGISTER`，不再检查 `app.debug` 或 `WERKZEUG_RUN_MAIN`，因此
+  Gunicorn（等）在 `DEBUG=True` 下也会启动注册线程。
+
 ## [0.3.3] - 2026-07-24
 
 ### 新增
