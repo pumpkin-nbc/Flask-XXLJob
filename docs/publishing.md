@@ -16,8 +16,8 @@ This produces a wheel and a source distribution in `dist/`:
 
 ```text
 dist/
-  flask_xxljob-0.3.3-py3-none-any.whl
-  flask_xxljob-0.3.3.tar.gz
+  flask_xxljob-0.3.4-py3-none-any.whl
+  flask_xxljob-0.3.4.tar.gz
 ```
 
 ## Check
@@ -25,7 +25,7 @@ dist/
 ```bash
 .venv\Scripts\python.exe scripts\check_docs.py
 .venv\Scripts\python.exe scripts\check_package.py
-.venv\Scripts\python.exe -m twine check dist\flask_xxljob-0.3.3-py3-none-any.whl dist\flask_xxljob-0.3.3.tar.gz
+.venv\Scripts\python.exe -m twine check dist\flask_xxljob-0.3.4-py3-none-any.whl dist\flask_xxljob-0.3.4.tar.gz
 ```
 
 ## Configure Trusted Publishing
@@ -54,8 +54,8 @@ from TestPyPI without dependency resolution:
 
 ```bash
 python -m pip install --index-url https://pypi.org/simple Flask requests
-python -m pip install --index-url https://test.pypi.org/simple --no-deps flask-xxljob==0.3.3
-python -c "import flask_xxljob; assert flask_xxljob.__version__ == '0.3.3'"
+python -m pip install --index-url https://test.pypi.org/simple --no-deps flask-xxljob==0.3.4
+python -c "import flask_xxljob; assert flask_xxljob.__version__ == '0.3.4'"
 flask-xxljob --version
 ```
 
@@ -65,11 +65,11 @@ After the complete CI matrix has passed on `develop` and `master`, create the
 release tag from a commit contained in `master`:
 
 ```bash
-git tag -a v0.3.3 -m "Release 0.3.3"
-git push origin v0.3.3
+git tag -a v0.3.4 -m "Release 0.3.4"
+git push origin v0.3.4
 ```
 
-The tag starts the same `Release` workflow. It verifies that `v0.3.3`,
+The tag starts the same `Release` workflow. It verifies that `v0.3.4`,
 `flask_xxljob/_version.py`, and both Changelogs agree and that the tagged commit
 belongs to `master`. The `pypi` environment approval then gates the final
 Trusted Publishing step.
@@ -83,5 +83,5 @@ not include secrets, internal hostnames or tokens.
 ```bash
 .venv\Scripts\python.exe scripts\check_docs.py
 .venv\Scripts\python.exe scripts\check_package.py
-.venv\Scripts\python.exe -m twine check dist\flask_xxljob-0.3.3-py3-none-any.whl dist\flask_xxljob-0.3.3.tar.gz
+.venv\Scripts\python.exe -m twine check dist\flask_xxljob-0.3.4-py3-none-any.whl dist\flask_xxljob-0.3.4.tar.gz
 ```

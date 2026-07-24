@@ -18,15 +18,16 @@ longest expected runtime, and have the worker call `callback_success` /
 
 ## Automatic registration
 
-With `XXL_JOB_AUTO_REGISTER=True` the extension starts a daemon thread that
-registers the executor and renews it every `XXL_JOB_REGISTRY_INTERVAL` seconds.
-Registration failures are logged and never crash the application.
+With `XXL_JOB_ENABLED=True` and `XXL_JOB_AUTO_REGISTER=True`, the extension
+starts a daemon registry thread during `init_app()`. Startup depends only on
+those configuration switches — not on `app.debug` or `WERKZEUG_RUN_MAIN` — so
+Gunicorn (or similar) with `DEBUG=True` still registers. Registration failures
+are logged and never crash the application.
 
-## Flask debug reloader
-
-Under the Flask debug reloader the registration thread only starts in the
-reloader child process (where `WERKZEUG_RUN_MAIN=true`), so it is not started
-twice.
+Under `flask run --debug`, the Werkzeug reloader may start a registry thread in
+both the parent and child process. Address-keyed registration is idempotent for
+Admin; if local double-start is undesirable, set `XXL_JOB_AUTO_REGISTER=False`
+and register manually.
 
 ## Multiple processes
 

@@ -28,6 +28,17 @@ Job routing, block strategies, timeouts and retries are still managed by the
 XXL-JOB admin. Flask-XXLJob only relays the protocol; your task service keeps
 full control over execution.
 
+## Upgrading 0.3.3 to 0.3.4
+
+`0.3.4` starts automatic registration from configuration alone
+(`XXL_JOB_ENABLED` + `XXL_JOB_AUTO_REGISTER`). `app.debug` and
+`WERKZEUG_RUN_MAIN` are no longer consulted, so processes such as Gunicorn with
+`DEBUG=True` register normally.
+
+```bash
+pip install --upgrade flask-xxljob==0.3.4
+```
+
 ## Upgrading 0.3.2 to 0.3.3
 
 `0.3.3` lets success responses carry an optional message as the first argument:
