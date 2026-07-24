@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   argument, mapping to the official `ReturnT.msg` field. `content` remains the
   second argument; the default `msg` remains `None`.
 
+### Documentation
+
+- Documented long-running / Celery callback flow, Admin job timeout for
+  “任务结果丢失，标记失败”, and that callback outbox / durable retry remain
+  outside the plugin’s scope.
+
 ## [0.3.2] - 2026-07-23
 
 ### Changed

@@ -90,3 +90,25 @@ result also carries `attempt_count`, `elapsed_ms` and `http_status` for
 troubleshooting. Failover and bounded synchronous retry are controlled by the
 `XXL_JOB_ADMIN_*` configuration keys; by default business failures are not
 re-sent to another admin.
+
+## Long-running tasks (Celery and similar)
+
+Flask-XXLJob does not run or time out your business work. For Celery or any
+other async worker:
+
+1. In `on_run`, enqueue the job quickly and return `XXLJobResponse.success(...)`.
+   Pass `log_id` and `log_date_time` into the worker unchanged.
+2. When the worker finishes, call `callback_success` / `callback_failure` (with a
+   Flask application context when needed).
+3. In XXL-JOB Admin, set the job **timeout** (seconds) higher than the longest
+   expected worker runtime. If Admin marks the run as
+   “任务结果丢失，标记失败”, the callback arrived too late or never arrived —
+   raise the Admin timeout and verify the worker callback succeeded
+   (`CallResult.success`).
+
+## Out of scope
+
+Reliable callback delivery beyond the bounded Admin HTTP client is the host
+application’s responsibility. Flask-XXLJob does **not** provide a callback
+outbox, durable queue, or background infinite retry. If `callback_*` fails,
+inspect `CallResult` and retry or persist from your own task/worker layer.

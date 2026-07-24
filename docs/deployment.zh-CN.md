@@ -4,7 +4,13 @@
 
 ## 执行器地址
 
-将 `XXL_JOB_EXECUTOR_ADDRESS` 设置为 XXL-JOB Admin 能够访问的 URL。在容器化或多主机部署中，这通常是服务地址，而不是 `127.0.0.1`。
+将 `XXL_JOB_EXECUTOR_ADDRESS` 设置为 XXL-JOB Admin 能够访问的 URL。在容器化或多主机部署中，这通常是服务地址，而不是 `127.0.0.1`。地址只需填写服务基础 URL；加载配置时会自动附加 `XXL_JOB_ROUTE_PREFIX`。
+
+## 长任务的超时
+
+任务超时在 XXL-JOB Admin 按任务配置（单位：秒），不属于 Flask-XXLJob。对接
+Celery 等异步 worker 时，请将该超时调到大于最长执行时间，并在 worker 结束后调用
+`callback_success` / `callback_failure`。详见[任务结果回调](callback.zh-CN.md)。
 
 ## 自动注册
 

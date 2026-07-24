@@ -157,6 +157,7 @@ shows a task service reporting its result back through a protected Flask endpoin
 | Admin calls `/xxl-job/xxl-job/...` | Route prefix was embedded in `EXECUTOR_ADDRESS` | Set only the base URL (e.g. `http://host:5001`); `XXL_JOB_ROUTE_PREFIX` is appended automatically. |
 | `/run` succeeds but no task runs | The example only prints/submits | Replace `handle_run` with your business-task submission. |
 | Final status is missing | Trigger success is not the final callback | Call `callback_success` or `callback_failure` after completion. |
+| Admin shows “任务结果丢失，标记失败” | Admin timeout too short, or worker never/late-callback | Raise the job timeout in Admin; ensure Celery/worker calls `callback_*` with the original `log_id` / `log_date_time`. See [callback](callback.md). |
 
 Next, read the [configuration reference](configuration.md) only for settings you
 actually need. You do not need to understand every option before starting.

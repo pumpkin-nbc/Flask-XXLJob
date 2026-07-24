@@ -14,6 +14,11 @@
 - `XXLJobResponse.success()` 新增可选 `msg` 作为第一个参数，对应官方
   `ReturnT.msg`；`content` 为第二个参数，`msg` 默认仍为 `None`。
 
+### 文档
+
+- 补充长任务 / Celery 回调流程、Admin「任务结果丢失，标记失败」与超时配置说明，
+  并明确回调 Outbox / 持久化重试不属于本插件职责。
+
 ## [0.3.2] - 2026-07-23
 
 ### 变更
