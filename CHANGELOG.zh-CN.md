@@ -11,13 +11,8 @@
 
 ### 新增
 
-- `XXLJobResponse.success()` 新增可选 `msg` 参数，对应官方 `ReturnT.msg`；
-  默认仍为 `None`。
-
-### 变更
-
-- 托管控制台日志始终按等级着色，不再依赖 TTY 检测、`NO_COLOR` 或 `TERM=dumb`
-  开关；文件日志仍保持无 ANSI 转义码的纯文本。
+- `XXLJobResponse.success()` 新增可选 `msg` 作为第一个参数，对应官方
+  `ReturnT.msg`；`content` 为第二个参数，`msg` 默认仍为 `None`。
 
 ## [0.3.2] - 2026-07-23
 

@@ -94,7 +94,7 @@ from flask_xxljob import (
 ```python
 from flask_xxljob import XXLJobResponse, LogResponse
 
-XXLJobResponse.success(content=None, msg=None)
+XXLJobResponse.success(msg=None, content=None)
 XXLJobResponse.failure("message")
 ```
 

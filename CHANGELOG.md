@@ -11,14 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `XXLJobResponse.success()` now accepts an optional `msg` argument that maps
-  to the official `ReturnT.msg` field. The default remains `None`.
-
-### Changed
-
-- Managed console records are always colorized by level. Coloring is no longer
-  gated by TTY detection, `NO_COLOR`, or `TERM=dumb`; file logs remain plain
-  text without ANSI escape sequences.
+- `XXLJobResponse.success()` now accepts an optional `msg` as its first
+  argument, mapping to the official `ReturnT.msg` field. `content` remains the
+  second argument; the default `msg` remains `None`.
 
 ## [0.3.2] - 2026-07-23
 

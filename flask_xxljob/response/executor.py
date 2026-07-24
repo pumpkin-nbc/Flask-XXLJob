@@ -37,12 +37,13 @@ class XXLJobResponse:
         """
         构造成功响应。
 
-        ``msg`` 可选，会写入官方 ``ReturnT.msg``；默认 ``None``。
+        ``msg`` 可选，写入官方 ``ReturnT.msg``，默认 ``None``；``content`` 为
+        第二个参数。
 
         Build a success response.
 
         ``msg`` is optional and maps to the official ``ReturnT.msg``; defaults
-        to ``None``.
+        to ``None``. ``content`` is the second argument.
         """
         return cls(code=SUCCESS_CODE, msg=msg, content=content)
 

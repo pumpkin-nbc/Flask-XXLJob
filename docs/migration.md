@@ -30,14 +30,12 @@ full control over execution.
 
 ## Upgrading 0.3.2 to 0.3.3
 
-`0.3.3` lets success responses carry an optional message:
+`0.3.3` lets success responses carry an optional message as the first argument:
 
 ```python
-return XXLJobResponse.success(content="accepted", msg="job queued")
+return XXLJobResponse.success("job queued")
+return XXLJobResponse.success(msg="job queued", content="accepted")
 ```
-
-Managed console coloring is always applied (no longer gated by TTY /
-`NO_COLOR` / `TERM=dumb`). File logs remain plain text.
 
 ```bash
 pip install --upgrade flask-xxljob==0.3.3

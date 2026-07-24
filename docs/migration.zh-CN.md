@@ -28,14 +28,12 @@ XXL-JOB -> Flask (Flask-XXLJob) -> your on_run submits the task
 
 ## 从 0.3.2 升级到 0.3.3
 
-`0.3.3` 允许成功响应携带可选消息：
+`0.3.3` 允许成功响应携带可选消息，`msg` 为第一个参数：
 
 ```python
-return XXLJobResponse.success(content="accepted", msg="job queued")
+return XXLJobResponse.success("job queued")
+return XXLJobResponse.success(msg="job queued", content="accepted")
 ```
-
-托管控制台着色始终生效（不再受 TTY / `NO_COLOR` / `TERM=dumb` 门控）。文件日志
-仍为纯文本。
 
 ```bash
 pip install --upgrade flask-xxljob==0.3.3

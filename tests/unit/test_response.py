@@ -15,7 +15,7 @@ def test_success_response():
 
 
 def test_success_response_with_msg():
-    resp = XXLJobResponse.success(content="accepted", msg="job queued")
+    resp = XXLJobResponse.success(msg="job queued", content="accepted")
     assert resp.code == 200
     assert resp.msg == "job queued"
     assert resp.content == "accepted"
@@ -25,6 +25,13 @@ def test_success_response_with_msg():
         "msg": "job queued",
         "content": "accepted",
     }
+
+
+def test_success_positional_msg():
+    resp = XXLJobResponse.success("job queued")
+    assert resp.code == 200
+    assert resp.msg == "job queued"
+    assert resp.content is None
 
 
 def test_failure_response():
