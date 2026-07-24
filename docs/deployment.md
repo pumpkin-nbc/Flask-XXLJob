@@ -6,7 +6,15 @@
 
 Set `XXL_JOB_EXECUTOR_ADDRESS` to a URL the XXL-JOB admin can reach. In
 containerized or multi-host deployments this is usually the service address,
-not `127.0.0.1`.
+not `127.0.0.1`. Set only the service base URL; `XXL_JOB_ROUTE_PREFIX` is
+appended automatically when the configuration is loaded.
+
+## Job timeout for long-running work
+
+Task timeout is configured in XXL-JOB Admin (per job, in seconds), not in
+Flask-XXLJob. For Celery or other async workers, raise that timeout above the
+longest expected runtime, and have the worker call `callback_success` /
+`callback_failure` when finished. See [Task-Result Callback](callback.md).
 
 ## Automatic registration
 

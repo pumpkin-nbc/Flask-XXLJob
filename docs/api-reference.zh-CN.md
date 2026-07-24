@@ -2,7 +2,7 @@
 
 # API 参考
 
-本页记录 Flask-XXLJob 0.3.2 的公共 API。该扩展只负责适配 XXL-JOB 2.4.1 协议，
+本页记录 Flask-XXLJob 0.3.3 的公共 API。该扩展只负责适配 XXL-JOB 2.4.1 协议，
 绝不执行业务任务。
 
 ## `FlaskXXLJob`
@@ -94,7 +94,7 @@ from flask_xxljob import (
 ```python
 from flask_xxljob import XXLJobResponse, LogResponse
 
-XXLJobResponse.success(content=None)
+XXLJobResponse.success(msg=None, content=None)
 XXLJobResponse.failure("message")
 ```
 

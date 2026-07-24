@@ -33,13 +33,19 @@ class XXLJobResponse:
     content: Any = None
 
     @classmethod
-    def success(cls, content: Any = None) -> "XXLJobResponse":
+    def success(cls, msg: Optional[str] = None, content: Any = None) -> "XXLJobResponse":
         """
         构造成功响应。
 
+        ``msg`` 可选，写入官方 ``ReturnT.msg``，默认 ``None``；``content`` 为
+        第二个参数。
+
         Build a success response.
+
+        ``msg`` is optional and maps to the official ``ReturnT.msg``; defaults
+        to ``None``. ``content`` is the second argument.
         """
-        return cls(code=SUCCESS_CODE, msg=None, content=content)
+        return cls(code=SUCCESS_CODE, msg=msg, content=content)
 
     @classmethod
     def failure(cls, msg: str, content: Any = None) -> "XXLJobResponse":

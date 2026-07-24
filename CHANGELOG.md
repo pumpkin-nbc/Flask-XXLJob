@@ -7,6 +7,20 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.3] - 2026-07-24
+
+### Added
+
+- `XXLJobResponse.success()` now accepts an optional `msg` as its first
+  argument, mapping to the official `ReturnT.msg` field. `content` remains the
+  second argument; the default `msg` remains `None`.
+
+### Documentation
+
+- Documented long-running / Celery callback flow, Admin job timeout for
+  “任务结果丢失，标记失败”, and that callback outbox / durable retry remain
+  outside the plugin’s scope.
+
 ## [0.3.2] - 2026-07-23
 
 ### Changed

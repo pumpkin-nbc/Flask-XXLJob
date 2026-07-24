@@ -2,7 +2,7 @@
 
 # API reference
 
-This page documents the public API of Flask-XXLJob 0.3.2. The extension only
+This page documents the public API of Flask-XXLJob 0.3.3. The extension only
 adapts the XXL-JOB 2.4.1 protocol; it never executes business tasks.
 
 ## `FlaskXXLJob`
@@ -104,7 +104,7 @@ from flask_xxljob import (
 ```python
 from flask_xxljob import XXLJobResponse, LogResponse
 
-XXLJobResponse.success(content=None)
+XXLJobResponse.success(msg=None, content=None)
 XXLJobResponse.failure("message")
 ```
 

@@ -149,7 +149,9 @@ xxl_job.callback_success(
 | `/run` 返回 `Unsupported JobHandler` | Admin 名称与装饰器不完全一致 | 两处使用相同且区分大小写的名称，例如 `demoJobHandler`。 |
 | 返回 Access Token 错误 | Flask 与 Admin Token 不一致 | 两边配置完全相同的 Token。 |
 | Admin 找不到执行器 | Admin 无法访问执行器地址 | 跨容器或跨机器时不要使用 `127.0.0.1`。 |
+| Admin 回调路径变成 `/xxl-job/xxl-job/...` | `EXECUTOR_ADDRESS` 里手写了路由前缀 | 地址只填基础 URL（如 `http://host:5001`），前缀由 `XXL_JOB_ROUTE_PREFIX` 自动附加。 |
 | `/run` 成功但业务没有执行 | 入门案例只打印/提交任务 | 将 `handle_run` 替换为你的业务任务提交逻辑。 |
 | Admin 没有最终状态 | 触发成功不等于最终回调 | 任务完成后调用 `callback_success` 或 `callback_failure`。 |
+| Admin 显示「任务结果丢失，标记失败」 | Admin 超时过短，或 worker 未/过晚回调 | 调大 Admin 任务超时；确保 Celery/worker 用原 `log_id`/`log_date_time` 调用 `callback_*`。详见[任务结果回调](callback.zh-CN.md)。 |
 
 下一步只需按实际需要阅读[配置参考](configuration.zh-CN.md)，不必在开始前理解全部配置项。
