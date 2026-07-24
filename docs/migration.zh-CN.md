@@ -26,6 +26,21 @@ XXL-JOB -> Flask (Flask-XXLJob) -> your on_run submits the task
 
 任务路由、阻塞策略、超时与重试仍由 XXL-JOB Admin 管理。Flask-XXLJob 只负责协议中转；你的任务服务始终完全掌控执行过程。
 
+## 从 0.3.2 升级到 0.3.3
+
+`0.3.3` 允许成功响应携带可选消息：
+
+```python
+return XXLJobResponse.success(content="accepted", msg="job queued")
+```
+
+托管控制台着色始终生效（不再受 TTY / `NO_COLOR` / `TERM=dumb` 门控）。文件日志
+仍为纯文本。
+
+```bash
+pip install --upgrade flask-xxljob==0.3.3
+```
+
 ## 从 0.3.1 升级到 0.3.2
 
 `0.3.2` 会在加载配置时始终把 `XXL_JOB_ROUTE_PREFIX` 附加到

@@ -7,6 +7,18 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 并遵循 [语义化版本](https://semver.org/lang/zh-CN/spec/v2.0.0.html)。
 
+## [0.3.3] - 2026-07-24
+
+### 新增
+
+- `XXLJobResponse.success()` 新增可选 `msg` 参数，对应官方 `ReturnT.msg`；
+  默认仍为 `None`。
+
+### 变更
+
+- 托管控制台日志始终按等级着色，不再依赖 TTY 检测、`NO_COLOR` 或 `TERM=dumb`
+  开关；文件日志仍保持无 ANSI 转义码的纯文本。
+
 ## [0.3.2] - 2026-07-23
 
 ### 变更

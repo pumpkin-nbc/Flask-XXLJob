@@ -28,6 +28,21 @@ Job routing, block strategies, timeouts and retries are still managed by the
 XXL-JOB admin. Flask-XXLJob only relays the protocol; your task service keeps
 full control over execution.
 
+## Upgrading 0.3.2 to 0.3.3
+
+`0.3.3` lets success responses carry an optional message:
+
+```python
+return XXLJobResponse.success(content="accepted", msg="job queued")
+```
+
+Managed console coloring is always applied (no longer gated by TTY /
+`NO_COLOR` / `TERM=dumb`). File logs remain plain text.
+
+```bash
+pip install --upgrade flask-xxljob==0.3.3
+```
+
 ## Upgrading 0.3.1 to 0.3.2
 
 `0.3.2` always appends `XXL_JOB_ROUTE_PREFIX` to `XXL_JOB_EXECUTOR_ADDRESS`

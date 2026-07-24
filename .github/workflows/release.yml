@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     tags:
-      - "v0.3.2"
+      - "v0.3.3"
 
 permissions:
   contents: read
@@ -25,8 +25,8 @@ jobs:
         run: |
           set -euo pipefail
           version="$(python -c 'import runpy; print(runpy.run_path("flask_xxljob/_version.py")["__version__"])')"
-          grep -Fqx "## [${version}] - 2026-07-23" CHANGELOG.md
-          grep -Fqx "## [${version}] - 2026-07-23" CHANGELOG.zh-CN.md
+          grep -Fqx "## [${version}] - 2026-07-24" CHANGELOG.md
+          grep -Fqx "## [${version}] - 2026-07-24" CHANGELOG.zh-CN.md
           if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
             if [[ "${GITHUB_REF_NAME}" != "v${version}" ]]; then
               echo "Tag ${GITHUB_REF_NAME} does not match package version ${version}." >&2

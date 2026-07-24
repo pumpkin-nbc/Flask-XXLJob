@@ -86,5 +86,5 @@ jobs:
       - name: Smoke-test installed wheel
         run: |
           cd "${RUNNER_TEMP}"
-          python -c "import flask_xxljob; from importlib.metadata import version; assert flask_xxljob.__version__ == version('flask-xxljob') == '0.3.2'"
+          python -c "import flask_xxljob; from importlib.metadata import version; assert flask_xxljob.__version__ == version('flask-xxljob') == '0.3.3'"
           flask-xxljob --version
