@@ -2,7 +2,7 @@
 
 # API reference
 
-This page documents the public API of Flask-XXLJob 0.3.4. The extension only
+This page documents the public API of Flask-XXLJob 0.4.0. The extension only
 adapts the XXL-JOB 2.4.1 protocol; it never executes business tasks.
 
 ## `FlaskXXLJob`
@@ -81,8 +81,15 @@ exceeds `XXL_JOB_CALLBACK_BATCH_MAX_SIZE`.
 ```python
 status = xxl_job.get_status(app)   # XXLJobStatus
 xxl_job.start_registry(app)
-xxl_job.stop_registry(app)
+xxl_job.stop_registry(app, remove=True)
+xxl_job.stop_registry(app, remove=False)  # Stop renewal; keep shared identity.
 ```
+
+`start_registry()` starts one daemon renewal thread for the current process and
+is non-blocking and idempotent. `stop_registry()` uses a keyword-only `remove`
+argument and continues to deregister by default. `XXL_JOB_DEREGISTER_ON_EXIT`
+controls automatic Runtime cleanup only; it does not change an explicit stop.
+Registry status is process-local and resets when the PID changes.
 
 ## Request models
 

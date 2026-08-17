@@ -94,6 +94,8 @@ with app.app_context():
 | `XXL_JOB_EXECUTOR_ADDRESS` | `""` | Executor service base URL (scheme/host/port). `XXL_JOB_ROUTE_PREFIX` is appended automatically. |
 | `XXL_JOB_ROUTE_PREFIX` | `""` | URL prefix for the executor endpoints; also appended to `XXL_JOB_EXECUTOR_ADDRESS`. |
 | `XXL_JOB_AUTO_REGISTER` | `True` | Start automatic registration renewal. |
+| `XXL_JOB_AUTO_REGISTER_ON_INIT` | `True` | Start the registry thread during `init_app()` when auto-registration is enabled. |
+| `XXL_JOB_DEREGISTER_ON_EXIT` | `True` | Deregister during automatic Runtime shutdown. |
 | `XXL_JOB_REGISTRY_INTERVAL` | `30` | Registration renewal interval (seconds). |
 | `XXL_JOB_HTTP_CONNECT_TIMEOUT` | `3` | HTTP connect timeout (seconds). |
 | `XXL_JOB_HTTP_READ_TIMEOUT` | `5` | HTTP read timeout (seconds). |
@@ -124,6 +126,12 @@ handler. Enabling only `XXL_JOB_LOG_ENABLED` writes to
 `./logs/flask-xxljob.log` and the console. For containers, disable the file
 target and retain the default console target. See the
 [logging guide](docs/logging.md).
+
+For Gunicorn preload or an Application Factory shared with Celery, set
+`XXL_JOB_AUTO_REGISTER_ON_INIT=False` and call `start_registry(app)` only in the
+process that should renew the executor. When multiple workers share one
+executor address, set `XXL_JOB_DEREGISTER_ON_EXIT=False` so one worker exiting
+does not remove the shared identity. See [deployment](docs/deployment.md).
 
 ## CLI
 

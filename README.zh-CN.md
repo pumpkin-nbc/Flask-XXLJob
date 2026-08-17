@@ -92,6 +92,8 @@ with app.app_context():
 | `XXL_JOB_EXECUTOR_ADDRESS` | `""` | 执行器服务基础地址（协议/主机/端口）；会自动附加 `XXL_JOB_ROUTE_PREFIX`。 |
 | `XXL_JOB_ROUTE_PREFIX` | `""` | 执行器接口的 URL 前缀；同时会附加到 `XXL_JOB_EXECUTOR_ADDRESS`。 |
 | `XXL_JOB_AUTO_REGISTER` | `True` | 是否启动自动注册续约。 |
+| `XXL_JOB_AUTO_REGISTER_ON_INIT` | `True` | 启用自动注册时，是否在 `init_app()` 阶段启动注册线程。 |
+| `XXL_JOB_DEREGISTER_ON_EXIT` | `True` | Runtime 自动关闭时是否注销执行器。 |
 | `XXL_JOB_REGISTRY_INTERVAL` | `30` | 注册续约间隔（秒）。 |
 | `XXL_JOB_HTTP_CONNECT_TIMEOUT` | `3` | HTTP 连接超时（秒）。 |
 | `XXL_JOB_HTTP_READ_TIMEOUT` | `5` | HTTP 读取超时（秒）。 |
@@ -120,6 +122,12 @@ with app.app_context():
 托管日志默认关闭，不创建目录、文件或控制台 Handler。只开启
 `XXL_JOB_LOG_ENABLED` 时默认同时写入 `./logs/flask-xxljob.log` 和控制台；容器环境
 建议关闭文件目标并保留默认控制台目标。详见[日志指南](docs/logging.zh-CN.md)。
+
+使用 Gunicorn preload，或 Flask Application Factory 同时供 Celery 使用时，可设置
+`XXL_JOB_AUTO_REGISTER_ON_INIT=False`，并只在需要续约执行器的进程中调用
+`start_registry(app)`。多个 Worker 共享一个执行器地址时，建议设置
+`XXL_JOB_DEREGISTER_ON_EXIT=False`，避免任一 Worker 退出时删除共享身份。详见
+[部署](docs/deployment.zh-CN.md)。
 
 ## 命令行
 

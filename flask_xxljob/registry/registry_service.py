@@ -14,6 +14,7 @@ failures never prevent the Flask application from starting.
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
@@ -41,6 +42,7 @@ class RegistryService:
         self._config = config
         self._admin_client = admin_client
         self._logger = logger or logging.getLogger("flask_xxljob.registry")
+        self._pid = os.getpid()
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         # 生命周期锁串行化 start/stop；调用锁串行化注册与注销请求。
@@ -64,6 +66,31 @@ class RegistryService:
         self._last_registry_admin_address: Optional[str] = None
         self._last_registry_error_type: Optional[str] = None
         self._last_registry_message: Optional[str] = None
+
+    def _ensure_process_state(self) -> None:
+        """Reset process-local lifecycle state after a fork."""
+        current_pid = os.getpid()
+        if self._pid == current_pid:
+            return
+
+        # Never acquire an inherited lock before replacing it. Only the thread
+        # that called fork survives in the child, so this lock-free reset is the
+        # safe process boundary.
+        self._pid = current_pid
+        self._thread = None
+        self._stop_event = threading.Event()
+        self._lock = threading.Lock()
+        self._call_lock = threading.Lock()
+        self._status_lock = threading.Lock()
+        self._remove_requested = False
+        self._remove_claimed = False
+        self._shutdown_callbacks = []
+        self._registered = False
+        self._last_registry_time = None
+        self._last_registry_success = None
+        self._last_registry_admin_address = None
+        self._last_registry_error_type = None
+        self._last_registry_message = None
 
     def _record(self, result: CallResult, *, is_remove: bool) -> None:
         # 记录最近一次调用的插件级状态，供 get_status 查询。
@@ -92,6 +119,7 @@ class RegistryService:
         Return a snapshot of the latest registration status (never a token or
         any business state).
         """
+        self._ensure_process_state()
         with self._status_lock:
             return {
                 "registered": self._registered,
@@ -100,7 +128,9 @@ class RegistryService:
                 "last_registry_admin_address": self._last_registry_admin_address,
                 "last_registry_error_type": self._last_registry_error_type,
                 "last_registry_message": self._last_registry_message,
-                "registry_thread_running": self.is_running,
+                "registry_thread_running": (
+                    self._thread is not None and self._thread.is_alive()
+                ),
             }
 
     def _build_request(self) -> RegistryRequest:
@@ -115,6 +145,7 @@ class RegistryService:
 
         Perform a single registration/renewal call and return the full result.
         """
+        self._ensure_process_state()
         with self._call_lock:
             result = self._admin_client.registry(self._build_request())
             self._record(result, is_remove=False)
@@ -140,6 +171,7 @@ class RegistryService:
 
         Perform a single deregistration call and return the full result.
         """
+        self._ensure_process_state()
         with self._call_lock:
             result = self._admin_client.registry_remove(self._build_request())
             self._record(result, is_remove=True)
@@ -184,6 +216,7 @@ class RegistryService:
         Registration failures never raise and never affect application
         startup.
         """
+        self._ensure_process_state()
         with self._lock:
             if self._thread is not None and self._thread.is_alive():
                 return
@@ -196,7 +229,11 @@ class RegistryService:
                 daemon=True,
             )
             self._thread = thread
-            thread.start()
+            try:
+                thread.start()
+            except Exception:
+                self._thread = None
+                raise
             self._logger.info("XXL-JOB registry renewal thread started.")
 
     def _run_loop(self) -> None:
@@ -269,6 +306,7 @@ class RegistryService:
 
         Stop the renewal thread and optionally deregister the executor.
         """
+        self._ensure_process_state()
         # Record the stop intent while holding the lifecycle lock, but never
         # wait for the worker while holding it: the worker needs the same lock
         # to claim a deferred deregistration request as it exits.
@@ -322,4 +360,5 @@ class RegistryService:
     @property
     def is_running(self) -> bool:
         """续约线程是否正在运行。 / Whether the renewal thread is running."""
+        self._ensure_process_state()
         return self._thread is not None and self._thread.is_alive()

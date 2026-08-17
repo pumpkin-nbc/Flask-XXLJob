@@ -7,6 +7,34 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-08-16
+
+### Added
+
+- Added `XXL_JOB_AUTO_REGISTER_ON_INIT` to separate extension initialization
+  from registry-thread startup, while preserving automatic startup by default.
+- Added `XXL_JOB_DEREGISTER_ON_EXIT` to control whether automatic Runtime
+  cleanup removes the executor registration.
+- Added the keyword-only `remove` argument to `stop_registry()`; it defaults to
+  `True`, while `remove=False` stops only the current process's renewal thread.
+
+### Changed
+
+- `RegistryService` and `XXLJobRuntime` now rebuild process-local locks, thread,
+  event and lifecycle status after a PID change, making inherited application
+  objects safe to use after `fork()`.
+- A registry thread start failure now clears the failed thread reference so a
+  later `start_registry()` call can retry immediately.
+- The build backend is capped below Hatchling 1.32 so release artifacts remain
+  on Core Metadata 2.4, which the current Twine release validates.
+
+### Compatibility
+
+- Existing applications keep their previous behavior because both new
+  lifecycle settings default to `True`; no configuration migration is required.
+- Multi-worker deployments sharing one executor address can disable automatic
+  exit deregistration without introducing cross-process coordination.
+
 ## [0.3.4] - 2026-07-25
 
 ### Changed

@@ -17,6 +17,8 @@ the constructor.
 | `XXL_JOB_EXECUTOR_ADDRESS` | `""` | Executor service base URL (scheme/host/port). `XXL_JOB_ROUTE_PREFIX` is appended automatically. |
 | `XXL_JOB_ROUTE_PREFIX` | `""` | URL prefix for the executor endpoints; also appended to `XXL_JOB_EXECUTOR_ADDRESS`. |
 | `XXL_JOB_AUTO_REGISTER` | `True` | Start automatic registration renewal. |
+| `XXL_JOB_AUTO_REGISTER_ON_INIT` | `True` | Start renewal during `init_app()` when auto-registration is enabled. |
+| `XXL_JOB_DEREGISTER_ON_EXIT` | `True` | Deregister during automatic Runtime shutdown. |
 | `XXL_JOB_REGISTRY_INTERVAL` | `30` | Registration renewal interval (seconds). |
 | `XXL_JOB_HTTP_CONNECT_TIMEOUT` | `3` | HTTP connect timeout (seconds). |
 | `XXL_JOB_HTTP_READ_TIMEOUT` | `5` | HTTP read timeout (seconds). |
@@ -61,9 +63,27 @@ app.config.update(
     XXL_JOB_EXECUTOR_APP_NAME="project-executor",
     XXL_JOB_EXECUTOR_ADDRESS="http://127.0.0.1:5001",
     XXL_JOB_AUTO_REGISTER=True,
+    XXL_JOB_AUTO_REGISTER_ON_INIT=True,
+    XXL_JOB_DEREGISTER_ON_EXIT=True,
     XXL_JOB_REGISTRY_INTERVAL=30,
 )
 ```
+
+## Registry lifecycle
+
+`XXL_JOB_AUTO_REGISTER` enables automatic registration and renewal;
+`XXL_JOB_AUTO_REGISTER_ON_INIT` decides when that lifecycle starts.
+
+| `AUTO_REGISTER` | `AUTO_REGISTER_ON_INIT` | `init_app()` behavior |
+| --- | --- | --- |
+| `True` | `True` | Start the background registry thread. |
+| `True` | `False` | Initialize only; wait for `start_registry(app)`. |
+| `False` | `True` | Do not start automatically. |
+| `False` | `False` | Do not start automatically. |
+
+`XXL_JOB_DEREGISTER_ON_EXIT` affects automatic Runtime cleanup only. Explicit
+`stop_registry()` still deregisters by default; use `stop_registry(remove=False)`
+to stop renewal without removing a shared executor identity.
 
 ## Validation
 
@@ -82,8 +102,8 @@ empty (no-token mode), while a non-empty token is preserved. Validation messages
 name the offending key, its received type and the expected format. Bad
 configuration is never silently ignored.
 
-Logging booleans are strict booleans. Levels, encodings, rotation values and
-formats are validated during initialization; the format is
+All boolean settings accept real booleans only. Levels, encodings, rotation
+values and log formats are validated during initialization; the format is
 exercised against a synthetic `LogRecord`, so an unknown field fails before
 the application starts. If managed logging is disabled—or both output targets
 are disabled—the extension does not override the runtime logger's level or

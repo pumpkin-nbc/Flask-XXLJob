@@ -29,6 +29,8 @@ DEFAULTS: dict = {
     "XXL_JOB_EXECUTOR_ADDRESS": "",
     "XXL_JOB_ROUTE_PREFIX": "",
     "XXL_JOB_AUTO_REGISTER": True,
+    "XXL_JOB_AUTO_REGISTER_ON_INIT": True,
+    "XXL_JOB_DEREGISTER_ON_EXIT": True,
     "XXL_JOB_REGISTRY_INTERVAL": 30,
     "XXL_JOB_HTTP_CONNECT_TIMEOUT": 3,
     "XXL_JOB_HTTP_READ_TIMEOUT": 5,
@@ -75,6 +77,8 @@ class XXLJobConfig:
     executor_address: str = ""
     route_prefix: str = ""
     auto_register: bool = True
+    auto_register_on_init: bool = True
+    deregister_on_exit: bool = True
     registry_interval: int = 30
     http_connect_timeout: int = 3
     http_read_timeout: int = 5
@@ -111,6 +115,10 @@ class XXLJobConfig:
 
         enabled = _as_bool(merged, "XXL_JOB_ENABLED")
         auto_register = _as_bool(merged, "XXL_JOB_AUTO_REGISTER")
+        auto_register_on_init = _as_bool(
+            merged, "XXL_JOB_AUTO_REGISTER_ON_INIT"
+        )
+        deregister_on_exit = _as_bool(merged, "XXL_JOB_DEREGISTER_ON_EXIT")
 
         raw_access_token = _as_str(merged, "XXL_JOB_ACCESS_TOKEN")
         access_token = raw_access_token if raw_access_token.strip() else ""
@@ -177,6 +185,8 @@ class XXLJobConfig:
             executor_address=executor_address,
             route_prefix=route_prefix,
             auto_register=auto_register,
+            auto_register_on_init=auto_register_on_init,
+            deregister_on_exit=deregister_on_exit,
             registry_interval=registry_interval,
             http_connect_timeout=http_connect_timeout,
             http_read_timeout=http_read_timeout,

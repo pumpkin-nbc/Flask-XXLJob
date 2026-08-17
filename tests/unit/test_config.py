@@ -20,6 +20,9 @@ def base_mapping(**overrides):
 
 def test_defaults_applied():
     config = XXLJobConfig.from_mapping(base_mapping())
+    assert config.auto_register is True
+    assert config.auto_register_on_init is True
+    assert config.deregister_on_exit is True
     assert config.registry_interval == 30
     assert config.http_connect_timeout == 3
     assert config.http_read_timeout == 5
@@ -37,6 +40,16 @@ def test_defaults_applied():
     assert config.log_max_bytes == 10 * 1024 * 1024
     assert config.log_backup_count == 5
     assert config.log_propagate is False
+
+
+@pytest.mark.parametrize(
+    "key",
+    ["XXL_JOB_AUTO_REGISTER_ON_INIT", "XXL_JOB_DEREGISTER_ON_EXIT"],
+)
+@pytest.mark.parametrize("value", [None, 0, 1, "true", [], {}])
+def test_registry_lifecycle_flags_require_real_booleans(key, value):
+    with pytest.raises(XXLJobConfigError, match=key):
+        XXLJobConfig.from_mapping(base_mapping(**{key: value}))
 
 
 def test_log_level_is_case_insensitive():

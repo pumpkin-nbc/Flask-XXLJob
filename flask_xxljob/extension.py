@@ -168,12 +168,18 @@ class FlaskXXLJob:
             self._applications.add(app)
             runtime.attach_finalizer(install_runtime_finalizer(app, runtime))
             log_manager.get_logger("runtime").info(
-                "Flask-XXLJob initialized enabled=%s auto_register=%s.",
+                "Flask-XXLJob initialized enabled=%s auto_register=%s "
+                "auto_register_on_init=%s.",
                 config.enabled,
                 config.auto_register,
+                config.auto_register_on_init,
             )
 
-            if config.enabled and config.auto_register:
+            if (
+                config.enabled
+                and config.auto_register
+                and config.auto_register_on_init
+            ):
                 start_registry_with_shutdown(registry_service)
         except Exception as exc:
             log_manager.get_logger("runtime").error(
@@ -524,13 +530,19 @@ class FlaskXXLJob:
         """
         self._get_runtime(app).registry_service.start()
 
-    def stop_registry(self, app: Optional[Flask] = None) -> None:
+    def stop_registry(
+        self,
+        app: Optional[Flask] = None,
+        *,
+        remove: bool = True,
+    ) -> None:
         """
-        停止执行器自动注册/续约线程并注销执行器。
+        停止执行器自动注册/续约线程，并可选地注销执行器。
 
-        Stop the executor auto-registration/renewal thread and deregister.
+        Stop the executor auto-registration/renewal thread and optionally
+        deregister the executor.
         """
-        self._get_runtime(app).registry_service.stop()
+        self._get_runtime(app).registry_service.stop(remove=remove)
 
     # ------------------------------------------------------------------
     # 内部辅助 / Internal helpers

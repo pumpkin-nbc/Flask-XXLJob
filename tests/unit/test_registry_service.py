@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import threading
 
+import pytest
+
 from flask_xxljob.client import CallResult
 from flask_xxljob.config import XXLJobConfig
 from flask_xxljob.registry.registry_service import RegistryService
@@ -137,6 +139,172 @@ def test_stop_defers_remove_until_blocked_renewal_finishes():
     service.stop(remove=False)
     assert service.is_running is False
     assert admin.remove_calls == 1
+
+
+def test_pid_change_resets_all_process_local_state(mocker):
+    admin = FakeAdmin()
+    service = RegistryService(make_config(), admin)
+    inherited_thread = mocker.Mock()
+    inherited_thread.is_alive.return_value = True
+    service._thread = inherited_thread
+    old_event = service._stop_event
+    old_lock = service._lock
+    old_call_lock = service._call_lock
+    old_status_lock = service._status_lock
+    service._remove_requested = True
+    service._remove_claimed = True
+    service._shutdown_callbacks = [mocker.Mock()]
+    service._registered = True
+    service._last_registry_time = "parent-time"
+    service._last_registry_success = True
+    service._last_registry_admin_address = "http://parent:8080"
+    service._last_registry_error_type = "parent-error"
+    service._last_registry_message = "parent-message"
+    child_pid = service._pid + 1
+    mocker.patch(
+        "flask_xxljob.registry.registry_service.os.getpid",
+        return_value=child_pid,
+    )
+
+    snapshot = service.status_snapshot()
+
+    assert service._pid == child_pid
+    assert service._thread is None
+    assert service._stop_event is not old_event
+    assert service._lock is not old_lock
+    assert service._call_lock is not old_call_lock
+    assert service._status_lock is not old_status_lock
+    assert service._remove_requested is False
+    assert service._remove_claimed is False
+    assert service._shutdown_callbacks == []
+    assert snapshot == {
+        "registered": False,
+        "last_registry_time": None,
+        "last_registry_success": None,
+        "last_registry_admin_address": None,
+        "last_registry_error_type": None,
+        "last_registry_message": None,
+        "registry_thread_running": False,
+    }
+    inherited_thread.is_alive.assert_not_called()
+
+
+def test_start_after_pid_change_uses_a_new_daemon_thread(mocker):
+    service = RegistryService(make_config(), FakeAdmin())
+    inherited_thread = mocker.Mock()
+    inherited_thread.is_alive.return_value = True
+    service._thread = inherited_thread
+    child_thread = mocker.Mock()
+    child_thread.is_alive.return_value = True
+    thread_factory = mocker.patch(
+        "flask_xxljob.registry.registry_service.threading.Thread",
+        return_value=child_thread,
+    )
+    mocker.patch(
+        "flask_xxljob.registry.registry_service.os.getpid",
+        return_value=service._pid + 1,
+    )
+
+    service.start()
+
+    assert service._thread is child_thread
+    child_thread.start.assert_called_once_with()
+    thread_factory.assert_called_once_with(
+        target=service._run_loop,
+        name="flask-xxljob-registry",
+        daemon=True,
+    )
+    inherited_thread.is_alive.assert_not_called()
+
+
+def test_stop_after_pid_change_never_joins_inherited_thread(mocker):
+    admin = FakeAdmin()
+    service = RegistryService(make_config(), admin)
+    inherited_thread = mocker.Mock()
+    inherited_thread.is_alive.return_value = True
+    service._thread = inherited_thread
+    mocker.patch(
+        "flask_xxljob.registry.registry_service.os.getpid",
+        return_value=service._pid + 1,
+    )
+
+    service.stop(remove=False)
+
+    inherited_thread.is_alive.assert_not_called()
+    inherited_thread.join.assert_not_called()
+    assert admin.remove_calls == 0
+
+
+def test_is_running_resets_inherited_thread_after_pid_change(mocker):
+    service = RegistryService(make_config(), FakeAdmin())
+    inherited_thread = mocker.Mock()
+    inherited_thread.is_alive.return_value = True
+    service._thread = inherited_thread
+    mocker.patch(
+        "flask_xxljob.registry.registry_service.os.getpid",
+        return_value=service._pid + 1,
+    )
+
+    assert service.is_running is False
+    inherited_thread.is_alive.assert_not_called()
+
+
+def test_thread_start_failure_restores_retryable_state(mocker):
+    service = RegistryService(make_config(), FakeAdmin())
+    failed_thread = mocker.Mock()
+    failed_thread.start.side_effect = RuntimeError("cannot start")
+    retry_thread = mocker.Mock()
+    retry_thread.is_alive.return_value = True
+    mocker.patch(
+        "flask_xxljob.registry.registry_service.threading.Thread",
+        side_effect=[failed_thread, retry_thread],
+    )
+
+    with pytest.raises(RuntimeError, match="cannot start"):
+        service.start()
+
+    assert service._thread is None
+    service.start()
+    assert service._thread is retry_thread
+    retry_thread.start.assert_called_once_with()
+
+
+def test_register_and_remove_rebuild_call_lock_after_pid_change(mocker):
+    admin = FakeAdmin()
+    service = RegistryService(make_config(), admin)
+    parent_lock = service._call_lock
+    current_pid = [service._pid + 1]
+    mocker.patch(
+        "flask_xxljob.registry.registry_service.os.getpid",
+        side_effect=lambda: current_pid[0],
+    )
+
+    assert service.register_once_result().success is True
+    child_lock = service._call_lock
+    assert child_lock is not parent_lock
+    assert service.status_snapshot()["registered"] is True
+
+    current_pid[0] += 1
+    assert service.remove_once_result().success is True
+    assert service._call_lock is not child_lock
+    assert service.status_snapshot()["registered"] is False
+    assert admin.registry_calls == 1
+    assert admin.remove_calls == 1
+
+
+def test_status_snapshot_has_no_admin_or_thread_side_effects(mocker):
+    admin = FakeAdmin()
+    service = RegistryService(make_config(), admin)
+    thread_factory = mocker.patch(
+        "flask_xxljob.registry.registry_service.threading.Thread"
+    )
+
+    snapshot = service.status_snapshot()
+
+    assert snapshot["registered"] is False
+    assert admin.registry_calls == 0
+    assert admin.remove_calls == 0
+    thread_factory.assert_not_called()
 
 
 def test_deferred_shutdown_callback_runs_after_removal():

@@ -7,5 +7,5 @@ from flask_xxljob._version import __version__ as source_version
 
 
 def test_version_is_0_3_1():
-    assert source_version == "0.3.4"
+    assert source_version == "0.4.0"
     assert flask_xxljob.__version__ == source_version

@@ -7,6 +7,29 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 并遵循 [语义化版本](https://semver.org/lang/zh-CN/spec/v2.0.0.html)。
 
+## [0.4.0] - 2026-08-16
+
+### 新增
+
+- 新增 `XXL_JOB_AUTO_REGISTER_ON_INIT`，将扩展初始化与注册线程启动分离，同时
+  默认仍保持初始化后自动启动。
+- 新增 `XXL_JOB_DEREGISTER_ON_EXIT`，控制 Runtime 自动清理时是否注销执行器。
+- `stop_registry()` 新增仅限关键字参数 `remove`；默认 `True`，设置为 `False`
+  时只停止当前进程的续约线程。
+
+### 变更
+
+- `RegistryService` 与 `XXLJobRuntime` 在 PID 变化后会重建进程局部的锁、线程、
+  Event 与生命周期状态，使 fork 后继承的应用对象可以安全使用。
+- 注册线程启动失败时会清除失败的线程引用，后续 `start_registry()` 可立即重试。
+- 构建后端限制在 Hatchling 1.32 以下，使发布制品保持使用当前 Twine 可校验的
+  Core Metadata 2.4。
+
+### 兼容性
+
+- 两个新生命周期配置均默认 `True`，现有应用行为不变，无需迁移配置。
+- 共享同一执行器地址的多 Worker 部署可关闭退出自动注销，无需引入跨进程协调。
+
 ## [0.3.4] - 2026-07-25
 
 ### 变更

@@ -26,6 +26,30 @@ XXL-JOB -> Flask (Flask-XXLJob) -> your on_run submits the task
 
 任务路由、阻塞策略、超时与重试仍由 XXL-JOB Admin 管理。Flask-XXLJob 只负责协议中转；你的任务服务始终完全掌控执行过程。
 
+## 从 0.3.4 升级到 0.4.0
+
+`0.4.0` 将扩展初始化与 Registry 启动分离，并使进程局部生命周期状态具备 fork
+安全性。现有应用无需修改：`XXL_JOB_AUTO_REGISTER_ON_INIT` 与
+`XXL_JOB_DEREGISTER_ON_EXIT` 均默认 `True`，自动启动和退出注销行为保持不变。
+
+```bash
+pip install --upgrade flask-xxljob==0.4.0
+```
+
+使用 Gunicorn preload，或 Application Factory 同时被 Celery 导入时，应延迟
+Registry 启动，只在目标 Worker 进程中调用：
+
+```python
+app.config["XXL_JOB_AUTO_REGISTER_ON_INIT"] = False
+xxl_job.init_app(app)
+xxl_job.start_registry(app)  # fork 后在拥有 Registry 的进程中执行
+```
+
+多个 Worker 共享相同执行器应用名和地址时，设置
+`XXL_JOB_DEREGISTER_ON_EXIT=False`，避免任一 Worker 自动清理时删除共享的 Admin
+身份。显式 `stop_registry()` 默认仍会注销；只需停止本地续约时使用
+`stop_registry(remove=False)`。本版本未加入分布式锁、Leader 选举或进程检测。
+
 ## 从 0.3.3 升级到 0.3.4
 
 `0.3.4` 仅根据配置（`XXL_JOB_ENABLED` + `XXL_JOB_AUTO_REGISTER`）启动自动注册，

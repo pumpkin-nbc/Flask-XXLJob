@@ -2,7 +2,7 @@
 
 # API 参考
 
-本页记录 Flask-XXLJob 0.3.4 的公共 API。该扩展只负责适配 XXL-JOB 2.4.1 协议，
+本页记录 Flask-XXLJob 0.4.0 的公共 API。该扩展只负责适配 XXL-JOB 2.4.1 协议，
 绝不执行业务任务。
 
 ## `FlaskXXLJob`
@@ -75,8 +75,14 @@ xxl_job.callback_many(callbacks, app=None)   # CallbackRequest 或 dict 的列�
 ```python
 status = xxl_job.get_status(app)   # XXLJobStatus
 xxl_job.start_registry(app)
-xxl_job.stop_registry(app)
+xxl_job.stop_registry(app, remove=True)
+xxl_job.stop_registry(app, remove=False)  # 停止续约，保留共享身份
 ```
+
+`start_registry()` 为当前进程启动一个守护续约线程，非阻塞且幂等。
+`stop_registry()` 的 `remove` 是仅限关键字参数，默认仍会注销。
+`XXL_JOB_DEREGISTER_ON_EXIT` 只控制 Runtime 自动清理，不改变显式停止调用。
+Registry 状态属于当前进程，PID 变化后会重置。
 
 ## 请求模型
 

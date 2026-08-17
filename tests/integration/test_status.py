@@ -145,4 +145,14 @@ def test_start_stop_registry(mocker):
     ext.start_registry(app)
     ext.stop_registry(app)
     start.assert_called_once()
-    stop.assert_called_once()
+    stop.assert_called_once_with(remove=True)
+
+
+def test_stop_registry_can_keep_shared_executor_registration(mocker):
+    ext = FlaskXXLJob()
+    app, _ = make_app(ext)
+    stop = mocker.patch.object(app.extensions["xxljob"].registry_service, "stop")
+
+    ext.stop_registry(app, remove=False)
+
+    stop.assert_called_once_with(remove=False)

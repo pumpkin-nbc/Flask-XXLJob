@@ -28,6 +28,32 @@ Job routing, block strategies, timeouts and retries are still managed by the
 XXL-JOB admin. Flask-XXLJob only relays the protocol; your task service keeps
 full control over execution.
 
+## Upgrading 0.3.4 to 0.4.0
+
+`0.4.0` separates extension initialization from Registry startup and makes
+process-local lifecycle state fork-safe. Existing applications need no changes:
+`XXL_JOB_AUTO_REGISTER_ON_INIT` and `XXL_JOB_DEREGISTER_ON_EXIT` both default to
+`True`, so automatic startup and exit deregistration remain enabled.
+
+```bash
+pip install --upgrade flask-xxljob==0.4.0
+```
+
+For Gunicorn preload or a factory also imported by Celery, delay Registry
+startup and call it only from the intended worker process:
+
+```python
+app.config["XXL_JOB_AUTO_REGISTER_ON_INIT"] = False
+xxl_job.init_app(app)
+xxl_job.start_registry(app)  # Run after fork in the Registry-owning process.
+```
+
+If multiple workers share the same executor app name and address, set
+`XXL_JOB_DEREGISTER_ON_EXIT=False` so one worker's automatic cleanup does not
+remove their shared Admin identity. Explicit `stop_registry()` still removes by
+default; use `stop_registry(remove=False)` when only local renewal should stop.
+No distributed lock, leader election or process detection was added.
+
 ## Upgrading 0.3.3 to 0.3.4
 
 `0.3.4` starts automatic registration from configuration alone

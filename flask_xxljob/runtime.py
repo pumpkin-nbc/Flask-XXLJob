@@ -15,6 +15,7 @@ Celery connections).
 
 from __future__ import annotations
 
+import os
 import threading
 from typing import TYPE_CHECKING
 from weakref import finalize
@@ -52,6 +53,7 @@ class XXLJobRuntime:
         self.callback_client = callback_client
         self.registry_service = registry_service
         self.log_manager = log_manager
+        self._pid = os.getpid()
         self._close_lock = threading.Lock()
         self._closed = False
         self._finalizer: "finalize | None" = None
@@ -59,8 +61,18 @@ class XXLJobRuntime:
     def attach_finalizer(self, finalizer: "finalize") -> None:
         self._finalizer = finalizer
 
+    def _ensure_process_state(self) -> None:
+        """Reset process-local cleanup state after a fork."""
+        current_pid = os.getpid()
+        if self._pid == current_pid:
+            return
+        self._pid = current_pid
+        self._close_lock = threading.Lock()
+        self._closed = False
+
     def close(self) -> None:
         """Best-effort, idempotent internal runtime cleanup."""
+        self._ensure_process_state()
         with self._close_lock:
             if self._closed:
                 return
@@ -72,6 +84,7 @@ class XXLJobRuntime:
         snapshot = self.registry_service.status_snapshot()
         remove = bool(
             self.config.enabled
+            and self.config.deregister_on_exit
             and (
                 snapshot["registered"]
                 or snapshot["registry_thread_running"]
