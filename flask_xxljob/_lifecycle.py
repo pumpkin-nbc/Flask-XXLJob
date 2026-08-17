@@ -6,21 +6,7 @@ import weakref
 
 from flask import Flask
 
-from .registry.registry_service import RegistryService
 from .runtime import XXLJobRuntime
-
-
-def start_registry_with_shutdown(registry_service: RegistryService) -> None:
-    """Start a service; the owning runtime finalizer performs cleanup."""
-    registry_service.start()
-
-
-def safe_stop_registry(registry_service: RegistryService) -> None:
-    """Stop quietly during interpreter teardown."""
-    try:
-        registry_service.stop()
-    except Exception:  # noqa: BLE001 - interpreter shutdown must remain quiet
-        pass
 
 
 def install_runtime_finalizer(

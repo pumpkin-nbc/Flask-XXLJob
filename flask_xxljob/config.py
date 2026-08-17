@@ -29,8 +29,7 @@ DEFAULTS: dict = {
     "XXL_JOB_EXECUTOR_ADDRESS": "",
     "XXL_JOB_ROUTE_PREFIX": "",
     "XXL_JOB_AUTO_REGISTER": True,
-    "XXL_JOB_AUTO_REGISTER_ON_INIT": True,
-    "XXL_JOB_DEREGISTER_ON_EXIT": True,
+    "XXL_JOB_DEREGISTER_ON_EXIT": False,
     "XXL_JOB_REGISTRY_INTERVAL": 30,
     "XXL_JOB_HTTP_CONNECT_TIMEOUT": 3,
     "XXL_JOB_HTTP_READ_TIMEOUT": 5,
@@ -77,8 +76,7 @@ class XXLJobConfig:
     executor_address: str = ""
     route_prefix: str = ""
     auto_register: bool = True
-    auto_register_on_init: bool = True
-    deregister_on_exit: bool = True
+    deregister_on_exit: bool = False
     registry_interval: int = 30
     http_connect_timeout: int = 3
     http_read_timeout: int = 5
@@ -111,13 +109,11 @@ class XXLJobConfig:
 
         Build and validate the configuration from a Flask ``app.config``.
         """
+        _validate_removed_configs(config)
         merged = {key: config.get(key, default) for key, default in DEFAULTS.items()}
 
         enabled = _as_bool(merged, "XXL_JOB_ENABLED")
         auto_register = _as_bool(merged, "XXL_JOB_AUTO_REGISTER")
-        auto_register_on_init = _as_bool(
-            merged, "XXL_JOB_AUTO_REGISTER_ON_INIT"
-        )
         deregister_on_exit = _as_bool(merged, "XXL_JOB_DEREGISTER_ON_EXIT")
 
         raw_access_token = _as_str(merged, "XXL_JOB_ACCESS_TOKEN")
@@ -185,7 +181,6 @@ class XXLJobConfig:
             executor_address=executor_address,
             route_prefix=route_prefix,
             auto_register=auto_register,
-            auto_register_on_init=auto_register_on_init,
             deregister_on_exit=deregister_on_exit,
             registry_interval=registry_interval,
             http_connect_timeout=http_connect_timeout,
@@ -217,19 +212,13 @@ class XXLJobConfig:
 
     def validate(self) -> None:
         """
-        校验配置。
+        校验初始化阶段已经提供的配置字段。
 
-        - 扩展禁用时不做任何校验。
-        - 仅当开启自动注册（``auto_register``）时，才要求 Admin 地址、执行器名称
-          与执行器地址；这样仅提供协议接入而不注册的场景也能正常工作。
-        - 提供了 Admin 地址或执行器地址时，必须为 ``http``/``https`` 方案。
+        Validate fields supplied during initialization.
 
-        Validate the configuration.
-
-        - No validation is performed when the extension is disabled.
-        - The admin addresses, executor name and executor address are required
-          only when auto-registration is enabled, so scenarios that provide the
-          protocol endpoints without registering still work.
+        - Registry completeness is validated separately, immediately before a
+          Registry lifecycle or one-shot Registry RPC starts. This allows an
+          application to initialize protocol endpoints without Admin settings.
         - When provided, admin/executor addresses must use the ``http``/``https``
           scheme. ``XXL_JOB_ROUTE_PREFIX`` is always appended to the executor
           address when the configuration is loaded.
@@ -237,27 +226,57 @@ class XXLJobConfig:
         if not self.enabled:
             return
 
-        if self.auto_register:
-            if not self.executor_app_name:
-                raise XXLJobConfigError(
-                    "XXL_JOB_EXECUTOR_APP_NAME must not be empty when "
-                    "XXL_JOB_AUTO_REGISTER is enabled."
-                )
-            if not self.admin_addresses:
-                raise XXLJobConfigError(
-                    "XXL_JOB_ADMIN_ADDRESSES must contain at least one admin "
-                    "address when XXL_JOB_AUTO_REGISTER is enabled."
-                )
-            if not self.executor_address:
-                raise XXLJobConfigError(
-                    "XXL_JOB_EXECUTOR_ADDRESS must not be empty when "
-                    "XXL_JOB_AUTO_REGISTER is enabled."
-                )
-
         for address in self.admin_addresses:
             _validate_http_url("XXL_JOB_ADMIN_ADDRESSES", address)
         if self.executor_address:
             _validate_http_url("XXL_JOB_EXECUTOR_ADDRESS", self.executor_address)
+
+    def validate_registry(self) -> None:
+        """Validate configuration required by an enabled Registry operation."""
+        if not isinstance(self.executor_app_name, str) or not self.executor_app_name:
+            raise XXLJobConfigError(
+                "XXL_JOB_EXECUTOR_APP_NAME must not be empty for Registry operations."
+            )
+        if not isinstance(self.admin_addresses, list) or not self.admin_addresses:
+            raise XXLJobConfigError(
+                "XXL_JOB_ADMIN_ADDRESSES must contain at least one admin address "
+                "for Registry operations."
+            )
+        if not isinstance(self.executor_address, str) or not self.executor_address:
+            raise XXLJobConfigError(
+                "XXL_JOB_EXECUTOR_ADDRESS must not be empty for Registry operations."
+            )
+        for address in self.admin_addresses:
+            if not isinstance(address, str):
+                raise XXLJobConfigError(
+                    "XXL_JOB_ADMIN_ADDRESSES must contain only strings."
+                )
+            _validate_http_url("XXL_JOB_ADMIN_ADDRESSES", address)
+        _validate_http_url("XXL_JOB_EXECUTOR_ADDRESS", self.executor_address)
+        values = {
+            "XXL_JOB_REGISTRY_INTERVAL": self.registry_interval,
+            "XXL_JOB_HTTP_CONNECT_TIMEOUT": self.http_connect_timeout,
+            "XXL_JOB_HTTP_READ_TIMEOUT": self.http_read_timeout,
+            "XXL_JOB_ADMIN_RETRY_COUNT": self.admin_retry_count,
+            "XXL_JOB_ADMIN_RETRY_BACKOFF": self.admin_retry_backoff,
+            "XXL_JOB_ADMIN_FAILOVER_ON_HTTP_ERROR": (
+                self.admin_failover_on_http_error
+            ),
+            "XXL_JOB_ADMIN_FAILOVER_ON_INVALID_JSON": (
+                self.admin_failover_on_invalid_json
+            ),
+            "XXL_JOB_ADMIN_FAILOVER_ON_BUSINESS_ERROR": (
+                self.admin_failover_on_business_error
+            ),
+        }
+        _as_positive_int(values, "XXL_JOB_REGISTRY_INTERVAL")
+        _as_positive_int(values, "XXL_JOB_HTTP_CONNECT_TIMEOUT")
+        _as_positive_int(values, "XXL_JOB_HTTP_READ_TIMEOUT")
+        _as_non_negative_int(values, "XXL_JOB_ADMIN_RETRY_COUNT")
+        _as_non_negative_float(values, "XXL_JOB_ADMIN_RETRY_BACKOFF")
+        _as_bool(values, "XXL_JOB_ADMIN_FAILOVER_ON_HTTP_ERROR")
+        _as_bool(values, "XXL_JOB_ADMIN_FAILOVER_ON_INVALID_JSON")
+        _as_bool(values, "XXL_JOB_ADMIN_FAILOVER_ON_BUSINESS_ERROR")
 
     @property
     def timeout(self) -> tuple:
@@ -267,6 +286,33 @@ class XXLJobConfig:
         Return the ``(connect, read)`` timeout tuple used by requests.
         """
         return (self.http_connect_timeout, self.http_read_timeout)
+
+
+def _validate_removed_configs(config: Mapping[str, Any]) -> None:
+    key = "XXL_JOB_AUTO_REGISTER_ON_INIT"
+    if key not in config:
+        return
+    value = config[key]
+    if value is False:
+        message = (
+            "XXL_JOB_AUTO_REGISTER_ON_INIT 已删除。\n\n"
+            "如需保持手动 Registry 启动，请设置：\n\n"
+            "XXL_JOB_AUTO_REGISTER=False\n\n"
+            "然后在需要的生命周期显式调用：\n\n"
+            "start_registry()"
+        )
+    elif value is True:
+        message = (
+            "XXL_JOB_AUTO_REGISTER_ON_INIT 已删除。\n\n"
+            "请删除该配置，并保留：\n\n"
+            "XXL_JOB_AUTO_REGISTER=True"
+        )
+    else:
+        message = (
+            "XXL_JOB_AUTO_REGISTER_ON_INIT 已删除，请删除该配置并使用 "
+            "XXL_JOB_AUTO_REGISTER 控制 Registry 自动启动。"
+        )
+    raise XXLJobConfigError(message)
 
 
 def _as_bool(config: Mapping[str, Any], key: str) -> bool:

@@ -18,10 +18,6 @@ def make_runtime(mocker, **overrides):
     mapping.update(overrides)
     config = XXLJobConfig.from_mapping(mapping)
     registry_service = mocker.Mock()
-    registry_service.status_snapshot.return_value = {
-        "registered": False,
-        "registry_thread_running": False,
-    }
     logger = mocker.Mock()
     log_manager = mocker.Mock()
     log_manager.get_logger.return_value = logger
@@ -33,48 +29,37 @@ def make_runtime(mocker, **overrides):
         registry_service=registry_service,
         log_manager=log_manager,
     )
-    return runtime, registry_service, log_manager
+    return runtime, registry_service, log_manager, logger
 
 
-@pytest.mark.parametrize(
-    "enabled,deregister_on_exit,registered,running,expected_remove",
-    [
-        (True, True, True, False, True),
-        (True, True, False, True, True),
-        (True, True, False, False, False),
-        (True, False, True, True, False),
-        (False, True, True, True, False),
-    ],
-)
-def test_close_applies_exit_deregistration_policy(
-    mocker,
-    enabled,
-    deregister_on_exit,
-    registered,
-    running,
-    expected_remove,
-):
-    runtime, service, _ = make_runtime(
+@pytest.mark.parametrize("deregister_on_exit", [False, True])
+def test_close_delegates_nonblocking_shutdown_once(mocker, deregister_on_exit):
+    runtime, service, log_manager, _ = make_runtime(
         mocker,
-        XXL_JOB_ENABLED=enabled,
         XXL_JOB_DEREGISTER_ON_EXIT=deregister_on_exit,
     )
-    service.status_snapshot.return_value = {
-        "registered": registered,
-        "registry_thread_running": running,
-    }
 
     runtime.close()
     runtime.close()
 
-    service.stop.assert_called_once()
-    _, kwargs = service.stop.call_args
-    assert kwargs["remove"] is expected_remove
-    assert kwargs["on_stopped"] == runtime._finish_close
+    log_manager.prepare_shutdown.assert_called_once_with()
+    service.shutdown.assert_called_once_with(
+        deregister_on_exit=deregister_on_exit
+    )
+    log_manager.close.assert_not_called()
+
+
+def test_close_logs_shutdown_error_without_raising(mocker):
+    runtime, service, _, logger = make_runtime(mocker)
+    service.shutdown.side_effect = RuntimeError("shutdown")
+
+    runtime.close()
+
+    logger.error.assert_called_once()
 
 
 def test_close_resets_runtime_cleanup_state_after_pid_change(mocker):
-    runtime, service, _ = make_runtime(mocker)
+    runtime, service, _, _ = make_runtime(mocker)
     old_lock = runtime._close_lock
     runtime._closed = True
     child_pid = runtime._pid + 1
@@ -85,4 +70,4 @@ def test_close_resets_runtime_cleanup_state_after_pid_change(mocker):
     assert runtime._pid == child_pid
     assert runtime._close_lock is not old_lock
     assert runtime._closed is True
-    service.stop.assert_called_once()
+    service.shutdown.assert_called_once_with(deregister_on_exit=False)

@@ -12,10 +12,7 @@ from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional, cast
 from flask import Flask, current_app, has_app_context
 
 from ._app import ApplicationRegistry, ensure_executor_routes_available, executor_paths
-from ._lifecycle import (
-    install_runtime_finalizer,
-    start_registry_with_shutdown,
-)
+from ._lifecycle import install_runtime_finalizer
 from ._logging import XXLJobLogManager
 from .callback.registry import (
     CallbackRegistry,
@@ -145,6 +142,7 @@ class FlaskXXLJob:
             config,
             admin_client,
             logger=log_manager.get_logger("registry"),
+            close_logs=log_manager.close,
         )
 
         runtime = XXLJobRuntime(
@@ -168,19 +166,14 @@ class FlaskXXLJob:
             self._applications.add(app)
             runtime.attach_finalizer(install_runtime_finalizer(app, runtime))
             log_manager.get_logger("runtime").info(
-                "Flask-XXLJob initialized enabled=%s auto_register=%s "
-                "auto_register_on_init=%s.",
+                "Flask-XXLJob initialized enabled=%s auto_register=%s.",
                 config.enabled,
                 config.auto_register,
-                config.auto_register_on_init,
             )
 
-            if (
-                config.enabled
-                and config.auto_register
-                and config.auto_register_on_init
-            ):
-                start_registry_with_shutdown(registry_service)
+            if config.enabled and config.auto_register:
+                # Automatic and explicit starts share exactly one public path.
+                self.start_registry(app)
         except Exception as exc:
             log_manager.get_logger("runtime").error(
                 "Flask-XXLJob initialization failed exception_type=%s.",
@@ -524,9 +517,10 @@ class FlaskXXLJob:
 
     def start_registry(self, app: Optional[Flask] = None) -> None:
         """
-        启动执行器自动注册/续约线程（幂等）。
+        启动执行器自动注册/续约生命周期（幂等且非阻塞）。
 
-        Start the executor auto-registration/renewal thread (idempotent).
+        Start the executor registration-renewal lifecycle (idempotent and
+        non-blocking).
         """
         self._get_runtime(app).registry_service.start()
 
@@ -534,13 +528,13 @@ class FlaskXXLJob:
         self,
         app: Optional[Flask] = None,
         *,
-        remove: bool = True,
+        remove: bool = False,
     ) -> None:
         """
-        停止执行器自动注册/续约线程，并可选地注销执行器。
+        立即停止本地续约；可选地排队一次后台注销。
 
-        Stop the executor auto-registration/renewal thread and optionally
-        deregister the executor.
+        Stop local renewal immediately and optionally enqueue one background
+        deregistration.
         """
         self._get_runtime(app).registry_service.stop(remove=remove)
 

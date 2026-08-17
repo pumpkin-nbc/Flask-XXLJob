@@ -30,29 +30,47 @@ full control over execution.
 
 ## Upgrading 0.3.4 to 0.4.0
 
-`0.4.0` separates extension initialization from Registry startup and makes
-process-local lifecycle state fork-safe. Existing applications need no changes:
-`XXL_JOB_AUTO_REGISTER_ON_INIT` and `XXL_JOB_DEREGISTER_ON_EXIT` both default to
-`True`, so automatic startup and exit deregistration remain enabled.
+`0.4.0` replaces the Registry thread-centric lifecycle with a process-local
+state machine. Task dispatch, five executor endpoints, callbacks, the Admin
+protocol and `REGISTRY_INTERVAL` are unchanged.
 
 ```bash
 pip install --upgrade flask-xxljob==0.4.0
 ```
 
-For Gunicorn preload or a factory also imported by Celery, delay Registry
-startup and call it only from the intended worker process:
+`XXL_JOB_AUTO_REGISTER_ON_INIT` was never released and is now removed without a
+deprecation period. If it remains in `app.config`, `init_app()` fails even when
+`XXL_JOB_ENABLED=False`:
+
+- Old `False`: set `XXL_JOB_AUTO_REGISTER=False`, then call
+  `start_registry(app)` explicitly where needed.
+- Old `True`: delete the key and retain `XXL_JOB_AUTO_REGISTER=True`.
+- Any other old value: delete the key and use `XXL_JOB_AUTO_REGISTER`.
+
+Automatic startup is now exactly `XXL_JOB_ENABLED and
+XXL_JOB_AUTO_REGISTER`. For Gunicorn preload or a factory imported by Celery:
 
 ```python
-app.config["XXL_JOB_AUTO_REGISTER_ON_INIT"] = False
+app.config["XXL_JOB_AUTO_REGISTER"] = False
 xxl_job.init_app(app)
 xxl_job.start_registry(app)  # Run after fork in the Registry-owning process.
 ```
 
-If multiple workers share the same executor app name and address, set
-`XXL_JOB_DEREGISTER_ON_EXIT=False` so one worker's automatic cleanup does not
-remove their shared Admin identity. Explicit `stop_registry()` still removes by
-default; use `stop_registry(remove=False)` when only local renewal should stop.
-No distributed lock, leader election or process detection was added.
+`XXL_JOB_DEREGISTER_ON_EXIT` now defaults to `False`. `stop_registry()` also
+defaults to a local-only, immediate stop and preserves `registered`. Use
+`stop_registry(remove=True)` for one background automatic Remove, or pair a
+local stop with synchronous `remove_executor()` when the result is required.
+
+Registry completeness is checked only when an enabled Registry operation is
+actually requested, so `AUTO_REGISTER=False` supports protocol-only
+initialization without Admin settings. `ENABLED=False` short-circuits Registry
+behavior, while removed-key detection and existing field validation still run.
+
+Forked children replace all Registry locks, workers, generations, Remove state,
+sequences and snapshots before reading local state. In one process all four
+Registry RPC forms are strictly serialized. No cross-process lock, leader
+election, signal handling, or deployment detection was added; every worker that
+starts Registry still owns its own lifecycle.
 
 ## Upgrading 0.3.3 to 0.3.4
 

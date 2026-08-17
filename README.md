@@ -93,9 +93,8 @@ with app.app_context():
 | `XXL_JOB_EXECUTOR_APP_NAME` | `"flask-xxljob-executor"` | Executor application name. |
 | `XXL_JOB_EXECUTOR_ADDRESS` | `""` | Executor service base URL (scheme/host/port). `XXL_JOB_ROUTE_PREFIX` is appended automatically. |
 | `XXL_JOB_ROUTE_PREFIX` | `""` | URL prefix for the executor endpoints; also appended to `XXL_JOB_EXECUTOR_ADDRESS`. |
-| `XXL_JOB_AUTO_REGISTER` | `True` | Start automatic registration renewal. |
-| `XXL_JOB_AUTO_REGISTER_ON_INIT` | `True` | Start the registry thread during `init_app()` when auto-registration is enabled. |
-| `XXL_JOB_DEREGISTER_ON_EXIT` | `True` | Deregister during automatic Runtime shutdown. |
+| `XXL_JOB_AUTO_REGISTER` | `True` | With `ENABLED=True`, call `start_registry()` after initialization. |
+| `XXL_JOB_DEREGISTER_ON_EXIT` | `False` | Best-effort background deregistration during Runtime shutdown. |
 | `XXL_JOB_REGISTRY_INTERVAL` | `30` | Registration renewal interval (seconds). |
 | `XXL_JOB_HTTP_CONNECT_TIMEOUT` | `3` | HTTP connect timeout (seconds). |
 | `XXL_JOB_HTTP_READ_TIMEOUT` | `5` | HTTP read timeout (seconds). |
@@ -127,11 +126,20 @@ handler. Enabling only `XXL_JOB_LOG_ENABLED` writes to
 target and retain the default console target. See the
 [logging guide](docs/logging.md).
 
-For Gunicorn preload or an Application Factory shared with Celery, set
-`XXL_JOB_AUTO_REGISTER_ON_INIT=False` and call `start_registry(app)` only in the
-process that should renew the executor. When multiple workers share one
-executor address, set `XXL_JOB_DEREGISTER_ON_EXIT=False` so one worker exiting
-does not remove the shared identity. See [deployment](docs/deployment.md).
+`init_app()` starts Registry only when `XXL_JOB_ENABLED` and
+`XXL_JOB_AUTO_REGISTER` are both `True`. Set `XXL_JOB_AUTO_REGISTER=False` for
+Gunicorn preload or an Application Factory shared with Celery, then call
+`start_registry(app)` only in a process that should renew the executor. Each
+Gunicorn worker still owns an independent process-local Registry lifecycle;
+this release does not add leader election or cross-process locking. See
+[deployment](docs/deployment.md).
+
+`stop_registry()` now stops local renewal immediately and preserves the latest
+`registered` snapshot. Use `stop_registry(remove=True)` for one best-effort
+background Remove for that lifecycle, or use `stop_registry()` followed by
+`remove_executor()` when a synchronous `CallResult` is required. Exit
+deregistration is off by default so one worker does not remove a shared
+executor identity.
 
 ## CLI
 
@@ -148,7 +156,8 @@ Target support is `Flask >= 1.0` and `Python >= 3.8`. The compatibility matrix
 `.github/workflows/ci.yml`. This release was verified locally on Python 3.12.13
 with Flask 3.1.3; the remaining combinations are configured in CI but were not
 executed locally. Run the test suite in your own environment before claiming a
-specific combination.
+specific combination. The final local 0.4.0 suite completed with 454 tests
+passed, 2 optional official-Admin tests skipped, and 93.72% line coverage.
 
 When one `FlaskXXLJob` instance initializes multiple Flask applications, pass
 `app=` to callback, registration, status and lifecycle helpers outside an

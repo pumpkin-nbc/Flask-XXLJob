@@ -28,27 +28,43 @@ XXL-JOB -> Flask (Flask-XXLJob) -> your on_run submits the task
 
 ## 从 0.3.4 升级到 0.4.0
 
-`0.4.0` 将扩展初始化与 Registry 启动分离，并使进程局部生命周期状态具备 fork
-安全性。现有应用无需修改：`XXL_JOB_AUTO_REGISTER_ON_INIT` 与
-`XXL_JOB_DEREGISTER_ON_EXIT` 均默认 `True`，自动启动和退出注销行为保持不变。
+`0.4.0` 将以 Registry Thread 为中心的生命周期替换为进程级状态机。任务调度、五个
+执行器端点、Callback、Admin 协议与 `REGISTRY_INTERVAL` 都没有变化。
 
 ```bash
 pip install --upgrade flask-xxljob==0.4.0
 ```
 
-使用 Gunicorn preload，或 Application Factory 同时被 Celery 导入时，应延迟
-Registry 启动，只在目标 Worker 进程中调用：
+尚未正式发布的 `XXL_JOB_AUTO_REGISTER_ON_INIT` 已直接删除，不提供弃用兼容期。只要
+该键仍在 `app.config`，即使 `XXL_JOB_ENABLED=False`，`init_app()` 也会同步失败：
+
+- 旧值为严格 `False`：改用 `XXL_JOB_AUTO_REGISTER=False`，并在需要的位置显式调用
+  `start_registry(app)`。
+- 旧值为严格 `True`：删除该键，保留 `XXL_JOB_AUTO_REGISTER=True`。
+- 其他旧值：删除该键，统一使用 `XXL_JOB_AUTO_REGISTER`。
+
+唯一自动启动条件现在是 `XXL_JOB_ENABLED and XXL_JOB_AUTO_REGISTER`。Gunicorn
+preload 或 Application Factory 同时被 Celery 导入时使用：
 
 ```python
-app.config["XXL_JOB_AUTO_REGISTER_ON_INIT"] = False
+app.config["XXL_JOB_AUTO_REGISTER"] = False
 xxl_job.init_app(app)
 xxl_job.start_registry(app)  # fork 后在拥有 Registry 的进程中执行
 ```
 
-多个 Worker 共享相同执行器应用名和地址时，设置
-`XXL_JOB_DEREGISTER_ON_EXIT=False`，避免任一 Worker 自动清理时删除共享的 Admin
-身份。显式 `stop_registry()` 默认仍会注销；只需停止本地续约时使用
-`stop_registry(remove=False)`。本版本未加入分布式锁、Leader 选举或进程检测。
+`XXL_JOB_DEREGISTER_ON_EXIT` 现在默认 `False`。`stop_registry()` 也默认只做本地
+立即停止并保留 `registered`。需要一次后台自动注销时使用
+`stop_registry(remove=True)`；需要确定性结果时，本地停止后同步调用
+`remove_executor()`。
+
+完整 Registry 配置仅在 enabled 状态真正请求 Registry 操作时校验，因此
+`AUTO_REGISTER=False` 可在没有 Admin 配置时完成纯协议初始化。`ENABLED=False` 会
+短路 Registry 行为，但已删除配置检测与现有字段校验仍然执行。
+
+fork 子进程会在读取本地状态前替换全部 Registry 锁、Worker、generation、Remove、
+sequence 与快照。同一进程内四类 Registry RPC 严格串行。本版本没有增加跨进程锁、
+Leader 选举、信号处理或部署检测；每个启动 Registry 的 Worker 仍拥有自己的
+lifecycle。
 
 ## 从 0.3.3 升级到 0.3.4
 

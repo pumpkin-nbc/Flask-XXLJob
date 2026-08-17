@@ -1,14 +1,20 @@
-"""Registry service tests."""
+"""RegistryService process lifecycle, ordering, and cleanup tests."""
 
 from __future__ import annotations
 
 import threading
+import time
 
 import pytest
 
 from flask_xxljob.client import CallResult
 from flask_xxljob.config import XXLJobConfig
-from flask_xxljob.registry.registry_service import RegistryService
+from flask_xxljob.exceptions import XXLJobConfigError
+from flask_xxljob.registry.registry_service import (
+    RegistryService,
+    _RegistryWorkerContext,
+    _RemoveOperation,
+)
 
 
 def make_config(**overrides):
@@ -16,361 +22,1119 @@ def make_config(**overrides):
         "XXL_JOB_ADMIN_ADDRESSES": ["http://a:8080"],
         "XXL_JOB_EXECUTOR_APP_NAME": "app",
         "XXL_JOB_EXECUTOR_ADDRESS": "http://127.0.0.1:5001",
-        "XXL_JOB_REGISTRY_INTERVAL": 1,
+        "XXL_JOB_AUTO_REGISTER": False,
+        "XXL_JOB_REGISTRY_INTERVAL": 3600,
     }
     mapping.update(overrides)
     return XXLJobConfig.from_mapping(mapping)
 
 
+def wait_for(predicate, timeout=2.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return
+        time.sleep(0.005)
+    assert predicate()
+
+
 class FakeAdmin:
-    def __init__(self, success=True):
-        self.success = success
+    def __init__(self, registry_success=True, remove_success=True):
+        self.registry_success = registry_success
+        self.remove_success = remove_success
         self.registry_calls = 0
         self.remove_calls = 0
 
     def registry(self, request):
         self.registry_calls += 1
-        return CallResult(success=self.success, address="http://a:8080")
+        return CallResult(
+            success=self.registry_success,
+            address="http://a:8080",
+            error=None if self.registry_success else "register failed",
+            error_type=None if self.registry_success else "business",
+        )
 
-    def registry_remove(self, request):
-        self.remove_calls += 1
-        return CallResult(success=self.success, address="http://a:8080")
-
-
-class BlockingAdmin(FakeAdmin):
-    def __init__(self):
-        super().__init__()
-        self.registry_started = threading.Event()
-        self.registry_release = threading.Event()
-        self.remove_started = threading.Event()
-        self.registry_in_progress = False
-        self.calls_overlapped = False
-
-    def registry(self, request):
-        self.registry_calls += 1
-        self.registry_in_progress = True
-        self.registry_started.set()
-        self.registry_release.wait(timeout=5)
-        self.registry_in_progress = False
-        return CallResult(success=True, address="http://a:8080")
-
-    def registry_remove(self, request):
-        self.remove_calls += 1
-        self.calls_overlapped = self.registry_in_progress
-        self.remove_started.set()
-        return CallResult(success=True, address="http://a:8080")
-
-
-class FailingRemoveAdmin(FakeAdmin):
     def registry_remove(self, request):
         self.remove_calls += 1
         return CallResult(
-            success=False,
+            success=self.remove_success,
             address="http://a:8080",
-            error="remove failed",
-            error_type="business",
+            error=None if self.remove_success else "remove failed",
+            error_type=None if self.remove_success else "business",
         )
 
 
-class RaisingRemoveAdmin(FakeAdmin):
+class RaisingAdmin(FakeAdmin):
+    def registry(self, request):
+        self.registry_calls += 1
+        raise RuntimeError("register exploded")
+
     def registry_remove(self, request):
         self.remove_calls += 1
         raise RuntimeError("remove exploded")
 
 
-def test_register_once_result():
-    admin = FakeAdmin()
-    service = RegistryService(make_config(), admin)
-    result = service.register_once_result()
-    assert result.success is True
-    assert admin.registry_calls == 1
+class BlockingRegistryAdmin(FakeAdmin):
+    def __init__(self, result=True):
+        super().__init__(registry_success=result)
+        self.started = threading.Event()
+        self.release = threading.Event()
+
+    def registry(self, request):
+        self.registry_calls += 1
+        self.started.set()
+        self.release.wait(timeout=5)
+        return CallResult(
+            success=self.registry_success,
+            address="http://a:8080",
+            error=None if self.registry_success else "blocked failure",
+            error_type=None if self.registry_success else "network",
+        )
 
 
-def test_remove_once_result():
+class BlockingRemoveAdmin(FakeAdmin):
+    def __init__(self, remove_success=True):
+        super().__init__(remove_success=remove_success)
+        self.remove_started = threading.Event()
+        self.remove_release = threading.Event()
+
+    def registry_remove(self, request):
+        self.remove_calls += 1
+        self.remove_started.set()
+        self.remove_release.wait(timeout=5)
+        return CallResult(
+            success=self.remove_success,
+            address="http://a:8080",
+            error=None if self.remove_success else "remove failed",
+            error_type=None if self.remove_success else "business",
+        )
+
+
+class FirstRemoveBlocksAdmin(FakeAdmin):
+    def __init__(self):
+        super().__init__()
+        self.first_remove_started = threading.Event()
+        self.first_remove_release = threading.Event()
+
+    def registry_remove(self, request):
+        self.remove_calls += 1
+        if self.remove_calls == 1:
+            self.first_remove_started.set()
+            self.first_remove_release.wait(timeout=5)
+        return CallResult(success=True, address="http://a:8080")
+
+
+def test_sync_register_and_remove_update_snapshot_without_generation():
     admin = FakeAdmin()
     service = RegistryService(make_config(), admin)
+
+    assert service.register_once_result().success is True
+    state = service._get_process_state()
+    assert state.registered is True
+    assert state.generation == 0
+    assert state.rpc_sequence == 1
+    assert state.last_applied_rpc_sequence == 1
+
     assert service.remove_once_result().success is True
-    assert admin.remove_calls == 1
+    assert state.registered is False
+    assert state.generation == 0
+    assert state.rpc_sequence == 2
+    assert state.last_applied_rpc_sequence == 2
 
 
-def test_register_failure_does_not_raise():
-    admin = FakeAdmin(success=False)
+@pytest.mark.parametrize("remove", [False, True])
+def test_sync_failure_preserves_registered_and_advances_sequence(remove):
+    admin = FakeAdmin(registry_success=False, remove_success=False)
     service = RegistryService(make_config(), admin)
-    result = service.register_once_result()
+    state = service._get_process_state()
+    state.registered = True
+
+    result = (
+        service.remove_once_result()
+        if remove
+        else service.register_once_result()
+    )
+
     assert result.success is False
+    assert state.registered is True
+    assert state.rpc_sequence == 1
+    assert state.last_applied_rpc_sequence == 1
+    assert state.last_error is not None
 
 
-def test_start_is_idempotent():
+@pytest.mark.parametrize("remove", [False, True])
+def test_sync_unexpected_exception_is_safe_and_ordered(remove):
+    service = RegistryService(make_config(), RaisingAdmin())
+    state = service._get_process_state()
+
+    result = (
+        service.remove_once_result()
+        if remove
+        else service.register_once_result()
+    )
+
+    assert result.success is False
+    assert result.error_type == "RuntimeError"
+    assert "exploded" not in (result.error or "")
+    assert state.last_applied_rpc_sequence == 1
+
+
+@pytest.mark.parametrize("method_name", ["register_once_result", "remove_once_result"])
+@pytest.mark.parametrize("registered", [False, True])
+def test_disabled_sync_api_updates_only_local_safe_snapshot(
+    method_name, registered
+):
+    config = make_config(XXL_JOB_ENABLED=False)
     admin = FakeAdmin()
-    service = RegistryService(make_config(XXL_JOB_REGISTRY_INTERVAL=3600), admin)
-    service.start()
-    service.start()
-    assert service.is_running is True
-    service.stop(remove=False)
-    assert service.is_running is False
+    service = RegistryService(config, admin)
+    state = service._get_process_state()
+    state.registered = registered
+    state.generation = 7
 
+    result = getattr(service, method_name)()
 
-def test_stop_triggers_remove():
-    admin = FakeAdmin()
-    service = RegistryService(make_config(XXL_JOB_REGISTRY_INTERVAL=3600), admin)
-    service.start()
-    service.stop(remove=True)
-    assert admin.remove_calls == 1
-
-
-def test_stop_defers_remove_until_blocked_renewal_finishes():
-    admin = BlockingAdmin()
-    service = RegistryService(make_config(XXL_JOB_REGISTRY_INTERVAL=1), admin)
-    service.start()
-    assert admin.registry_started.wait(timeout=1)
-
-    service.stop(remove=True)
-
-    assert admin.remove_calls == 0
-    assert service.is_running is True
-    assert service.status_snapshot()["registry_thread_running"] is True
-
-    admin.registry_release.set()
-    assert admin.remove_started.wait(timeout=1)
-    assert admin.calls_overlapped is False
-    assert admin.remove_calls == 1
-
-    # A later stop only waits for cleanup; it must not deregister again.
-    service.stop(remove=False)
-    assert service.is_running is False
-    assert admin.remove_calls == 1
-
-
-def test_pid_change_resets_all_process_local_state(mocker):
-    admin = FakeAdmin()
-    service = RegistryService(make_config(), admin)
-    inherited_thread = mocker.Mock()
-    inherited_thread.is_alive.return_value = True
-    service._thread = inherited_thread
-    old_event = service._stop_event
-    old_lock = service._lock
-    old_call_lock = service._call_lock
-    old_status_lock = service._status_lock
-    service._remove_requested = True
-    service._remove_claimed = True
-    service._shutdown_callbacks = [mocker.Mock()]
-    service._registered = True
-    service._last_registry_time = "parent-time"
-    service._last_registry_success = True
-    service._last_registry_admin_address = "http://parent:8080"
-    service._last_registry_error_type = "parent-error"
-    service._last_registry_message = "parent-message"
-    child_pid = service._pid + 1
-    mocker.patch(
-        "flask_xxljob.registry.registry_service.os.getpid",
-        return_value=child_pid,
+    assert result == CallResult(
+        success=False,
+        error="Flask-XXLJob is disabled.",
+        error_type="config",
+        attempt_count=0,
     )
-
-    snapshot = service.status_snapshot()
-
-    assert service._pid == child_pid
-    assert service._thread is None
-    assert service._stop_event is not old_event
-    assert service._lock is not old_lock
-    assert service._call_lock is not old_call_lock
-    assert service._status_lock is not old_status_lock
-    assert service._remove_requested is False
-    assert service._remove_claimed is False
-    assert service._shutdown_callbacks == []
-    assert snapshot == {
-        "registered": False,
-        "last_registry_time": None,
-        "last_registry_success": None,
-        "last_registry_admin_address": None,
-        "last_registry_error_type": None,
-        "last_registry_message": None,
-        "registry_thread_running": False,
-    }
-    inherited_thread.is_alive.assert_not_called()
-
-
-def test_start_after_pid_change_uses_a_new_daemon_thread(mocker):
-    service = RegistryService(make_config(), FakeAdmin())
-    inherited_thread = mocker.Mock()
-    inherited_thread.is_alive.return_value = True
-    service._thread = inherited_thread
-    child_thread = mocker.Mock()
-    child_thread.is_alive.return_value = True
-    thread_factory = mocker.patch(
-        "flask_xxljob.registry.registry_service.threading.Thread",
-        return_value=child_thread,
-    )
-    mocker.patch(
-        "flask_xxljob.registry.registry_service.os.getpid",
-        return_value=service._pid + 1,
-    )
-
-    service.start()
-
-    assert service._thread is child_thread
-    child_thread.start.assert_called_once_with()
-    thread_factory.assert_called_once_with(
-        target=service._run_loop,
-        name="flask-xxljob-registry",
-        daemon=True,
-    )
-    inherited_thread.is_alive.assert_not_called()
-
-
-def test_stop_after_pid_change_never_joins_inherited_thread(mocker):
-    admin = FakeAdmin()
-    service = RegistryService(make_config(), admin)
-    inherited_thread = mocker.Mock()
-    inherited_thread.is_alive.return_value = True
-    service._thread = inherited_thread
-    mocker.patch(
-        "flask_xxljob.registry.registry_service.os.getpid",
-        return_value=service._pid + 1,
-    )
-
-    service.stop(remove=False)
-
-    inherited_thread.is_alive.assert_not_called()
-    inherited_thread.join.assert_not_called()
+    assert state.registered is registered
+    assert state.generation == 7
+    assert state.rpc_sequence == 0
+    assert state.last_applied_rpc_sequence == 0
+    assert state.last_result == result
+    assert state.last_error == result
+    assert admin.registry_calls == 0
     assert admin.remove_calls == 0
 
 
-def test_is_running_resets_inherited_thread_after_pid_change(mocker):
-    service = RegistryService(make_config(), FakeAdmin())
-    inherited_thread = mocker.Mock()
-    inherited_thread.is_alive.return_value = True
-    service._thread = inherited_thread
-    mocker.patch(
-        "flask_xxljob.registry.registry_service.os.getpid",
-        return_value=service._pid + 1,
+def test_disabled_start_and_both_stop_modes_are_true_noops():
+    config = XXLJobConfig.from_mapping(
+        {
+            "XXL_JOB_ENABLED": False,
+            "XXL_JOB_AUTO_REGISTER": True,
+            "XXL_JOB_ADMIN_ADDRESSES": [],
+        }
+    )
+    admin = FakeAdmin()
+    service = RegistryService(config, admin)
+    original = service._process_state
+
+    assert service.start() is None
+    assert service.stop(remove=False) is None
+    assert service.stop(remove=True) is None
+    assert service._process_state is original
+    assert admin.registry_calls == admin.remove_calls == 0
+
+
+@pytest.mark.parametrize(
+    "method",
+    [
+        lambda service: service.start(),
+        lambda service: service.register_once_result(),
+        lambda service: service.remove_once_result(),
+        lambda service: service.stop(remove=True),
+    ],
+)
+def test_enabled_remote_entrypoints_validate_before_side_effects(method, mocker):
+    config = XXLJobConfig.from_mapping(
+        {
+            "XXL_JOB_AUTO_REGISTER": False,
+            "XXL_JOB_ADMIN_ADDRESSES": [],
+        }
+    )
+    admin = FakeAdmin()
+    service = RegistryService(config, admin)
+    thread = mocker.patch(
+        "flask_xxljob.registry.registry_service.threading.Thread"
     )
 
-    assert service.is_running is False
-    inherited_thread.is_alive.assert_not_called()
+    with pytest.raises(XXLJobConfigError):
+        method(service)
+
+    thread.assert_not_called()
+    assert admin.registry_calls == admin.remove_calls == 0
 
 
-def test_thread_start_failure_restores_retryable_state(mocker):
+def test_start_returns_while_first_admin_call_is_blocked():
+    admin = BlockingRegistryAdmin()
+    service = RegistryService(make_config(), admin)
+
+    service.start()
+
+    assert admin.started.wait(timeout=1)
+    assert service.is_running is True
+    admin.release.set()
+    service.stop()
+    wait_for(lambda: not service._get_process_state().stopping_workers)
+
+
+def test_concurrent_start_creates_one_current_worker():
+    admin = BlockingRegistryAdmin()
+    service = RegistryService(make_config(), admin)
+    barrier = threading.Barrier(9)
+
+    def start():
+        barrier.wait()
+        service.start()
+
+    callers = [threading.Thread(target=start) for _ in range(8)]
+    for caller in callers:
+        caller.start()
+    barrier.wait()
+    for caller in callers:
+        caller.join(timeout=1)
+
+    state = service._get_process_state()
+    assert state.generation == 1
+    assert state.worker is not None
+    assert admin.started.wait(timeout=1)
+    assert admin.registry_calls == 1
+    service.stop()
+    admin.release.set()
+    wait_for(lambda: not state.stopping_workers)
+
+
+def test_registered_snapshot_does_not_prevent_a_new_start():
+    admin = BlockingRegistryAdmin()
+    service = RegistryService(make_config(), admin)
+    state = service._get_process_state()
+    state.registered = True
+
+    service.start()
+
+    assert state.worker is not None
+    assert state.generation == 1
+    service.stop()
+    admin.release.set()
+    wait_for(lambda: not state.stopping_workers)
+
+
+def test_thread_start_failure_does_not_commit_or_cancel_pending(mocker):
     service = RegistryService(make_config(), FakeAdmin())
+    state = service._get_process_state()
+    pending = _RemoveOperation(0, threading.Event())
+    state.pending_remove = pending
+
     failed_thread = mocker.Mock()
     failed_thread.start.side_effect = RuntimeError("cannot start")
-    retry_thread = mocker.Mock()
-    retry_thread.is_alive.return_value = True
-    mocker.patch(
+    thread_factory = mocker.patch(
         "flask_xxljob.registry.registry_service.threading.Thread",
-        side_effect=[failed_thread, retry_thread],
+        return_value=failed_thread,
     )
 
     with pytest.raises(RuntimeError, match="cannot start"):
         service.start()
 
-    assert service._thread is None
+    assert state.generation == 0
+    assert state.worker is None
+    assert state.pending_remove is pending
+    assert pending.done_event.is_set() is False
+
+    mocker.stop(thread_factory)
     service.start()
-    assert service._thread is retry_thread
-    retry_thread.start.assert_called_once_with()
+    assert state.generation == 1
+    assert state.pending_remove is None
+    assert pending.done_event.is_set() is True
+    service.stop()
+    wait_for(lambda: not state.stopping_workers)
 
 
-def test_register_and_remove_rebuild_call_lock_after_pid_change(mocker):
+def test_stop_is_immediately_local_and_tracks_stopping_worker():
+    admin = BlockingRegistryAdmin()
+    service = RegistryService(make_config(), admin)
+    service.start()
+    assert admin.started.wait(timeout=1)
+    state = service._get_process_state()
+    ctx = state.worker
+
+    service.stop(remove=False)
+
+    assert service.is_running is False
+    assert service.status_snapshot()["registry_thread_running"] is False
+    assert state.generation == 1
+    assert state.stopping_workers[1] is ctx
+    assert state.registered is False
+    admin.release.set()
+    wait_for(lambda: 1 not in state.stopping_workers)
+    assert state.rpc_sequence == 1
+    assert state.last_applied_rpc_sequence == 0
+
+
+def test_stop_does_not_change_a_true_registered_snapshot():
+    service = RegistryService(make_config(), FakeAdmin())
+    state = service._get_process_state()
+    state.registered = True
+
+    service.stop(remove=False)
+
+    assert service.status_snapshot()["registered"] is True
+    assert service.status_snapshot()["registry_thread_running"] is False
+
+
+def test_worker_failure_is_accepted_and_worker_keeps_running():
+    admin = FakeAdmin(registry_success=False)
+    service = RegistryService(make_config(), admin)
+    service.start()
+    wait_for(lambda: admin.registry_calls == 1)
+    state = service._get_process_state()
+
+    assert state.registered is False
+    assert state.last_applied_rpc_sequence == 1
+    assert service.is_running is True
+    service.stop()
+    wait_for(lambda: not state.stopping_workers)
+
+
+def test_old_inflight_worker_result_cannot_pollute_new_generation():
+    admin = BlockingRegistryAdmin(result=False)
+    service = RegistryService(make_config(), admin)
+    service.start()
+    assert admin.started.wait(timeout=1)
+    state = service._get_process_state()
+
+    service.stop()
+    admin.registry_success = True
+    service.start()
+    assert state.generation == 2
+    admin.release.set()
+    wait_for(lambda: admin.registry_calls >= 2)
+    wait_for(lambda: state.last_applied_rpc_sequence >= 2)
+
+    assert state.registered is True
+    assert state.worker is not None
+    assert state.worker.generation == 2
+    service.stop()
+    wait_for(lambda: not state.stopping_workers)
+
+
+def test_plain_stop_never_deregisters():
     admin = FakeAdmin()
     service = RegistryService(make_config(), admin)
-    parent_lock = service._call_lock
-    current_pid = [service._pid + 1]
-    mocker.patch(
-        "flask_xxljob.registry.registry_service.os.getpid",
-        side_effect=lambda: current_pid[0],
-    )
+    service.start()
+    wait_for(lambda: admin.registry_calls == 1)
 
-    assert service.register_once_result().success is True
-    child_lock = service._call_lock
-    assert child_lock is not parent_lock
-    assert service.status_snapshot()["registered"] is True
+    service.stop()
+    wait_for(lambda: not service._get_process_state().stopping_workers)
 
-    current_pid[0] += 1
-    assert service.remove_once_result().success is True
-    assert service._call_lock is not child_lock
-    assert service.status_snapshot()["registered"] is False
+    assert admin.remove_calls == 0
+
+
+def test_stop_remove_is_background_and_worker_claims_same_generation():
+    admin = BlockingRegistryAdmin()
+    service = RegistryService(make_config(), admin)
+    service.start()
+    assert admin.started.wait(timeout=1)
+    state = service._get_process_state()
+
+    service.stop(remove=True)
+
+    operation = state.pending_remove
+    assert operation is not None
+    assert operation.generation == 1
+    assert admin.remove_calls == 0
+    admin.release.set()
+    assert operation.done_event.wait(timeout=1)
+    assert admin.remove_calls == 1
+    assert state.last_remove_requested_generation == 1
+
+
+def test_remove_can_be_requested_after_plain_stop_while_worker_is_stopping():
+    admin = BlockingRegistryAdmin()
+    service = RegistryService(make_config(), admin)
+    service.start()
+    assert admin.started.wait(timeout=1)
+    state = service._get_process_state()
+
+    service.stop(remove=False)
+    assert 1 in state.stopping_workers
+    service.stop(remove=True)
+    operation = state.pending_remove
+
+    assert operation is not None
+    admin.release.set()
+    assert operation.done_event.wait(timeout=1)
+    assert admin.remove_calls == 1
+
+
+def test_remove_can_be_requested_after_worker_has_fully_exited():
+    admin = FakeAdmin()
+    service = RegistryService(make_config(), admin)
+    service.start()
+    wait_for(lambda: admin.registry_calls == 1)
+    state = service._get_process_state()
+    service.stop(remove=False)
+    wait_for(lambda: not state.stopping_workers)
+
+    service.stop(remove=True)
+
+    wait_for(lambda: admin.remove_calls == 1)
+    wait_for(lambda: state.active_remove is None)
+    assert state.last_remove_requested_generation == 1
+
+
+def test_generation_zero_never_creates_automatic_remove():
+    admin = FakeAdmin()
+    service = RegistryService(make_config(), admin)
+
+    service.stop(remove=True)
+
+    state = service._get_process_state()
+    assert state.generation == 0
+    assert state.pending_remove is None
+    assert state.active_remove is None
+    assert admin.remove_calls == 0
+
+
+def test_same_generation_automatic_remove_is_never_retried_after_failure():
+    admin = FakeAdmin(remove_success=False)
+    service = RegistryService(make_config(), admin)
+    service.start()
+    wait_for(lambda: admin.registry_calls == 1)
+    state = service._get_process_state()
+
+    service.stop(remove=True)
+    wait_for(lambda: admin.remove_calls == 1)
+    wait_for(lambda: state.active_remove is None)
+    service.stop(remove=True)
+
+    time.sleep(0.02)
+    assert admin.remove_calls == 1
+    assert state.last_remove_requested_generation == 1
+
+
+def test_new_generation_gets_its_own_remove_eligibility():
+    admin = FakeAdmin()
+    service = RegistryService(make_config(), admin)
+    service.start()
+    wait_for(lambda: admin.registry_calls == 1)
+    service.stop(remove=True)
+    wait_for(lambda: admin.remove_calls == 1)
+
+    service.start()
+    wait_for(lambda: admin.registry_calls == 2)
+    service.stop(remove=True)
+    wait_for(lambda: admin.remove_calls == 2)
+
+    assert service._get_process_state().last_remove_requested_generation == 2
+
+
+def test_new_start_cancels_pending_remove_before_worker_can_claim_it():
+    admin = BlockingRegistryAdmin()
+    service = RegistryService(make_config(), admin)
+    service.start()
+    assert admin.started.wait(timeout=1)
+    state = service._get_process_state()
+    service.stop(remove=True)
+    pending = state.pending_remove
+    assert pending is not None
+
+    service.start()
+
+    assert pending.done_event.is_set() is True
+    assert state.pending_remove is None
+    assert state.generation == 2
+    admin.release.set()
+    wait_for(lambda: admin.registry_calls >= 2)
+    assert admin.remove_calls == 0
+    service.stop()
+    wait_for(lambda: not state.stopping_workers)
+
+
+def test_new_worker_waiting_for_active_remove_rechecks_after_stop():
+    admin = BlockingRemoveAdmin()
+    service = RegistryService(make_config(), admin)
+    service.start()
+    wait_for(lambda: admin.registry_calls == 1)
+    state = service._get_process_state()
+    service.stop(remove=True)
+    assert admin.remove_started.wait(timeout=1)
+
+    service.start()
+    assert state.generation == 2
+    service.stop(remove=False)
+    admin.remove_release.set()
+    wait_for(lambda: not state.stopping_workers)
+
     assert admin.registry_calls == 1
     assert admin.remove_calls == 1
 
 
-def test_status_snapshot_has_no_admin_or_thread_side_effects(mocker):
+def test_failed_active_remove_still_wakes_current_new_worker():
+    admin = BlockingRemoveAdmin(remove_success=False)
+    service = RegistryService(make_config(), admin)
+    service.start()
+    wait_for(lambda: admin.registry_calls == 1)
+    state = service._get_process_state()
+    service.stop(remove=True)
+    assert admin.remove_started.wait(timeout=1)
+
+    service.start()
+    admin.remove_release.set()
+
+    wait_for(lambda: admin.registry_calls == 2)
+    assert state.generation == 2
+    assert state.registered is True
+    service.stop()
+    wait_for(lambda: not state.stopping_workers)
+
+
+def test_active_then_newer_pending_is_drained_by_its_own_worker():
+    admin = FirstRemoveBlocksAdmin()
+    service = RegistryService(make_config(), admin)
+    service.start()
+    wait_for(lambda: admin.registry_calls == 1)
+    state = service._get_process_state()
+    service.stop(remove=True)
+    assert admin.first_remove_started.wait(timeout=1)
+
+    service.start()
+    service.stop(remove=True)
+    assert state.active_remove is not None
+    assert state.active_remove.generation == 1
+    assert state.pending_remove is not None
+    assert state.pending_remove.generation == 2
+    admin.first_remove_release.set()
+
+    wait_for(lambda: admin.remove_calls == 2)
+    wait_for(lambda: state.active_remove is None)
+    assert state.pending_remove is None
+
+
+def test_newer_start_can_cancel_newer_pending_while_old_active_runs():
+    admin = FirstRemoveBlocksAdmin()
+    service = RegistryService(make_config(), admin)
+    service.start()
+    wait_for(lambda: admin.registry_calls == 1)
+    state = service._get_process_state()
+    service.stop(remove=True)
+    assert admin.first_remove_started.wait(timeout=1)
+    service.start()
+    service.stop(remove=True)
+    pending = state.pending_remove
+    assert pending is not None and pending.generation == 2
+
+    service.start()
+
+    assert state.generation == 3
+    assert pending.done_event.is_set() is True
+    assert state.pending_remove is None
+    admin.first_remove_release.set()
+    wait_for(lambda: admin.registry_calls == 2)
+    assert admin.remove_calls == 1
+    service.stop()
+    wait_for(lambda: not state.stopping_workers)
+
+
+def test_stopping_worker_claim_and_record_removal_are_atomic():
     admin = FakeAdmin()
     service = RegistryService(make_config(), admin)
-    thread_factory = mocker.patch(
-        "flask_xxljob.registry.registry_service.threading.Thread"
+    state = service._get_process_state()
+    ctx = _RegistryWorkerContext(3, threading.Event())
+    operation = _RemoveOperation(3, threading.Event())
+    state.generation = 3
+    state.stopping_workers[3] = ctx
+    state.pending_remove = operation
+
+    service._finish_worker(state, ctx)
+
+    assert 3 not in state.stopping_workers
+    assert state.pending_remove is None
+    assert state.active_remove is None
+    assert operation.done_event.is_set() is True
+    assert admin.remove_calls == 1
+
+
+def test_other_generation_stopping_worker_does_not_block_cleanup_actor():
+    admin = FakeAdmin()
+    service = RegistryService(make_config(), admin)
+    state = service._get_process_state()
+    state.generation = 2
+    state.stopping_workers[1] = _RegistryWorkerContext(
+        1, threading.Event()
+    )
+    operation = _RemoveOperation(2, threading.Event())
+    state.pending_remove = operation
+
+    service._schedule_pending_remove(state, raise_start_error=True)
+
+    assert operation.done_event.wait(timeout=1)
+    assert admin.remove_calls == 1
+    assert 1 in state.stopping_workers
+
+
+def test_cleanup_actor_that_cannot_claim_clears_its_association():
+    admin = FakeAdmin()
+    service = RegistryService(make_config(), admin)
+    state = service._get_process_state()
+    pending = _RemoveOperation(2, threading.Event())
+    other_active = _RemoveOperation(1, threading.Event())
+    state.pending_remove = pending
+
+    with state.state_lock:
+        service._schedule_pending_remove(state, raise_start_error=True)
+        first_actor = pending.thread
+        state.active_remove = other_active
+
+    wait_for(lambda: first_actor not in state.cleanup_actors)
+    assert state.pending_remove is pending
+    assert pending.thread is None
+
+    with state.state_lock:
+        state.active_remove = None
+    service._schedule_pending_remove(state, raise_start_error=True)
+    assert pending.done_event.wait(timeout=1)
+    assert admin.remove_calls == 1
+
+
+def test_scheduled_cleanup_actor_does_not_restore_cancelled_pending():
+    admin = FakeAdmin()
+    service = RegistryService(make_config(), admin)
+    state = service._get_process_state()
+    pending = _RemoveOperation(1, threading.Event())
+    state.pending_remove = pending
+
+    with state.state_lock:
+        service._schedule_pending_remove(state, raise_start_error=True)
+        actor = pending.thread
+        state.pending_remove = None
+        pending.done_event.set()
+
+    wait_for(lambda: actor not in state.cleanup_actors)
+    assert pending.thread is None
+    assert state.pending_remove is None
+    assert admin.remove_calls == 0
+
+
+def test_cleanup_thread_start_failure_terminates_operation(mocker):
+    admin = FakeAdmin()
+    service = RegistryService(make_config(), admin)
+    state = service._get_process_state()
+    operation = _RemoveOperation(1, threading.Event())
+    state.generation = 1
+    state.last_remove_requested_generation = 1
+    state.pending_remove = operation
+    failed_thread = mocker.Mock()
+    failed_thread.start.side_effect = RuntimeError("cannot start cleanup")
+    mocker.patch(
+        "flask_xxljob.registry.registry_service.threading.Thread",
+        return_value=failed_thread,
     )
 
-    snapshot = service.status_snapshot()
+    with pytest.raises(RuntimeError, match="cannot start cleanup"):
+        service._schedule_pending_remove(state, raise_start_error=True)
 
-    assert snapshot["registered"] is False
-    assert admin.registry_calls == 0
+    assert operation.done_event.is_set() is True
+    assert operation.thread is None
+    assert state.pending_remove is None
+    assert state.active_remove is None
+    assert not state.cleanup_actors
+    assert state.last_remove_requested_generation == 1
     assert admin.remove_calls == 0
-    thread_factory.assert_not_called()
 
 
-def test_deferred_shutdown_callback_runs_after_removal():
-    admin = BlockingAdmin()
-    service = RegistryService(make_config(XXL_JOB_REGISTRY_INTERVAL=1), admin)
-    closed = threading.Event()
-    service.start()
-    assert admin.registry_started.wait(timeout=1)
+def test_public_stop_propagates_cleanup_start_failure_after_local_stop(mocker):
+    service = RegistryService(make_config(), FakeAdmin())
+    state = service._get_process_state()
+    state.generation = 1
+    failed_thread = mocker.Mock()
+    failed_thread.start.side_effect = RuntimeError("cleanup start failed")
+    mocker.patch(
+        "flask_xxljob.registry.registry_service.threading.Thread",
+        return_value=failed_thread,
+    )
 
-    service.stop(remove=True, on_stopped=closed.set)
+    with pytest.raises(RuntimeError, match="cleanup start failed"):
+        service.stop(remove=True)
 
-    assert closed.is_set() is False
-    assert admin.remove_calls == 0
-    admin.registry_release.set()
+    assert state.worker is None
+    assert state.pending_remove is None
+    assert state.active_remove is None
+    assert state.last_remove_requested_generation == 1
+    assert state.last_error is not None
+
+
+def test_remove_completion_identity_guard_preserves_new_active():
+    admin = BlockingRemoveAdmin()
+    service = RegistryService(make_config(), admin)
+    state = service._get_process_state()
+    old = _RemoveOperation(1, threading.Event())
+    new = _RemoveOperation(2, threading.Event())
+    state.active_remove = old
+    state.registered = True
+    executor = threading.Thread(target=service._execute_remove, args=(state, old))
+    executor.start()
     assert admin.remove_started.wait(timeout=1)
-    assert closed.wait(timeout=1)
-    assert admin.remove_calls == 1
+
+    with state.state_lock:
+        state.active_remove = new
+    admin.remove_release.set()
+    executor.join(timeout=1)
+
+    assert state.active_remove is new
+    assert state.registered is True
+    assert state.last_applied_rpc_sequence == 0
+    assert old.done_event.is_set() is True
 
 
-def test_repeated_stop_deregisters_at_most_once():
+def test_remove_failure_is_accepted_ordered_and_preserves_registered():
+    admin = FakeAdmin(remove_success=False)
+    service = RegistryService(make_config(), admin)
+    state = service._get_process_state()
+    operation = _RemoveOperation(1, threading.Event())
+    state.active_remove = operation
+    state.registered = True
+
+    service._execute_remove(state, operation)
+
+    assert state.registered is True
+    assert state.last_registry_success is False
+    assert state.last_applied_rpc_sequence == 1
+    assert operation.done_event.is_set() is True
+
+
+def test_stale_remove_completion_still_clears_own_active_and_finishes():
     admin = FakeAdmin()
-    service = RegistryService(make_config(XXL_JOB_REGISTRY_INTERVAL=3600), admin)
-    service.start()
+    service = RegistryService(make_config(), admin)
+    state = service._get_process_state()
+    operation = _RemoveOperation(1, threading.Event())
+    state.active_remove = operation
+    state.registered = True
+    state.last_applied_rpc_sequence = 1
 
-    service.stop(remove=True)
-    service.stop(remove=True)
+    service._execute_remove(state, operation)
+
+    assert state.active_remove is None
+    assert state.registered is True
+    assert state.last_applied_rpc_sequence == 1
+    assert operation.done_event.is_set() is True
+
+
+def test_sequence_is_allocated_only_after_network_lock_is_acquired():
+    admin = FakeAdmin()
+    service = RegistryService(make_config(), admin)
+    state = service._get_process_state()
+    state.network_lock.acquire()
+    caller = threading.Thread(target=service.register_once_result)
+    caller.start()
+
+    time.sleep(0.02)
+    assert state.rpc_sequence == 0
+    assert admin.registry_calls == 0
+    state.network_lock.release()
+    caller.join(timeout=1)
+
+    assert state.rpc_sequence == 1
+    assert state.last_applied_rpc_sequence == 1
+
+
+def test_equal_sequence_is_rejected_and_only_strictly_newer_is_accepted():
+    service = RegistryService(make_config(), FakeAdmin())
+    state = service._get_process_state()
+    state.last_applied_rpc_sequence = 5
+    state.registered = False
+    state.last_registry_message = "kept"
+    result = CallResult(success=True, msg="new")
+
+    service._commit_one_shot(state, result, 5, remove=False)
+
+    assert state.registered is False
+    assert state.last_registry_message == "kept"
+    assert state.last_applied_rpc_sequence == 5
+
+    service._commit_one_shot(state, result, 6, remove=False)
+    assert state.registered is True
+    assert state.last_registry_message == "new"
+    assert state.last_applied_rpc_sequence == 6
+
+
+def test_newer_failure_prevents_older_success_from_overwriting_snapshot():
+    service = RegistryService(make_config(), FakeAdmin())
+    state = service._get_process_state()
+    newer_failure = CallResult(
+        success=False, error="new failure", error_type="network"
+    )
+    older_success = CallResult(success=True, msg="old success")
+
+    service._commit_one_shot(state, newer_failure, 2, remove=False)
+    service._commit_one_shot(state, older_success, 1, remove=False)
+
+    assert state.registered is False
+    assert state.last_registry_message == "new failure"
+    assert state.last_applied_rpc_sequence == 2
+
+
+def test_network_lock_serializes_worker_registry_and_sync_remove():
+    admin = BlockingRegistryAdmin()
+    service = RegistryService(make_config(), admin)
+    service.start()
+    assert admin.started.wait(timeout=1)
+    result = []
+    caller = threading.Thread(
+        target=lambda: result.append(service.remove_once_result())
+    )
+    caller.start()
+
+    time.sleep(0.02)
+    assert admin.remove_calls == 0
+    admin.release.set()
+    caller.join(timeout=1)
 
     assert admin.remove_calls == 1
+    assert result[0].success is True
+    service.stop()
+    wait_for(lambda: not service._get_process_state().stopping_workers)
 
 
-def test_stop_without_remove_does_not_deregister():
+def test_network_lock_serializes_background_remove_and_sync_register():
+    admin = BlockingRemoveAdmin()
+    service = RegistryService(make_config(), admin)
+    state = service._get_process_state()
+    operation = _RemoveOperation(1, threading.Event())
+    state.active_remove = operation
+    cleanup = threading.Thread(
+        target=service._execute_remove, args=(state, operation)
+    )
+    cleanup.start()
+    assert admin.remove_started.wait(timeout=1)
+    result = []
+    caller = threading.Thread(
+        target=lambda: result.append(service.register_once_result())
+    )
+    caller.start()
+
+    time.sleep(0.02)
+    assert admin.registry_calls == 0
+    admin.remove_release.set()
+    cleanup.join(timeout=1)
+    caller.join(timeout=1)
+
+    assert admin.registry_calls == 1
+    assert result[0].success is True
+    assert state.last_applied_rpc_sequence == 2
+
+
+class PoisonLock:
+    def __enter__(self):
+        raise AssertionError("inherited state lock was acquired")
+
+    def __exit__(self, exc_type, exc, traceback):
+        return False
+
+
+def test_fork_status_and_running_replace_state_without_parent_lock(mocker):
+    service = RegistryService(make_config(), FakeAdmin())
+    parent = service._process_state
+    parent.registered = True
+    parent.generation = 9
+    parent.worker = _RegistryWorkerContext(9, threading.Event())
+    parent.state_lock = PoisonLock()
+    mocker.patch(
+        "flask_xxljob.registry.registry_service.os.getpid",
+        return_value=parent.pid + 1,
+    )
+
+    snapshot = service.status_snapshot()
+
+    child = service._process_state
+    assert child is not parent
+    assert child.pid == parent.pid + 1
+    assert snapshot["registered"] is False
+    assert snapshot["registry_thread_running"] is False
+    assert child.generation == 0
+    assert service.is_running is False
+
+
+@pytest.mark.parametrize("method_name", ["register_once_result", "remove_once_result"])
+def test_fork_disabled_snapshot_uses_blank_child_state(
+    mocker, method_name
+):
+    config = make_config(XXL_JOB_ENABLED=False)
     admin = FakeAdmin()
-    service = RegistryService(make_config(XXL_JOB_REGISTRY_INTERVAL=3600), admin)
-    service.start()
+    service = RegistryService(config, admin)
+    parent = service._process_state
+    parent.registered = True
+    parent.generation = 4
+    parent.state_lock = PoisonLock()
+    mocker.patch(
+        "flask_xxljob.registry.registry_service.os.getpid",
+        return_value=parent.pid + 1,
+    )
 
-    service.stop(remove=False)
-    service.stop(remove=False)
+    result = getattr(service, method_name)()
 
+    child = service._process_state
+    assert child is not parent
+    assert result.error == "Flask-XXLJob is disabled."
+    assert child.registered is False
+    assert child.generation == 0
+    assert child.rpc_sequence == 0
+    assert child.last_applied_rpc_sequence == 0
+    assert child.last_error == result
+    assert admin.registry_calls == admin.remove_calls == 0
+
+
+def test_fork_finalizer_uses_only_blank_child_state(mocker):
+    closed = mocker.Mock()
+    service = RegistryService(make_config(), FakeAdmin(), close_logs=closed)
+    parent = service._process_state
+    inherited_event = mocker.Mock()
+    parent.worker = _RegistryWorkerContext(1, inherited_event)
+    parent.generation = 1
+    parent.state_lock = PoisonLock()
+    mocker.patch(
+        "flask_xxljob.registry.registry_service.os.getpid",
+        return_value=parent.pid + 1,
+    )
+
+    service.shutdown(deregister_on_exit=True)
+
+    child = service._process_state
+    inherited_event.set.assert_not_called()
+    assert child.generation == 0
+    assert child.logs_closed is True
+    closed.assert_called_once_with()
+
+
+def test_finalizer_generation_zero_skips_validation_and_remove(mocker):
+    config = make_config()
+    validate = mocker.patch.object(config, "validate_registry")
+    admin = FakeAdmin()
+    closed = mocker.Mock()
+    service = RegistryService(config, admin, close_logs=closed)
+
+    service.shutdown(deregister_on_exit=True)
+
+    validate.assert_not_called()
+    assert admin.remove_calls == 0
+    closed.assert_called_once_with()
+
+
+def test_sync_registration_does_not_create_finalizer_remove_eligibility(mocker):
+    config = make_config()
+    admin = FakeAdmin()
+    service = RegistryService(config, admin, close_logs=mocker.Mock())
+    service.register_once_result()
+
+    service.shutdown(deregister_on_exit=True)
+
+    assert service._get_process_state().generation == 0
     assert admin.remove_calls == 0
 
 
-def test_remove_failure_is_kept_in_status_snapshot():
-    admin = FailingRemoveAdmin()
-    service = RegistryService(make_config(XXL_JOB_REGISTRY_INTERVAL=3600), admin)
+def test_finalizer_does_not_validate_or_repeat_used_generation(mocker):
+    config = make_config()
+    admin = FakeAdmin()
+    service = RegistryService(config, admin, close_logs=mocker.Mock())
+    state = service._get_process_state()
+    state.generation = 1
+    state.last_remove_requested_generation = 1
+    validate = mocker.patch.object(config, "validate_registry")
+
+    service.shutdown(deregister_on_exit=True)
+
+    validate.assert_not_called()
+    assert admin.remove_calls == 0
+
+
+def test_finalizer_can_request_unused_remove_after_plain_stop(mocker):
+    config = make_config()
+    admin = FakeAdmin()
+    service = RegistryService(config, admin, close_logs=mocker.Mock())
     service.start()
+    wait_for(lambda: admin.registry_calls == 1)
+    state = service._get_process_state()
+    service.stop(remove=False)
+    wait_for(lambda: not state.stopping_workers)
 
-    service.stop(remove=True)
+    service.shutdown(deregister_on_exit=True)
 
-    snapshot = service.status_snapshot()
-    assert snapshot["registered"] is True
-    assert snapshot["last_registry_success"] is False
-    assert snapshot["last_registry_error_type"] == "business"
-    assert snapshot["last_registry_message"] == "remove failed"
+    wait_for(lambda: admin.remove_calls == 1)
+    assert state.last_remove_requested_generation == 1
 
 
-def test_unexpected_remove_exception_is_kept_in_status_snapshot():
-    admin = RaisingRemoveAdmin()
-    service = RegistryService(make_config(XXL_JOB_REGISTRY_INTERVAL=3600), admin)
+def test_finalizer_invalid_remove_config_still_stops_locally(mocker):
+    config = make_config()
+    admin = BlockingRegistryAdmin()
+    closed = mocker.Mock()
+    service = RegistryService(config, admin, close_logs=closed)
     service.start()
+    assert admin.started.wait(timeout=1)
+    state = service._get_process_state()
+    ctx = state.worker
+    config.admin_addresses = []
 
-    service.stop(remove=True)
+    service.shutdown(deregister_on_exit=True)
 
-    snapshot = service.status_snapshot()
-    assert snapshot["registered"] is True
-    assert snapshot["last_registry_success"] is False
-    assert snapshot["last_registry_error_type"] == "RuntimeError"
-    assert snapshot["last_registry_message"] == (
-        "Unexpected error during XXL-JOB executor removal."
+    assert state.worker is None
+    assert state.stopping_workers[1] is ctx
+    assert ctx.stop_event.is_set() is True
+    assert admin.remove_calls == 0
+    admin.release.set()
+    wait_for(lambda: not state.stopping_workers)
+    closed.assert_called_once_with()
+
+
+def test_finalizer_swallows_cleanup_start_failure_and_closes_logs(mocker):
+    closed = mocker.Mock()
+    service = RegistryService(make_config(), FakeAdmin(), close_logs=closed)
+    state = service._get_process_state()
+    state.generation = 1
+    failed_thread = mocker.Mock()
+    failed_thread.start.side_effect = RuntimeError("cleanup start failed")
+    mocker.patch(
+        "flask_xxljob.registry.registry_service.threading.Thread",
+        return_value=failed_thread,
     )
+
+    service.shutdown(deregister_on_exit=True)
+
+    assert state.last_remove_requested_generation == 1
+    assert state.pending_remove is None
+    assert state.active_remove is None
+    assert state.logs_closed is True
+    closed.assert_called_once_with()
+
+
+def test_logs_close_once_immediately_when_idle(mocker):
+    closed = mocker.Mock()
+    service = RegistryService(make_config(), FakeAdmin(), close_logs=closed)
+
+    service.shutdown(deregister_on_exit=False)
+    service.shutdown(deregister_on_exit=False)
+
+    closed.assert_called_once_with()
+    assert service._get_process_state().logs_closed is True
+
+
+def test_logs_close_only_after_last_background_worker_exits(mocker):
+    admin = BlockingRegistryAdmin()
+    closed = mocker.Mock()
+    service = RegistryService(make_config(), admin, close_logs=closed)
+    service.start()
+    assert admin.started.wait(timeout=1)
+    state = service._get_process_state()
+
+    service.shutdown(deregister_on_exit=False)
+
+    closed.assert_not_called()
+    admin.release.set()
+    wait_for(lambda: state.logs_closed)
+    closed.assert_called_once_with()
+
+
+def test_logs_close_only_after_background_remove_actor_exits(mocker):
+    admin = BlockingRemoveAdmin()
+    closed = mocker.Mock()
+    service = RegistryService(make_config(), admin, close_logs=closed)
+    state = service._get_process_state()
+    state.generation = 1
+
+    service.shutdown(deregister_on_exit=True)
+
+    assert admin.remove_started.wait(timeout=1)
+    closed.assert_not_called()
+    admin.remove_release.set()
+    wait_for(lambda: state.logs_closed)
+    closed.assert_called_once_with()

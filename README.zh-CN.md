@@ -91,9 +91,8 @@ with app.app_context():
 | `XXL_JOB_EXECUTOR_APP_NAME` | `"flask-xxljob-executor"` | 执行器应用名称。 |
 | `XXL_JOB_EXECUTOR_ADDRESS` | `""` | 执行器服务基础地址（协议/主机/端口）；会自动附加 `XXL_JOB_ROUTE_PREFIX`。 |
 | `XXL_JOB_ROUTE_PREFIX` | `""` | 执行器接口的 URL 前缀；同时会附加到 `XXL_JOB_EXECUTOR_ADDRESS`。 |
-| `XXL_JOB_AUTO_REGISTER` | `True` | 是否启动自动注册续约。 |
-| `XXL_JOB_AUTO_REGISTER_ON_INIT` | `True` | 启用自动注册时，是否在 `init_app()` 阶段启动注册线程。 |
-| `XXL_JOB_DEREGISTER_ON_EXIT` | `True` | Runtime 自动关闭时是否注销执行器。 |
+| `XXL_JOB_AUTO_REGISTER` | `True` | 与 `ENABLED=True` 同时成立时，初始化后调用 `start_registry()`。 |
+| `XXL_JOB_DEREGISTER_ON_EXIT` | `False` | Runtime 关闭时是否 best-effort 后台注销。 |
 | `XXL_JOB_REGISTRY_INTERVAL` | `30` | 注册续约间隔（秒）。 |
 | `XXL_JOB_HTTP_CONNECT_TIMEOUT` | `3` | HTTP 连接超时（秒）。 |
 | `XXL_JOB_HTTP_READ_TIMEOUT` | `5` | HTTP 读取超时（秒）。 |
@@ -123,11 +122,16 @@ with app.app_context():
 `XXL_JOB_LOG_ENABLED` 时默认同时写入 `./logs/flask-xxljob.log` 和控制台；容器环境
 建议关闭文件目标并保留默认控制台目标。详见[日志指南](docs/logging.zh-CN.md)。
 
-使用 Gunicorn preload，或 Flask Application Factory 同时供 Celery 使用时，可设置
-`XXL_JOB_AUTO_REGISTER_ON_INIT=False`，并只在需要续约执行器的进程中调用
-`start_registry(app)`。多个 Worker 共享一个执行器地址时，建议设置
-`XXL_JOB_DEREGISTER_ON_EXIT=False`，避免任一 Worker 退出时删除共享身份。详见
-[部署](docs/deployment.zh-CN.md)。
+只有 `XXL_JOB_ENABLED` 与 `XXL_JOB_AUTO_REGISTER` 同时为 `True` 时，`init_app()`
+才会启动 Registry。Gunicorn preload 或 Flask Application Factory 与 Celery 共用时，
+设置 `XXL_JOB_AUTO_REGISTER=False`，再只在需要续约的业务进程中显式调用
+`start_registry(app)`。每个 Gunicorn Worker 仍拥有独立的进程级 Registry lifecycle；
+本版本不提供 Leader 选举或跨进程锁。详见[部署](docs/deployment.zh-CN.md)。
+
+`stop_registry()` 现在会立即停止本地续约，并保留最近的 `registered` 快照。
+`stop_registry(remove=True)` 为该生命周期申请一次 best-effort 后台注销；需要同步
+`CallResult` 时，先调用 `stop_registry()`，再调用 `remove_executor()`。退出注销默认
+关闭，避免单个 Worker 退出时删除共享执行器身份。
 
 ## 命令行
 
@@ -143,7 +147,8 @@ flask --app "project:create_app" xxljob status
 （Python 3.8-3.14 x Flask 1/2/3）已在 `.github/workflows/ci.yml` 中配置。
 本版本已在 Python 3.12.13 与 Flask 3.1.3
 上完成本地验证；其余组合已在 CI 中配置但未在本地执行。请在你自己的环境中
-运行测试后再声明特定组合可用。
+运行测试后再声明特定组合可用。0.4.0 最终本地测试结果为 454 项通过、2 项可选
+官方 Admin 测试跳过，行覆盖率 93.72%。
 
 当同一个 `FlaskXXLJob` 实例初始化了多个 Flask 应用时，请在应用上下文之外调用回调、注册、状态与生命周期辅助方法时显式传入 `app=`。只有恰好初始化了一个应用时才可省略；在初始化前注册的 `on_*` 装饰器仍会作为默认处理函数注入其后初始化的每个应用。
 

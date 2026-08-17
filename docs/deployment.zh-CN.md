@@ -2,150 +2,118 @@
 
 # 部署
 
-## 完整使用流程
+## 两条互不依赖的路径
+
+初始化 HTTP 执行器协议并不要求 Registry lifecycle 正在运行。
 
 ```mermaid
 flowchart TD
-    A["创建 Flask 应用"] --> B["设置 XXL_JOB_* 配置"]
-    B --> C["创建 FlaskXXLJob 实例"]
-    C --> D["注册命名 Handler<br/>@xxl_job.on_run('demoJobHandler')"]
-    D --> E["调用 xxl_job.init_app(app)"]
-
-    E --> F["校验配置与执行器路由冲突"]
-    F -->|失败| G["抛出初始化异常<br/>应用停止启动"]
-    F -->|成功| H["创建应用独立 Runtime<br/>客户端、Registry、日志、回调表"]
-    H --> I["注册五个执行器接口<br/>beat / idleBeat / run / kill / log"]
-
-    I --> J{"是否自动启动 Registry？<br/>ENABLED && AUTO_REGISTER<br/>&& AUTO_REGISTER_ON_INIT"}
-    J -->|是| K["启动当前进程的 daemon Registry 线程"]
-    J -->|否| L["仅完成初始化<br/>等待显式 start_registry(app)"]
-    L --> M["业务进程显式调用 start_registry(app)"]
-    M --> K
-
-    K --> N["立即向 Admin 注册"]
-    N --> O["按 REGISTRY_INTERVAL 周期续约"]
-
-    O --> P["XXL-JOB Admin 发起 /run 请求"]
-    P --> Q["校验 Token、请求大小和字段类型"]
-    Q -->|失败| R["HTTP 200<br/>XXL-JOB code=500"]
-    Q -->|成功| S["解析 executorHandler"]
-    S --> T{"精确匹配已注册 Handler？"}
-    T -->|否| U["Unsupported JobHandler<br/>HTTP 200，code=500"]
-    T -->|是| V["调用对应业务函数"]
-
-    V --> W{"执行方式"}
-    W -->|同步任务| X["返回 XXLJobResponse"]
-    W -->|Celery/异步任务| Y["提交任务并返回接收成功"]
-    Y --> Z["任务完成后主动调用<br/>callback_success / callback_failure"]
-
-    H -. "检测到 PID 变化" .-> AA["丢弃父进程 Thread、Event、Lock 和状态"]
-    AA --> AB["重建当前进程状态"]
-    AB --> K
-
-    H --> AC["应用退出或 Runtime 被回收"]
-    AC --> AD["停止当前进程续约线程"]
-    AD --> AE{"DEREGISTER_ON_EXIT<br/>且已注册或线程运行？"}
-    AE -->|是| AF["调用 registryRemove 注销"]
-    AE -->|否| AG["保留 Admin 端共享执行器身份"]
+    A["init_app()"] --> B["检查已删除配置与已提供字段的值"]
+    B --> C["创建 Runtime 并安装 finalizer"]
+    C --> D["注册 beat / idleBeat / run / kill / log"]
+    D --> E["HTTP 执行器协议可用"]
 ```
+
+Registry 是另一条独立的进程级路径：
+
+```mermaid
+flowchart TD
+    A["init_app()"] --> B{"ENABLED 且 AUTO_REGISTER？"}
+    B -->|"是"| C["公开 start_registry(app)"]
+    B -->|"否"| D["等待业务显式 start_registry(app)"]
+    D --> C
+    C --> E["同步校验完整 Registry 配置"]
+    E --> F["PID guard 与当前 ProcessState"]
+    F --> G["准备候选 generation 和 Worker"]
+    G --> H["Thread.start()"]
+    H --> I["提交 generation 与 Worker ownership"]
+    I --> J["立即返回"]
+    I --> K["Worker：立即 registry"]
+    K --> L["stop_event.wait(REGISTRY_INTERVAL)"]
+    L --> K
+    L --> M["stop_registry()：分离、唤醒并返回"]
+```
+
+五个执行器端点、Handler 分发、任务执行与 Callback API 都没有变化。Registry 仍然
+在 Worker 启动后立即注册，随后每隔 `REGISTRY_INTERVAL` 续约。
+
+## 生命周期停止
+
+`stop_registry()` 是本地非阻塞停止：不 join、不访问 Admin，也不修改最近的
+`registered` 快照。即使 Worker 已经退出，稍后调用 `stop_registry(remove=True)`
+仍可消耗同一 lifecycle generation 尚未使用的一次自动 Remove 资格。
+
+`stop_registry(remove=True)` 在后台执行注销。Pending Remove 可以被更新的成功 start
+取消；Active Remove 不强制取消，新 Worker 会在后台等待它结束。当前进程中的续约、
+后台注销、`register_executor()` 与 `remove_executor()` 共用一个网络锁，绝不并发。
+
+需要确定性注销及其 `CallResult` 时使用：
+
+```python
+xxl_job.stop_registry(app)
+result = xxl_job.remove_executor(app)
+```
+
+不要针对同一次意图再同时使用 `stop_registry(remove=True)`。
 
 ## 执行器地址
 
-将 `XXL_JOB_EXECUTOR_ADDRESS` 设置为 XXL-JOB Admin 能够访问的 URL。在容器化或多主机部署中，这通常是服务地址，而不是 `127.0.0.1`。地址只需填写服务基础 URL；加载配置时会自动附加 `XXL_JOB_ROUTE_PREFIX`。
-
-## 长任务的超时
-
-任务超时在 XXL-JOB Admin 按任务配置（单位：秒），不属于 Flask-XXLJob。对接
-Celery 等异步 worker 时，请将该超时调到大于最长执行时间，并在 worker 结束后调用
-`callback_success` / `callback_failure`。详见[任务结果回调](callback.zh-CN.md)。
-
-## 自动 Registry 生命周期
-
-当 `XXL_JOB_ENABLED`、`XXL_JOB_AUTO_REGISTER` 与
-`XXL_JOB_AUTO_REGISTER_ON_INIT` 均为 `True` 时，`init_app()` 会启动守护注册线程。
-后台线程会立即注册，之后按配置间隔续约；注册失败只记录日志，不会导致应用崩溃。
-`start_registry(app)` 非阻塞且幂等。
-
-应用构造与 Registry 生命周期属于不同进程阶段时，设置
-`XXL_JOB_AUTO_REGISTER_ON_INIT=False`：
-
-```python
-app.config.update(
-    XXL_JOB_AUTO_REGISTER=True,
-    XXL_JOB_AUTO_REGISTER_ON_INIT=False,
-)
-xxl_job.init_app(app)
-
-# 仅在当前进程应拥有续约线程后调用。
-xxl_job.start_registry(app)
-```
-
-扩展不会检查 `app.debug`、`WERKZEUG_RUN_MAIN`、Gunicorn 或 Celery；由宿主决定
-哪个进程调用 `start_registry()`。
+`XXL_JOB_EXECUTOR_ADDRESS` 必须是 Admin 能访问的 URL。容器或多主机部署通常应填
+服务地址而不是 `127.0.0.1`。只填写基础 URL；加载配置时会自动附加
+`XXL_JOB_ROUTE_PREFIX`。
 
 ## Gunicorn preload 与 fork 安全
 
-使用 Gunicorn `--preload` 时应延迟启动，并在 fork 后的 Worker 初始化阶段调用
-`start_registry(app)`，不要在 preload master 中启动。Flask 应用对象跨 fork 继承时，
-扩展会在接触继承锁之前识别 PID 变化，并重建本进程的线程、Event、锁、关闭标记与
-Registry 状态，不会 join 父进程线程。
-
-这只保证每个 Worker 的进程内状态正确，不会选举唯一 Registry Leader。每个调用
-`start_registry()` 的 Worker 都会拥有一个续约线程。
-
-## 共享地址与多 Worker
-
-使用不同执行器地址的 Worker 表示不同执行器实例，可保持
-`XXL_JOB_DEREGISTER_ON_EXIT=True`。使用相同应用名和地址的 Worker 共享一个
-Admin 侧身份，此时建议：
+应用可能在 fork 前导入时，使用显式 Registry 启动：
 
 ```python
-app.config.update(
-    XXL_JOB_DEREGISTER_ON_EXIT=False,
-)
+app.config["XXL_JOB_AUTO_REGISTER"] = False
+xxl_job.init_app(app)
+
+# 只在确实负责 Registry 续约的 Worker/进程中调用。
+xxl_job.start_registry(app)
 ```
 
-Runtime 清理仍会停止各 Worker 的本地线程，但任一 Worker 退出不会删除共享身份。
-该配置只控制自动清理：显式 `stop_registry()` 默认仍会注销，
-`stop_registry(remove=False)` 则只停止续约。
+所有本地状态访问都会先执行 PID guard。子进程不会获取父进程 Lock、读取父 Worker、
+join 父 Thread 或设置父 Event，而是直接替换整个 Registry ProcessState。Runtime、
+Handler、Callback、路由、纯配置与无进程资源的 AdminClient 继续保留。
 
-## Flask 与 Celery 共用 Application Factory
+这只是进程安全，不是 Leader 选举。每个调用 `start_registry()` 的 Gunicorn Worker
+仍拥有自己的进程级 Registry Worker；Flask-XXLJob 不增加跨进程锁，也不会自动挑选
+唯一 Worker。
 
-两类进程都初始化扩展，但只在对外提供执行器接口的 Web 进程中启动 Registry：
+## Flask 与 Celery 共用工厂
+
+两类进程都初始化协议能力，但只在真正负责续约的进程启动 Registry：
 
 ```python
 def create_app(start_executor_registry=False):
     app = Flask(__name__)
-    app.config["XXL_JOB_AUTO_REGISTER_ON_INIT"] = False
+    app.config["XXL_JOB_AUTO_REGISTER"] = False
     xxl_job.init_app(app)
     if start_executor_registry:
         xxl_job.start_registry(app)
     return app
-
-
-web_app = create_app(start_executor_registry=True)
-# Celery、CLI 与测试直接调用 create_app()，不启动 Registry。
 ```
 
-Flask-XXLJob 不检测 Celery，也不创建 Celery 任务；生命周期归属由宿主明确决定。
+Flask-XXLJob 不检测 Celery，也不创建 Celery 任务。
 
-容器中的插件诊断日志建议仅输出到控制台，由平台统一采集、保留与轮转：
+## 退出注销与共享地址
 
-```python
-app.config.update(
-    XXL_JOB_LOG_ENABLED=True,
-    XXL_JOB_LOG_FILE_ENABLED=False,
-    XXL_JOB_LOG_CONSOLE_ENABLED=True,
-)
-```
+`XXL_JOB_DEREGISTER_ON_EXIT=False` 是默认值。finalizer 会停止各进程的本地续约，
+但不会删除共享的 Admin 身份。只有明确满足“一个 Python 进程独占一个执行器地址”
+时才应开启。退出注销是 best-effort，finalizer 永不等待 Worker、Event、cleanup actor
+或 Admin RPC；解释器立即退出、`SIGKILL` 与容器强制终止都可能导致注销未完成。
 
-标准 `RotatingFileHandler` 只管理当前进程，不能保证 Gunicorn 等多个工作进程共享
-同一文件时安全。请改用独立文件、宿主 Logging 或控制台聚合。详见[日志](logging.zh-CN.md)。
+退出路径遵守同一套 lifecycle Remove 资格：generation 为零时不注销，同一代最多自动
+尝试一次。同步 `register_executor()` 不创建 lifecycle，因此退出时不会自动配对；
+需要时请显式调用 `remove_executor()`。
 
-## 单次注册
+## 任务超时与日志
 
-你可以关闭自动续约，改为通过 CLI 单次注册：
+任务超时仍由 XXL-JOB Admin 的任务配置决定，不属于 Registry 设置。Celery 等异步
+任务结束时，业务应调用 `callback_success()` 或 `callback_failure()`。
 
-```bash
-flask --app "project:create_app" xxljob register
-```
+容器环境建议只使用控制台托管日志。日志 Handler 会等待 Registry 后台收尾完成，并
+且最多关闭一次。标准轮转文件 Handler 只保证进程内管理，不能使多个 Worker 共享同一
+日志文件变得安全。

@@ -9,31 +9,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.4.0] - 2026-08-16
 
-### Added
-
-- Added `XXL_JOB_AUTO_REGISTER_ON_INIT` to separate extension initialization
-  from registry-thread startup, while preserving automatic startup by default.
-- Added `XXL_JOB_DEREGISTER_ON_EXIT` to control whether automatic Runtime
-  cleanup removes the executor registration.
-- Added the keyword-only `remove` argument to `stop_registry()`; it defaults to
-  `True`, while `remove=False` stops only the current process's renewal thread.
-
 ### Changed
 
-- `RegistryService` and `XXLJobRuntime` now rebuild process-local locks, thread,
-  event and lifecycle status after a PID change, making inherited application
-  objects safe to use after `fork()`.
-- A registry thread start failure now clears the failed thread reference so a
-  later `start_registry()` call can retry immediately.
-- The build backend is capped below Hatchling 1.32 so release artifacts remain
-  on Core Metadata 2.4, which the current Twine release validates.
+- Consolidated PID isolation, lifecycle generations, current/stopping Worker
+  ownership, Pending/Active Remove, cleanup scheduling, RPC ordering and final
+  log closure in `RegistryService`.
+- Automatic startup now has one condition (`XXL_JOB_ENABLED &&
+  XXL_JOB_AUTO_REGISTER`) and calls the public `start_registry()` path.
+- `stop_registry(remove=False)` is now the default: it detaches and wakes local
+  renewal immediately without joining, contacting Admin, or changing the
+  latest `registered` snapshot. `remove=True` schedules one background Remove
+  for that lifecycle generation.
+- All real Registry RPCs in one process share one network lock. Completions use
+  strictly increasing sequences so a late older success or failure cannot
+  overwrite newer accepted state.
+- PID changes replace only blank process-specific Registry state before any
+  inherited Lock, Thread, or Event is touched; application Runtime, handlers,
+  callbacks, routes, configuration and the resource-free AdminClient remain.
+- Runtime finalization is non-blocking. Exit removal is best-effort, uses the
+  same generation eligibility and scheduler, and managed logs close once after
+  all background cleanup is idle.
+- The build backend remains capped below Hatchling 1.32 so current Twine can
+  validate Core Metadata 2.4 artifacts.
+
+### Configuration
+
+- Removed the unreleased `XXL_JOB_AUTO_REGISTER_ON_INIT` key. Its presence is a
+  synchronous migration error, including when the extension is disabled.
+- Changed `XXL_JOB_DEREGISTER_ON_EXIT` to default to `False` so one worker does
+  not automatically remove a shared executor identity.
+- Split initialization field validation from full Registry completeness.
+  `AUTO_REGISTER=False` can initialize the HTTP protocol without Admin Registry
+  settings; enabled Registry operations validate before threads or RPCs.
+- `XXL_JOB_ENABLED=False` short-circuits Registry behavior. Synchronous one-shot
+  APIs return a safe local disabled `CallResult` without allocating an RPC
+  sequence or changing lifecycle state.
 
 ### Compatibility
 
-- Existing applications keep their previous behavior because both new
-  lifecycle settings default to `True`; no configuration migration is required.
-- Multi-worker deployments sharing one executor address can disable automatic
-  exit deregistration without introducing cross-process coordination.
+- The task protocol, Handler and Callback APIs, five executor endpoints, Admin
+  Registry protocol, renewal interval, `XXLJobStatus` fields, public imports,
+  Python 3.8-3.14 and Flask 1.x-3.x support remain unchanged.
+- Multi-worker topology remains process-per-Registry-Worker. No leader election,
+  cross-process lock, signal handler, or deployment detection was added.
+
+### Testing
+
+- The final local suite completed with 454 passed, 2 optional official-Admin
+  tests skipped, and 93.72% line coverage. It covers PID/disabled ordering,
+  generation ownership, Remove races, cleanup failures, strict completion
+  sequences, non-blocking finalization and one-time log closure.
 
 ## [0.3.4] - 2026-07-25
 

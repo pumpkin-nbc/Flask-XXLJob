@@ -14,9 +14,8 @@
 | `XXL_JOB_EXECUTOR_APP_NAME` | `"flask-xxljob-executor"` | 执行器应用名称。 |
 | `XXL_JOB_EXECUTOR_ADDRESS` | `""` | 执行器服务基础地址（协议/主机/端口）；会自动附加 `XXL_JOB_ROUTE_PREFIX`。 |
 | `XXL_JOB_ROUTE_PREFIX` | `""` | 执行器接口的 URL 前缀；同时会附加到 `XXL_JOB_EXECUTOR_ADDRESS`。 |
-| `XXL_JOB_AUTO_REGISTER` | `True` | 是否启动自动注册续约。 |
-| `XXL_JOB_AUTO_REGISTER_ON_INIT` | `True` | 启用自动注册时，是否在 `init_app()` 阶段启动续约。 |
-| `XXL_JOB_DEREGISTER_ON_EXIT` | `True` | Runtime 自动关闭时是否注销执行器。 |
+| `XXL_JOB_AUTO_REGISTER` | `True` | 与 `ENABLED=True` 同时成立时，在 `init_app()` 后启动 Registry。 |
+| `XXL_JOB_DEREGISTER_ON_EXIT` | `False` | Runtime 关闭时是否申请 best-effort 后台注销。 |
 | `XXL_JOB_REGISTRY_INTERVAL` | `30` | 注册续约间隔（秒）。 |
 | `XXL_JOB_HTTP_CONNECT_TIMEOUT` | `3` | HTTP 连接超时（秒）。 |
 | `XXL_JOB_HTTP_READ_TIMEOUT` | `5` | HTTP 读取超时（秒）。 |
@@ -59,33 +58,43 @@ app.config.update(
     XXL_JOB_EXECUTOR_APP_NAME="project-executor",
     XXL_JOB_EXECUTOR_ADDRESS="http://127.0.0.1:5001",
     XXL_JOB_AUTO_REGISTER=True,
-    XXL_JOB_AUTO_REGISTER_ON_INIT=True,
-    XXL_JOB_DEREGISTER_ON_EXIT=True,
+    XXL_JOB_DEREGISTER_ON_EXIT=False,
     XXL_JOB_REGISTRY_INTERVAL=30,
 )
 ```
 
 ## Registry 生命周期
 
-`XXL_JOB_AUTO_REGISTER` 控制是否使用自动注册续约，
-`XXL_JOB_AUTO_REGISTER_ON_INIT` 控制该生命周期何时启动。
+唯一自动启动条件是 `XXL_JOB_ENABLED and XXL_JOB_AUTO_REGISTER`。条件成立时，
+`init_app()` 会先完成 Runtime、五个 HTTP 路由和 finalizer 初始化，再调用公开
+`start_registry(app)`。`AUTO_REGISTER=False` 时只初始化执行器协议能力，业务可稍后
+显式启动 Registry。
 
-| `AUTO_REGISTER` | `AUTO_REGISTER_ON_INIT` | `init_app()` 行为 |
-| --- | --- | --- |
-| `True` | `True` | 启动后台注册线程。 |
-| `True` | `False` | 只初始化，等待 `start_registry(app)`。 |
-| `False` | `True` | 不自动启动。 |
-| `False` | `False` | 不自动启动。 |
+`stop_registry()` 默认只做本地停止：唤醒并分离当前续约 Worker，不 join、不访问
+Admin，也不修改 `registered`。`stop_registry(remove=True)` 会同步校验 Registry
+配置，并为最近一个非零 lifecycle generation 至多申请一次后台 `registryRemove`。
+需要确定性结果时，先调用 `stop_registry()`，再调用 `remove_executor()`。
 
-`XXL_JOB_DEREGISTER_ON_EXIT` 只影响 Runtime 自动清理。显式调用
-`stop_registry()` 默认仍会注销；使用 `stop_registry(remove=False)` 可只停止续约，
-不删除共享的执行器身份。
+退出注销默认关闭。显式开启后仍是非阻塞 best-effort；解释器立即退出、`SIGKILL`
+或容器强制终止都可能使其无法完成。
 
 ## 校验
 
-配置在 `init_app()` 时校验。类型错误会抛出 `XXLJobConfigError`。`XXL_JOB_EXECUTOR_APP_NAME`、至少一个 `XXL_JOB_ADMIN_ADDRESSES` 条目以及 `XXL_JOB_EXECUTOR_ADDRESS` 仅在启用 `XXL_JOB_AUTO_REGISTER` 时才是必填项，因此仅做协议接入而不注册的部署可以省略它们。提供 Admin/执行器地址时必须使用 `http` 或 `https` 方案，包含主机与合法端口，同时允许上下文路径。Admin 与执行器地址在加载时会被规范化（去除首尾空格与多余尾部斜杠，同时保留上下文路径与顺序）。设置了 `XXL_JOB_ROUTE_PREFIX` 时会始终附加到 `XXL_JOB_EXECUTOR_ADDRESS`；请勿在执行器地址中再手写该前缀。只含空白的 Access Token 会被规范化为空（无 Token 模式），非空 Token 保持原值。校验错误信息会指明出错的配置项、其收到的类型以及期望格式。错误配置绝不会被静默忽略。
+校验分三层：首先始终检查已经删除的配置键，即使 `XXL_JOB_ENABLED=False` 也不
+跳过；随后在 `init_app()` 执行现有字段类型和值校验；最后仅在 enabled 状态真正调用
+`start_registry()`、`register_executor()`、`remove_executor()` 或
+`stop_registry(remove=True)` 前校验完整 Registry 配置。因此
+`AUTO_REGISTER=False` 的纯协议初始化可以不提供 Admin 与执行器 Registry 配置。
+提供 Admin/执行器地址时必须使用 `http` 或 `https` 方案，包含主机与合法端口，同时
+允许上下文路径。地址会在加载时规范化，`XXL_JOB_ROUTE_PREFIX` 会始终附加到执行器
+地址。错误配置绝不会被静默忽略。
 
 所有布尔配置只接受真正的布尔值。等级、编码、轮转值与日志格式均在初始化
 阶段校验；格式会使用模拟 `LogRecord` 实际格式化一次，因此未知字段会在应用启动前
 失败。托管日志关闭或两个输出目标都关闭时，扩展不会覆盖 Runtime Logger 的等级和
 传播设置，宿主可以自行配置 `flask_xxljob` Logger。详见[日志](logging.zh-CN.md)。
+
+`XXL_JOB_ENABLED=False` 时，Registry API 会在完整校验、线程、Remove、网络锁、RPC
+与 sequence 分配之前短路。两个同步单次 API 返回
+`error="Flask-XXLJob is disabled."` 的配置失败 `CallResult`，只更新当前进程的安全
+本地失败快照，并保持 `registered` 不变。

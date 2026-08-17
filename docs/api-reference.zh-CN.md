@@ -58,6 +58,10 @@ result = xxl_job.register_executor(app)   # CallResult
 result = xxl_job.remove_executor(app)     # CallResult
 ```
 
+二者都是同步单次 Admin 操作，共用当前进程的 Registry 网络锁，但不会启动或停止
+lifecycle、推进 generation 或消耗自动 Remove 资格。调用失败时保留原有
+`registered` 快照；扩展 disabled 时返回本地配置失败 `CallResult`，不执行 Admin RPC。
+
 ### 任务结果回调
 
 ```python
@@ -75,14 +79,27 @@ xxl_job.callback_many(callbacks, app=None)   # CallbackRequest 或 dict 的列�
 ```python
 status = xxl_job.get_status(app)   # XXLJobStatus
 xxl_job.start_registry(app)
-xxl_job.stop_registry(app, remove=True)
-xxl_job.stop_registry(app, remove=False)  # 停止续约，保留共享身份
+xxl_job.stop_registry(app)                  # 本地停止，立即返回
+xxl_job.stop_registry(app, remove=True)     # 增加一次后台注销
 ```
 
-`start_registry()` 为当前进程启动一个守护续约线程，非阻塞且幂等。
-`stop_registry()` 的 `remove` 是仅限关键字参数，默认仍会注销。
-`XXL_JOB_DEREGISTER_ON_EXIT` 只控制 Runtime 自动清理，不改变显式停止调用。
-Registry 状态属于当前进程，PID 变化后会重置。
+`start_registry()` 会同步校验完整 Registry 配置，为当前进程至多建立一个有效的
+daemon 续约 Worker，并在首次 Admin 调用完成前返回。`stop_registry()` 的 `remove`
+是仅限关键字参数，默认 `False`：它立即分离并唤醒 Worker，不 join、不访问 Admin，
+并保留最近的 `registered` 快照。因此 `registry_thread_running=False` 与
+`registered=True` 可以同时成立。
+
+`stop_registry(remove=True)` 先校验配置，再完成同样的本地停止，并为该 lifecycle
+generation 至多排队一次后台 `registryRemove`。需要确定性同步结果时使用：
+
+```python
+xxl_job.stop_registry(app)
+result = xxl_job.remove_executor(app)
+```
+
+全部 Registry 状态都属于当前进程。所有本地读取先检查 PID；fork 子进程会获得空白
+锁、Worker/Remove ownership、sequence 和快照，且不获取父进程锁。状态查询不访问
+Admin，也不创建线程。正常续约仍是立即注册，再按 `REGISTRY_INTERVAL` 等待。
 
 ## 请求模型
 

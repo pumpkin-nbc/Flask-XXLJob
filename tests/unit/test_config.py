@@ -21,8 +21,7 @@ def base_mapping(**overrides):
 def test_defaults_applied():
     config = XXLJobConfig.from_mapping(base_mapping())
     assert config.auto_register is True
-    assert config.auto_register_on_init is True
-    assert config.deregister_on_exit is True
+    assert config.deregister_on_exit is False
     assert config.registry_interval == 30
     assert config.http_connect_timeout == 3
     assert config.http_read_timeout == 5
@@ -42,14 +41,46 @@ def test_defaults_applied():
     assert config.log_propagate is False
 
 
-@pytest.mark.parametrize(
-    "key",
-    ["XXL_JOB_AUTO_REGISTER_ON_INIT", "XXL_JOB_DEREGISTER_ON_EXIT"],
-)
 @pytest.mark.parametrize("value", [None, 0, 1, "true", [], {}])
-def test_registry_lifecycle_flags_require_real_booleans(key, value):
-    with pytest.raises(XXLJobConfigError, match=key):
-        XXLJobConfig.from_mapping(base_mapping(**{key: value}))
+def test_deregister_on_exit_requires_real_boolean(value):
+    with pytest.raises(XXLJobConfigError, match="XXL_JOB_DEREGISTER_ON_EXIT"):
+        XXLJobConfig.from_mapping(
+            base_mapping(XXL_JOB_DEREGISTER_ON_EXIT=value)
+        )
+
+
+def test_removed_auto_register_on_init_false_has_exact_migration_help():
+    with pytest.raises(XXLJobConfigError) as raised:
+        XXLJobConfig.from_mapping(
+            base_mapping(XXL_JOB_AUTO_REGISTER_ON_INIT=False)
+        )
+    assert str(raised.value) == (
+        "XXL_JOB_AUTO_REGISTER_ON_INIT 已删除。\n\n"
+        "如需保持手动 Registry 启动，请设置：\n\n"
+        "XXL_JOB_AUTO_REGISTER=False\n\n"
+        "然后在需要的生命周期显式调用：\n\n"
+        "start_registry()"
+    )
+
+
+def test_removed_auto_register_on_init_true_has_exact_migration_help():
+    with pytest.raises(XXLJobConfigError) as raised:
+        XXLJobConfig.from_mapping(
+            base_mapping(XXL_JOB_AUTO_REGISTER_ON_INIT=True)
+        )
+    assert str(raised.value) == (
+        "XXL_JOB_AUTO_REGISTER_ON_INIT 已删除。\n\n"
+        "请删除该配置，并保留：\n\n"
+        "XXL_JOB_AUTO_REGISTER=True"
+    )
+
+
+@pytest.mark.parametrize("value", [None, 0, 1, "false", [], {}])
+def test_removed_auto_register_on_init_other_values_always_raise(value):
+    with pytest.raises(XXLJobConfigError, match="已删除"):
+        XXLJobConfig.from_mapping(
+            base_mapping(XXL_JOB_AUTO_REGISTER_ON_INIT=value)
+        )
 
 
 def test_log_level_is_case_insensitive():
@@ -58,13 +89,19 @@ def test_log_level_is_case_insensitive():
 
 
 def test_missing_admin_addresses_raises():
+    config = XXLJobConfig.from_mapping(
+        base_mapping(XXL_JOB_ADMIN_ADDRESSES=[])
+    )
     with pytest.raises(XXLJobConfigError):
-        XXLJobConfig.from_mapping(base_mapping(XXL_JOB_ADMIN_ADDRESSES=[]))
+        config.validate_registry()
 
 
 def test_missing_app_name_raises():
+    config = XXLJobConfig.from_mapping(
+        base_mapping(XXL_JOB_EXECUTOR_APP_NAME="")
+    )
     with pytest.raises(XXLJobConfigError):
-        XXLJobConfig.from_mapping(base_mapping(XXL_JOB_EXECUTOR_APP_NAME=""))
+        config.validate_registry()
 
 
 def test_wrong_type_raises():
@@ -107,8 +144,28 @@ def test_auto_register_off_relaxes_admin_requirement():
 
 
 def test_missing_executor_address_raises_when_auto_register():
+    config = XXLJobConfig.from_mapping(
+        base_mapping(XXL_JOB_EXECUTOR_ADDRESS="")
+    )
     with pytest.raises(XXLJobConfigError):
-        XXLJobConfig.from_mapping(base_mapping(XXL_JOB_EXECUTOR_ADDRESS=""))
+        config.validate_registry()
+
+
+@pytest.mark.parametrize(
+    "attribute,value",
+    [
+        ("registry_interval", 0),
+        ("http_connect_timeout", 0),
+        ("http_read_timeout", "5"),
+        ("admin_retry_count", -1),
+        ("admin_retry_backoff", -0.1),
+    ],
+)
+def test_validate_registry_rechecks_mutable_numeric_fields(attribute, value):
+    config = XXLJobConfig.from_mapping(base_mapping())
+    setattr(config, attribute, value)
+    with pytest.raises(XXLJobConfigError):
+        config.validate_registry()
 
 
 def test_bad_admin_url_scheme_raises():

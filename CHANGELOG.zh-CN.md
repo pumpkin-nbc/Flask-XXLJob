@@ -9,26 +9,46 @@
 
 ## [0.4.0] - 2026-08-16
 
-### 新增
-
-- 新增 `XXL_JOB_AUTO_REGISTER_ON_INIT`，将扩展初始化与注册线程启动分离，同时
-  默认仍保持初始化后自动启动。
-- 新增 `XXL_JOB_DEREGISTER_ON_EXIT`，控制 Runtime 自动清理时是否注销执行器。
-- `stop_registry()` 新增仅限关键字参数 `remove`；默认 `True`，设置为 `False`
-  时只停止当前进程的续约线程。
-
 ### 变更
 
-- `RegistryService` 与 `XXLJobRuntime` 在 PID 变化后会重建进程局部的锁、线程、
-  Event 与生命周期状态，使 fork 后继承的应用对象可以安全使用。
-- 注册线程启动失败时会清除失败的线程引用，后续 `start_registry()` 可立即重试。
-- 构建后端限制在 Hatchling 1.32 以下，使发布制品保持使用当前 Twine 可校验的
-  Core Metadata 2.4。
+- 将 PID 隔离、lifecycle generation、当前/停止中 Worker ownership、Pending/Active
+  Remove、cleanup 调度、RPC 顺序及日志最终关闭统一收口到 `RegistryService`。
+- 自动启动只保留 `XXL_JOB_ENABLED && XXL_JOB_AUTO_REGISTER` 一个条件，并统一调用
+  公开 `start_registry()` 路径。
+- `stop_registry(remove=False)` 变成默认：立即分离并唤醒本地续约，不 join、不访问
+  Admin，也不修改最近 `registered` 快照。`remove=True` 为该 generation 排队一次
+  后台 Remove。
+- 当前进程全部真实 Registry RPC 共用一个网络锁；completion 通过严格递增 sequence
+  提交，旧成功或失败都不能晚写覆盖更新状态。
+- PID 变化会在接触继承的 Lock、Thread 或 Event 前只替换空白 Registry 进程状态；
+  应用 Runtime、Handler、Callback、路由、配置与无进程资源的 AdminClient 保持不变。
+- Runtime finalizer 始终非阻塞；退出注销复用 generation 资格和统一 Scheduler，托管
+  日志在全部后台收尾空闲后恰好关闭一次。
+- 构建后端继续限制在 Hatchling 1.32 以下，使当前 Twine 可以校验 Core Metadata 2.4。
+
+### 配置
+
+- 删除尚未发布的 `XXL_JOB_AUTO_REGISTER_ON_INIT`。只要该键存在就同步抛迁移错误，
+  即使扩展 disabled 也不会静默忽略。
+- `XXL_JOB_DEREGISTER_ON_EXIT` 默认值改为 `False`，避免单个 Worker 自动删除共享
+  执行器身份。
+- 将初始化字段校验与完整 Registry 配置校验分离。`AUTO_REGISTER=False` 可以在没有
+  Admin Registry 配置时初始化 HTTP 协议；enabled Registry 操作在线程/RPC 前校验。
+- `XXL_JOB_ENABLED=False` 会短路 Registry 行为；同步单次 API 返回安全的本地
+  disabled `CallResult`，不分配 RPC sequence，也不改变 lifecycle 状态。
 
 ### 兼容性
 
-- 两个新生命周期配置均默认 `True`，现有应用行为不变，无需迁移配置。
-- 共享同一执行器地址的多 Worker 部署可关闭退出自动注销，无需引入跨进程协调。
+- 任务协议、Handler 与 Callback API、五个执行器端点、Admin Registry 协议、续约
+  间隔、`XXLJobStatus` 字段、公开导入、Python 3.8-3.14 与 Flask 1.x-3.x 不变。
+- 多 Worker 拓扑仍是每进程一个 Registry Worker；未增加 Leader 选举、跨进程锁、
+  信号处理或部署检测。
+
+### 测试
+
+- 最终本地测试为 454 项通过、2 项可选官方 Admin 测试跳过，行覆盖率 93.72%。覆盖
+  PID/disabled 顺序、generation ownership、Remove 竞态、cleanup 启动失败、严格
+  completion sequence、非阻塞 finalizer 与日志恰好关闭一次。
 
 ## [0.3.4] - 2026-07-25
 

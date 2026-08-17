@@ -63,6 +63,12 @@ result = xxl_job.register_executor(app)   # CallResult
 result = xxl_job.remove_executor(app)     # CallResult
 ```
 
+Both are synchronous one-shot Admin operations. They share the current
+process's Registry network lock but do not start or stop a lifecycle, advance a
+lifecycle generation, or consume automatic Remove eligibility. A failed call
+preserves the existing `registered` snapshot. When the extension is disabled,
+both return a local config-failure `CallResult` without an Admin RPC.
+
 ### Task-result callbacks
 
 ```python
@@ -81,15 +87,31 @@ exceeds `XXL_JOB_CALLBACK_BATCH_MAX_SIZE`.
 ```python
 status = xxl_job.get_status(app)   # XXLJobStatus
 xxl_job.start_registry(app)
-xxl_job.stop_registry(app, remove=True)
-xxl_job.stop_registry(app, remove=False)  # Stop renewal; keep shared identity.
+xxl_job.stop_registry(app)                  # Local stop; immediate return.
+xxl_job.stop_registry(app, remove=True)     # Add one background Remove.
 ```
 
-`start_registry()` starts one daemon renewal thread for the current process and
-is non-blocking and idempotent. `stop_registry()` uses a keyword-only `remove`
-argument and continues to deregister by default. `XXL_JOB_DEREGISTER_ON_EXIT`
-controls automatic Runtime cleanup only; it does not change an explicit stop.
-Registry status is process-local and resets when the PID changes.
+`start_registry()` validates complete Registry configuration, creates at most
+one current daemon renewal Worker for the process, and returns before its first
+Admin call completes. `stop_registry()` has a keyword-only `remove=False`
+default: it immediately detaches and wakes that Worker, does not join or access
+Admin, and preserves the latest `registered` snapshot. Consequently
+`registry_thread_running=False` and `registered=True` is valid.
+
+`stop_registry(remove=True)` first validates configuration, performs the same
+local stop, and schedules at most one background `registryRemove` for that
+lifecycle generation. To obtain a deterministic synchronous result, use:
+
+```python
+xxl_job.stop_registry(app)
+result = xxl_job.remove_executor(app)
+```
+
+All Registry state is process-local. Every local read first checks the PID; a
+forked child gets blank locks, Worker/Remove ownership, sequences and snapshots
+without acquiring a parent lock. Status reads never access Admin or create a
+thread. Periodic renewal remains immediate registration followed by
+`REGISTRY_INTERVAL` waits.
 
 ## Request models
 

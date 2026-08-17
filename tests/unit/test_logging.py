@@ -13,6 +13,7 @@ import requests
 from flask import Flask
 
 from flask_xxljob import FlaskXXLJob
+from flask_xxljob.client import CallResult
 from flask_xxljob.exceptions import XXLJobConfigError, XXLJobInitializationError
 from tests.conftest import BASE_CONFIG, make_app
 
@@ -334,15 +335,18 @@ def test_managed_outputs_redact_sensitive_values(
 
     _log(app, sensitive, logging.DEBUG)
     runtime = _runtime(app)
-    runtime.registry_service._record(  # noqa: SLF001 - verify status redaction
-        type("Result", (), {
-            "success": False,
-            "address": None,
-            "error_type": "business",
-            "message": sensitive,
-        })(),
-        is_remove=False,
-    )
+    service = runtime.registry_service
+    state = service._get_process_state()  # noqa: SLF001 - status redaction
+    with state.state_lock:
+        service._record_result_locked(  # noqa: SLF001
+            state,
+            CallResult(
+                success=False,
+                error_type="business",
+                error=sensitive,
+            ),
+            operation="local",
+        )
 
     outputs = Path(runtime.log_manager.log_file).read_text(encoding="utf-8")
     if console_enabled:
