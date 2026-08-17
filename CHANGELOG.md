@@ -55,8 +55,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Testing
 
-- The final local suite completed with 454 passed, 2 optional official-Admin
-  tests skipped, and 93.72% line coverage. It covers PID/disabled ordering,
+- The final local suite completed with 456 passed, 2 optional official-Admin
+  tests skipped, and 93.87% line coverage. It covers PID/disabled ordering,
   generation ownership, Remove races, cleanup failures, strict completion
   sequences, non-blocking finalization and one-time log closure.
 

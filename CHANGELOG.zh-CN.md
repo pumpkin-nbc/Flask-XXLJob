@@ -46,7 +46,7 @@
 
 ### 测试
 
-- 最终本地测试为 454 项通过、2 项可选官方 Admin 测试跳过，行覆盖率 93.72%。覆盖
+- 最终本地测试为 456 项通过、2 项可选官方 Admin 测试跳过，行覆盖率 93.87%。覆盖
   PID/disabled 顺序、generation ownership、Remove 竞态、cleanup 启动失败、严格
   completion sequence、非阻塞 finalizer 与日志恰好关闭一次。
 

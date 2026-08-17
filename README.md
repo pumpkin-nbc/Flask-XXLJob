@@ -156,8 +156,8 @@ Target support is `Flask >= 1.0` and `Python >= 3.8`. The compatibility matrix
 `.github/workflows/ci.yml`. This release was verified locally on Python 3.12.13
 with Flask 3.1.3; the remaining combinations are configured in CI but were not
 executed locally. Run the test suite in your own environment before claiming a
-specific combination. The final local 0.4.0 suite completed with 454 tests
-passed, 2 optional official-Admin tests skipped, and 93.72% line coverage.
+specific combination. The final local 0.4.0 suite completed with 456 tests
+passed, 2 optional official-Admin tests skipped, and 93.87% line coverage.
 
 When one `FlaskXXLJob` instance initializes multiple Flask applications, pass
 `app=` to callback, registration, status and lifecycle helpers outside an

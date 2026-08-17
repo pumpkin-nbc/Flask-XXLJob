@@ -124,6 +124,27 @@ class FirstRemoveBlocksAdmin(FakeAdmin):
         return CallResult(success=True, address="http://a:8080")
 
 
+class ScriptedWaitEvent:
+    """Event-shaped test double that permits one renewal before stopping."""
+
+    def __init__(self):
+        self._set = False
+        self.timeouts = []
+
+    def is_set(self):
+        return self._set
+
+    def set(self):
+        self._set = True
+
+    def wait(self, timeout):
+        self.timeouts.append(timeout)
+        if len(self.timeouts) >= 2:
+            self._set = True
+            return True
+        return False
+
+
 def test_sync_register_and_remove_update_snapshot_without_generation():
     admin = FakeAdmin()
     service = RegistryService(make_config(), admin)
@@ -385,6 +406,24 @@ def test_worker_failure_is_accepted_and_worker_keeps_running():
     assert service.is_running is True
     service.stop()
     wait_for(lambda: not state.stopping_workers)
+
+
+def test_worker_failure_retries_after_the_configured_interval():
+    admin = FakeAdmin(registry_success=False)
+    service = RegistryService(make_config(), admin)
+    state = service._get_process_state()
+    stop_event = ScriptedWaitEvent()
+    ctx = _RegistryWorkerContext(1, stop_event)
+    state.generation = 1
+    state.worker = ctx
+
+    service._run_worker(state, ctx)
+
+    assert admin.registry_calls == 2
+    assert stop_event.timeouts == [3600, 3600]
+    assert state.registered is False
+    assert state.last_applied_rpc_sequence == 2
+    assert state.worker is None
 
 
 def test_old_inflight_worker_result_cannot_pollute_new_generation():
@@ -1108,6 +1147,38 @@ def test_logs_close_once_immediately_when_idle(mocker):
     assert service._get_process_state().logs_closed is True
 
 
+def test_actual_log_close_runs_outside_state_lock():
+    class TrackingStateLock:
+        def __init__(self):
+            self._lock = threading.RLock()
+            self.depth = 0
+
+        def __enter__(self):
+            self._lock.acquire()
+            self.depth += 1
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            self.depth -= 1
+            self._lock.release()
+            return False
+
+    lock = TrackingStateLock()
+    observed_depths = []
+    service = RegistryService(
+        make_config(),
+        FakeAdmin(),
+        close_logs=lambda: observed_depths.append(lock.depth),
+    )
+    state = service._get_process_state()
+    state.state_lock = lock
+
+    service.shutdown(deregister_on_exit=False)
+
+    assert observed_depths == [0]
+    assert state.logs_closed is True
+
+
 def test_logs_close_only_after_last_background_worker_exits(mocker):
     admin = BlockingRegistryAdmin()
     closed = mocker.Mock()
@@ -1122,6 +1193,7 @@ def test_logs_close_only_after_last_background_worker_exits(mocker):
     admin.release.set()
     wait_for(lambda: state.logs_closed)
     closed.assert_called_once_with()
+    assert admin.remove_calls == 0
 
 
 def test_logs_close_only_after_background_remove_actor_exits(mocker):

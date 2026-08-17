@@ -4,34 +4,39 @@
 
 ## 两条互不依赖的路径
 
-初始化 HTTP 执行器协议并不要求 Registry lifecycle 正在运行。
+扩展启用时，初始化 HTTP 执行器协议并不要求 Registry lifecycle 正在运行。禁用扩展
+也会同时禁用它的五个 HTTP 路由。
 
 ```mermaid
 flowchart TD
     A["init_app()"] --> B["检查已删除配置与已提供字段的值"]
     B --> C["创建 Runtime 并安装 finalizer"]
-    C --> D["注册 beat / idleBeat / run / kill / log"]
-    D --> E["HTTP 执行器协议可用"]
+    C --> D{"ENABLED？"}
+    D -->|"是"| E["注册 beat / idleBeat / run / kill / log"]
+    E --> F["HTTP 执行器协议可用"]
+    D -->|"否"| G["扩展保持禁用，不注册插件路由"]
 ```
 
 Registry 是另一条独立的进程级路径：
 
 ```mermaid
 flowchart TD
-    A["init_app()"] --> B{"ENABLED 且 AUTO_REGISTER？"}
-    B -->|"是"| C["公开 start_registry(app)"]
-    B -->|"否"| D["等待业务显式 start_registry(app)"]
-    D --> C
-    C --> E["同步校验完整 Registry 配置"]
-    E --> F["PID guard 与当前 ProcessState"]
-    F --> G["准备候选 generation 和 Worker"]
-    G --> H["Thread.start()"]
-    H --> I["提交 generation 与 Worker ownership"]
-    I --> J["立即返回"]
-    I --> K["Worker：立即 registry"]
-    K --> L["stop_event.wait(REGISTRY_INTERVAL)"]
-    L --> K
-    L --> M["stop_registry()：分离、唤醒并返回"]
+    A["init_app()"] --> B{"ENABLED？"}
+    B -->|"否"| C["Registry API 保持禁用"]
+    B -->|"是"| D{"AUTO_REGISTER？"}
+    D -->|"是"| E["公开 start_registry(app)"]
+    D -->|"否"| F["等待业务显式 start_registry(app)"]
+    F --> E
+    E --> G["同步校验完整 Registry 配置"]
+    G --> H["PID guard 与当前 ProcessState"]
+    H --> I["准备候选 generation 和 Worker"]
+    I --> J["Thread.start()"]
+    J --> K["提交 generation 与 Worker ownership"]
+    K --> L["立即返回"]
+    K --> M["Worker：立即 registry"]
+    M --> N["stop_event.wait(REGISTRY_INTERVAL)"]
+    N -->|"间隔结束"| M
+    N -->|"收到停止事件"| O["stop_registry()：分离、唤醒并返回"]
 ```
 
 五个执行器端点、Handler 分发、任务执行与 Callback API 都没有变化。Registry 仍然

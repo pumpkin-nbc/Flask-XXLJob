@@ -37,7 +37,10 @@ compatibility:
 
 1. **Registration / renewal / removal**: start the app with
    `XXL_JOB_AUTO_REGISTER=True`; confirm the executor appears online in the
-   admin, keeps renewing, and disappears after shutdown.
+   admin and keeps renewing. For deterministic removal, call
+   `stop_registry(remove=False)` followed by `remove_executor()`, then confirm
+   that it disappears. Normal shutdown does not remove it because
+   `XXL_JOB_DEREGISTER_ON_EXIT=False` is the default.
 2. **All five endpoints**: trigger `/run`, `/idleBeat`, `/kill`, `/log`, and
    confirm `/beat` health via the admin.
 3. **Single and batch callback**: use `callback` / `callback_success` /
@@ -53,10 +56,10 @@ compatibility:
 
 ## Locally verified matrix (honest report)
 
-Only the following was actually executed in this environment on 2026-07-23:
+Only the following was actually executed in this environment on 2026-08-17:
 
-- Python 3.12.13 with Flask 3.1.3 in a clean project `.venv`: 371 offline tests
-  passing, 2 live-Admin tests skipped by environment, and 93.46% coverage.
+- Python 3.12.13 with Flask 3.1.3 in the project `.venv`: 456 offline tests
+  passing, 2 live-Admin tests skipped by environment, and 93.87% coverage.
 - `pip check`, Ruff, mypy, bilingual documentation checks, wheel/sdist checks,
   and clean installed-wheel smoke tests passing.
 

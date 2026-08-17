@@ -4,10 +4,10 @@ Flask-XXLJob 注册状态示例。
 Flask-XXLJob registry-status example.
 
 演示如何用 ``get_status`` 查询插件运行状态，以及用 ``start_registry`` /
-``stop_registry`` 控制自动注册线程。状态只描述插件本身，绝不含 Token 或业务状态。
+``stop_registry`` 控制 Registry 生命周期。状态只描述插件本身，绝不含 Token 或业务状态。
 
 Demonstrates querying the plugin runtime status with ``get_status`` and
-controlling the auto-registration thread with ``start_registry`` /
+controlling the Registry lifecycle with ``start_registry`` /
 ``stop_registry``. The status describes only the plugin and never contains the
 token or any business state.
 

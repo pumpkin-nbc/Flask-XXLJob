@@ -4,35 +4,40 @@
 
 ## Two independent paths
 
-Initializing the HTTP executor protocol does not require a running Registry
-lifecycle.
+When the extension is enabled, initializing the HTTP executor protocol does not
+require a running Registry lifecycle. Disabling the extension also disables its
+five HTTP routes.
 
 ```mermaid
 flowchart TD
     A["init_app()"] --> B["Validate removed keys and supplied field values"]
     B --> C["Create Runtime and register finalizer"]
-    C --> D["Register beat / idleBeat / run / kill / log"]
-    D --> E["HTTP executor protocol is available"]
+    C --> D{"ENABLED?"}
+    D -->|"Yes"| E["Register beat / idleBeat / run / kill / log"]
+    E --> F["HTTP executor protocol is available"]
+    D -->|"No"| G["Keep the extension disabled; do not register its routes"]
 ```
 
 Registry is a separate, process-local path:
 
 ```mermaid
 flowchart TD
-    A["init_app()"] --> B{"ENABLED and AUTO_REGISTER?"}
-    B -->|"Yes"| C["Public start_registry(app)"]
-    B -->|"No"| D["Wait for an explicit start_registry(app)"]
-    D --> C
-    C --> E["Validate complete Registry configuration"]
-    E --> F["PID guard and current ProcessState"]
-    F --> G["Prepare candidate generation and Worker"]
-    G --> H["Thread.start()"]
-    H --> I["Commit generation and Worker ownership"]
-    I --> J["Return immediately"]
-    I --> K["Worker: registry immediately"]
-    K --> L["stop_event.wait(REGISTRY_INTERVAL)"]
-    L --> K
-    L --> M["stop_registry(): detach, wake and return"]
+    A["init_app()"] --> B{"ENABLED?"}
+    B -->|"No"| C["Registry APIs stay disabled"]
+    B -->|"Yes"| D{"AUTO_REGISTER?"}
+    D -->|"Yes"| E["Public start_registry(app)"]
+    D -->|"No"| F["Wait for an explicit start_registry(app)"]
+    F --> E
+    E --> G["Validate complete Registry configuration"]
+    G --> H["PID guard and current ProcessState"]
+    H --> I["Prepare candidate generation and Worker"]
+    I --> J["Thread.start()"]
+    J --> K["Commit generation and Worker ownership"]
+    K --> L["Return immediately"]
+    K --> M["Worker: registry immediately"]
+    M --> N["stop_event.wait(REGISTRY_INTERVAL)"]
+    N -->|"Interval elapsed"| M
+    N -->|"Stop event set"| O["stop_registry(): detach, wake and return"]
 ```
 
 The five executor endpoints, Handler dispatch, task execution and Callback API

@@ -402,8 +402,8 @@ class RegistryService:
             if not self._state_is_current(state):
                 return False
             # Recheck after waiting for the process-wide network lock.  The
-            # lock is released before the Admin RPC, so no state lock is held
-            # across network I/O.
+            # temporary state lock below is released before the Admin RPC, so
+            # no state lock is held across network I/O.
             with state.state_lock:
                 if (
                     ctx.stop_event.is_set()
