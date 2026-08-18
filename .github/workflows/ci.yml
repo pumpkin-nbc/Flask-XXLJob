@@ -5,6 +5,9 @@ on:
     branches: [develop, master]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -20,6 +23,7 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    name: py${{ matrix.python-version }} / ${{ matrix.label || 'latest Flask' }}
     strategy:
       fail-fast: false
       matrix:
@@ -88,3 +92,39 @@ jobs:
           cd "${RUNNER_TEMP}"
           python -c "import flask_xxljob; from importlib.metadata import version; assert flask_xxljob.__version__ == version('flask-xxljob') == '0.4.0'"
           flask-xxljob --version
+
+  required-ci:
+    name: Required CI
+    if: always()
+    needs:
+      - lint
+      - test
+      - coverage
+      - package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every CI job to pass
+        env:
+          LINT_RESULT: ${{ needs.lint.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+          COVERAGE_RESULT: ${{ needs.coverage.result }}
+          PACKAGE_RESULT: ${{ needs.package.result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          results=(
+            "lint=${LINT_RESULT}"
+            "test=${TEST_RESULT}"
+            "coverage=${COVERAGE_RESULT}"
+            "package=${PACKAGE_RESULT}"
+          )
+
+          for entry in "${results[@]}"; do
+            job="${entry%%=*}"
+            result="${entry#*=}"
+            if [[ "${result}" != "success" ]]; then
+              echo "::error title=Required CI failed::${job} finished with result '${result}'."
+              exit 1
+            fi
+          done
