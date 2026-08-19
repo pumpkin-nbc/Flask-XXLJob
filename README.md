@@ -142,6 +142,15 @@ background Remove for that lifecycle, or use `stop_registry()` followed by
 deregistration is off by default so one worker does not remove a shared
 executor identity.
 
+Terminal cleanup is idempotent by cleanup responsibility, not permanently by
+generation. A successful terminal Remove is reused by later shutdown or
+synchronous terminal removal. If an accepted register subsequently recreates
+the remote identity in the same generation, it creates a new cleanup
+responsibility; strict RPC sequencing plus one Active and one optional Pending
+fallback ensure that the newer remote state is removed exactly when needed.
+Calling `remove_executor()` while renewal is still running remains an ordinary
+one-shot RPC and does not stop or consume the lifecycle.
+
 Initialization first performs a side-effect-free preflight. Removed keys,
 field values, automatic Registry completeness and route/Blueprint conflicts
 are rejected before log handlers, files, Flask routes, CLI commands, extension
@@ -168,8 +177,8 @@ Target support is `Flask >= 1.0` and `Python >= 3.8`. The compatibility matrix
 `.github/workflows/ci.yml`. This release was verified locally on Python 3.12.13
 with Flask 3.1.3; the remaining combinations are configured in CI but were not
 executed locally. Run the test suite in your own environment before claiming a
-specific combination. The final local 0.4.0 suite completed with 484 tests
-passed, 2 optional official-Admin tests skipped, and 94.15% line coverage.
+specific combination. Final local 0.4.0 test and coverage results are recorded
+in the changelog.
 
 When one `FlaskXXLJob` instance initializes multiple Flask applications, pass
 `app=` to callback, registration, status and lifecycle helpers outside an

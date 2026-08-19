@@ -52,7 +52,11 @@ def test_cli_remove_stops_registry_even_when_remote_remove_fails(
     mocker, command_kind, remove_success
 ):
     ext = FlaskXXLJob()
-    app, _ = make_app(ext, name=f"cli_lifecycle_{command_kind}_{remove_success}")
+    app, _ = make_app(
+        ext,
+        name=f"cli_lifecycle_{command_kind}_{remove_success}",
+        XXL_JOB_DEREGISTER_ON_EXIT=True,
+    )
     runtime = app.extensions[EXTENSION_KEY]
     service = runtime.registry_service
     registry_called = threading.Event()
@@ -64,7 +68,7 @@ def test_cli_remove_stops_registry_even_when_remote_remove_fails(
         return CallResult(success=True, address="http://admin:8080")
 
     mocker.patch.object(runtime.admin_client, "registry", side_effect=registry)
-    mocker.patch.object(
+    remove = mocker.patch.object(
         runtime.admin_client,
         "registry_remove",
         return_value=CallResult(
@@ -99,6 +103,16 @@ def test_cli_remove_stops_registry_even_when_remote_remove_fails(
     for context in stopping:
         if context.thread is not None:
             context.thread.join(timeout=1.0)
+
+    runtime.close()
+    expected_remove_calls = 1 if remove_success else 2
+    wait_deadline = time.monotonic() + 1.0
+    while (
+        remove.call_count < expected_remove_calls
+        and time.monotonic() < wait_deadline
+    ):
+        time.sleep(0.005)
+    assert remove.call_count == expected_remove_calls
 
 
 def _script_info(app):

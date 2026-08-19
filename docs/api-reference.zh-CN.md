@@ -59,8 +59,11 @@ result = xxl_job.remove_executor(app)     # CallResult
 ```
 
 二者都是同步单次 Admin 操作，共用当前进程的 Registry 网络锁，但不会启动或停止
-lifecycle、推进 generation 或消耗自动 Remove 资格。调用失败时保留原有
-`registered` 快照；扩展 disabled 时返回本地配置失败 `CallResult`，不执行 Admin RPC。
+lifecycle，也不会推进 generation。当前仍有续约 Worker 时，`remove_executor()` 保持
+普通单次 RPC，不消耗 lifecycle 清理状态。非零 generation 已停止后，同一个 API 会
+参与终止型 Active/Pending ownership，使成功的同步 Remove 可被 shutdown 复用而不会
+重复发送。调用失败时保留原有 `registered` 快照；扩展 disabled 时返回本地配置失败
+`CallResult`，不执行 Admin RPC。
 
 ### 任务结果回调
 
@@ -89,8 +92,10 @@ daemon 续约 Worker，并在首次 Admin 调用完成前返回。`stop_registry
 并保留最近的 `registered` 快照。因此 `registry_thread_running=False` 与
 `registered=True` 可以同时成立。
 
-`stop_registry(remove=True)` 先校验配置，再完成同样的本地停止，并为该 lifecycle
-generation 至多排队一次后台 `registryRemove`。需要确定性同步结果时使用：
+`stop_registry(remove=True)` 先校验配置，再完成同样的本地停止，并为当前清理责任
+排队一次后台 `registryRemove`。终止 Remove 成功后该责任即满足；如果同 generation
+后来又有 accepted register 重新建立远端身份，则会产生一份新的必要清理责任，这不
+是 Remove 失败后的自动重试。需要确定性同步结果时使用：
 
 ```python
 xxl_job.stop_registry(app)

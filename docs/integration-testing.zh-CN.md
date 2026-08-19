@@ -50,8 +50,8 @@ $env:XXLJOB_EXECUTOR_ADDRESS = "http://127.0.0.1:5001"  # 可选
 
 本环境在 2026-08-17 实际执行的仅有：
 
-- 在项目 `.venv` 中使用 Python 3.12.13 与 Flask 3.1.3：484 项离线测试通过，
-  2 项真实 Admin 测试按环境跳过，覆盖率 94.15%。
+- 在项目 `.venv` 中使用 Python 3.12.13 与 Flask 3.1.3：503 项离线测试通过，
+  2 项真实 Admin 测试按环境跳过，覆盖率 93.27%。
 - `pip check`、Ruff、mypy、双语文档检查、wheel/sdist 检查与干净环境 wheel
   安装冒烟测试通过。
 

@@ -7,7 +7,7 @@ import os
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, Optional, Set
+from typing import Any, Callable, Dict, Optional, Set, Tuple
 
 from .._logging import redact_text
 from ..client import CallResult
@@ -28,11 +28,22 @@ class _RegistryWorkerContext:
 
 @dataclass(eq=False)
 class _RemoveOperation:
-    """One accepted, at-most-once automatic Registry removal."""
+    """One terminal/lifecycle Registry Remove ownership."""
 
     generation: int
     done_event: threading.Event
     thread: Optional[threading.Thread] = None
+    result: Optional[CallResult] = None
+
+
+@dataclass(eq=False)
+class _RegisterCoordination:
+    """Coordinate registers that overlap one generation cleanup boundary."""
+
+    generation: int
+    inflight_count: int = 0
+    done_event: threading.Event = field(default_factory=threading.Event)
+    cleanup_requested: bool = False
 
 
 @dataclass(eq=False)
@@ -43,7 +54,12 @@ class _RegistryProcessState:
     state_lock: threading.RLock = field(default_factory=threading.RLock)
     network_lock: threading.Lock = field(default_factory=threading.Lock)
     generation: int = 0
+    # This marker belongs to the current cleanup responsibility, not to the
+    # generation forever.  An accepted register may reopen the same generation.
     last_remove_requested_generation: Optional[int] = None
+    last_successfully_removed_generation: Optional[int] = None
+    last_successfully_removed_result: Optional[CallResult] = None
+    register_coordination: Optional[_RegisterCoordination] = None
     worker: Optional[_RegistryWorkerContext] = None
     stopping_workers: Dict[int, _RegistryWorkerContext] = field(
         default_factory=dict
@@ -189,6 +205,170 @@ class RegistryService:
             attempt_count=0,
         )
 
+    @staticmethod
+    def _internal_operation_result(message: str) -> CallResult:
+        return CallResult(
+            success=False,
+            error=message,
+            error_type="lifecycle",
+            attempt_count=0,
+        )
+
+    def _join_register_coordination(
+        self, state: _RegistryProcessState
+    ) -> Tuple[Optional[_RegisterCoordination], int]:
+        """Join the current generation's still-open register window."""
+        detached_event: Optional[threading.Event] = None
+        with state.state_lock:
+            generation = state.generation
+            coordination = state.register_coordination
+            if (
+                coordination is not None
+                and coordination.generation != generation
+            ):
+                state.register_coordination = None
+                detached_event = coordination.done_event
+                coordination = None
+
+            if coordination is not None:
+                # A lifecycle cleanup request is the state-lock linearization
+                # point that closes this coordination window.
+                if coordination.cleanup_requested:
+                    coordination = None
+            elif (
+                generation > 0
+                and state.last_successfully_removed_generation == generation
+            ):
+                coordination = _RegisterCoordination(generation=generation)
+                state.register_coordination = coordination
+
+            if coordination is not None:
+                coordination.inflight_count += 1
+                coordination.done_event.clear()
+
+        if detached_event is not None:
+            detached_event.set()
+        return coordination, generation
+
+    def _invalidate_successful_cleanup_locked(
+        self,
+        state: _RegistryProcessState,
+        generation: int,
+        coordination: Optional[_RegisterCoordination],
+    ) -> bool:
+        """Reopen cleanup responsibility after an accepted register."""
+        if generation <= 0 or state.generation != generation:
+            return False
+
+        invalidates_cached_success = (
+            state.last_successfully_removed_generation == generation
+        )
+        restores_coordinated_responsibility = bool(
+            coordination is not None
+            and state.register_coordination is coordination
+            and coordination.generation == generation
+            and coordination.cleanup_requested
+        )
+        if not (
+            invalidates_cached_success
+            or restores_coordinated_responsibility
+        ):
+            return False
+
+        state.last_successfully_removed_generation = None
+        state.last_successfully_removed_result = None
+        # This is a new remote state change, not a retry of the previous
+        # cleanup responsibility.
+        state.last_remove_requested_generation = None
+        return True
+
+    @staticmethod
+    def _has_remove_for_generation_locked(
+        state: _RegistryProcessState, generation: int
+    ) -> bool:
+        return bool(
+            (
+                state.active_remove is not None
+                and state.active_remove.generation == generation
+            )
+            or (
+                state.pending_remove is not None
+                and state.pending_remove.generation == generation
+            )
+        )
+
+    @staticmethod
+    def _ensure_pending_remove_locked(
+        state: _RegistryProcessState,
+        generation: int,
+    ) -> Optional[_RemoveOperation]:
+        """Represent one lifecycle cleanup responsibility as Pending."""
+        if generation == 0:
+            return None
+        if state.last_successfully_removed_generation == generation:
+            return None
+
+        pending = state.pending_remove
+        if pending is not None:
+            if pending.generation == generation:
+                state.last_remove_requested_generation = generation
+                return pending
+            return None
+
+        if state.last_remove_requested_generation == generation:
+            return None
+
+        state.last_remove_requested_generation = generation
+        operation = _RemoveOperation(
+            generation=generation,
+            done_event=threading.Event(),
+        )
+        state.pending_remove = operation
+        return operation
+
+    def _reconcile_register_coordination_locked(
+        self,
+        state: _RegistryProcessState,
+        coordination: _RegisterCoordination,
+    ) -> Optional[_RemoveOperation]:
+        """Reconcile local cleanup responsibility without I/O or waits."""
+        if state.register_coordination is not coordination:
+            return None
+        generation = coordination.generation
+        if state.generation != generation:
+            state.register_coordination = None
+            return None
+
+        operation: Optional[_RemoveOperation] = None
+        if (
+            coordination.cleanup_requested
+            and state.last_successfully_removed_generation != generation
+        ):
+            operation = self._ensure_pending_remove_locked(
+                state, generation
+            )
+
+        if coordination.inflight_count == 0:
+            cleanup_present = self._has_remove_for_generation_locked(
+                state, generation
+            )
+            cleanup_satisfied = (
+                state.last_successfully_removed_generation == generation
+            )
+            cleanup_attempt_finished = bool(
+                coordination.cleanup_requested
+                and not cleanup_present
+                and state.last_remove_requested_generation == generation
+            )
+            if (
+                not coordination.cleanup_requested
+                or cleanup_satisfied
+                or cleanup_attempt_finished
+            ):
+                state.register_coordination = None
+
+        return operation
+
     def _build_request(self) -> RegistryRequest:
         return RegistryRequest.for_executor(
             app_name=self._config.executor_app_name,
@@ -211,8 +391,16 @@ class RegistryService:
 
         self._config.validate_registry()
         state = self._get_process_state()
+        coordination, generation = self._join_register_coordination(state)
         result, sequence = self._call_registry(state, remove=False)
-        self._commit_one_shot(state, result, sequence, remove=False)
+        self._commit_one_shot(
+            state,
+            result,
+            sequence,
+            remove=False,
+            generation=generation,
+            coordination=coordination,
+        )
         self._log_rpc_result(result, operation)
         return result
 
@@ -226,10 +414,124 @@ class RegistryService:
 
         self._config.validate_registry()
         state = self._get_process_state()
+        with state.state_lock:
+            generation = state.generation
+            terminal_candidate = generation > 0 and state.worker is None
+
+        if terminal_candidate:
+            return self._terminal_remove_result(state, generation)
+
         result, sequence = self._call_registry(state, remove=True)
         self._commit_one_shot(state, result, sequence, remove=True)
         self._log_rpc_result(result, "removal")
         return result
+
+    def _terminal_remove_result(
+        self,
+        state: _RegistryProcessState,
+        generation: int,
+    ) -> CallResult:
+        """Synchronously observe or own one terminal generation Remove."""
+        while True:
+            if not self._state_is_current(state):
+                return self._internal_operation_result(
+                    "Registry process state changed during executor removal."
+                )
+
+            wait_kind: Optional[str] = None
+            wait_operation: Optional[_RemoveOperation] = None
+            wait_event: Optional[threading.Event] = None
+            cached_result: Optional[CallResult] = None
+            owned_operation: Optional[_RemoveOperation] = None
+            use_one_shot = False
+
+            with state.state_lock:
+                if state.generation != generation or state.worker is not None:
+                    use_one_shot = True
+                else:
+                    coordination = state.register_coordination
+                    if (
+                        coordination is not None
+                        and coordination.generation == generation
+                        and coordination.inflight_count > 0
+                    ):
+                        wait_kind = "registers"
+                        wait_event = coordination.done_event
+                    elif (
+                        state.last_successfully_removed_generation
+                        == generation
+                        and state.last_successfully_removed_result is not None
+                    ):
+                        cached_result = self._safe_result(
+                            state.last_successfully_removed_result
+                        )
+                    elif state.active_remove is not None:
+                        wait_operation = state.active_remove
+                        wait_event = wait_operation.done_event
+                        wait_kind = (
+                            "same-active"
+                            if wait_operation.generation == generation
+                            else "other-active"
+                        )
+                    elif state.pending_remove is not None:
+                        wait_operation = state.pending_remove
+                        wait_event = wait_operation.done_event
+                        wait_kind = (
+                            "same-pending"
+                            if wait_operation.generation == generation
+                            else "other-pending"
+                        )
+                    else:
+                        owned_operation = _RemoveOperation(
+                            generation=generation,
+                            done_event=threading.Event(),
+                        )
+                        state.active_remove = owned_operation
+
+            if use_one_shot:
+                result, sequence = self._call_registry(state, remove=True)
+                self._commit_one_shot(
+                    state, result, sequence, remove=True
+                )
+                self._log_rpc_result(result, "removal")
+                return result
+            if cached_result is not None:
+                return cached_result
+            if owned_operation is not None:
+                self._execute_remove(state, owned_operation)
+                return self._operation_result(owned_operation)
+
+            if wait_kind == "same-pending":
+                self._schedule_pending_remove(
+                    state, raise_start_error=True
+                )
+            if wait_event is None:
+                return self._internal_operation_result(
+                    "Registry removal coordination did not provide an event."
+                )
+            wait_event.wait()
+
+            if wait_kind in {"same-active", "same-pending"}:
+                if (
+                    wait_operation is not None
+                    and wait_operation.result is not None
+                ):
+                    return self._safe_result(wait_operation.result)
+                # A Pending operation may have been cancelled by a newer
+                # lifecycle or by an accepted Active success.  Recheck all
+                # state before deciding whether another RPC is still needed.
+                if wait_kind == "same-active":
+                    return self._internal_operation_result(
+                        "Registry removal completed without a result."
+                    )
+
+    def _operation_result(self, operation: _RemoveOperation) -> CallResult:
+        result = operation.result
+        if result is None:
+            return self._internal_operation_result(
+                "Registry removal completed without a result."
+            )
+        return self._safe_result(result)
 
     def _call_registry(
         self, state: _RegistryProcessState, *, remove: bool
@@ -272,20 +574,57 @@ class RegistryService:
         sequence: int,
         *,
         remove: bool,
+        generation: Optional[int] = None,
+        coordination: Optional[_RegisterCoordination] = None,
     ) -> None:
-        if sequence == 0 or not self._state_is_current(state):
+        if not self._state_is_current(state):
+            if coordination is not None:
+                coordination.done_event.set()
             return
+
+        coordination_event: Optional[threading.Event] = None
+        scheduled_operation: Optional[_RemoveOperation] = None
         with state.state_lock:
-            if sequence <= state.last_applied_rpc_sequence:
-                return
-            self._record_result_locked(
-                state,
-                result,
-                operation="remove" if remove else "register",
-            )
-            # Accepted failures carry the same ordering significance as
-            # accepted successes.
-            state.last_applied_rpc_sequence = sequence
+            accepted = sequence > state.last_applied_rpc_sequence
+            if accepted:
+                self._record_result_locked(
+                    state,
+                    result,
+                    operation="remove" if remove else "register",
+                )
+                # Accepted failures carry the same ordering significance as
+                # accepted successes.
+                state.last_applied_rpc_sequence = sequence
+
+                if (
+                    not remove
+                    and result.success
+                    and generation is not None
+                ):
+                    self._invalidate_successful_cleanup_locked(
+                        state, generation, coordination
+                    )
+
+            if coordination is not None:
+                if coordination.inflight_count > 0:
+                    coordination.inflight_count -= 1
+                if state.register_coordination is coordination:
+                    scheduled_operation = (
+                        self._reconcile_register_coordination_locked(
+                            state, coordination
+                        )
+                    )
+                if coordination.inflight_count == 0:
+                    # The Event is collected only after every state change and
+                    # reconcile decision above is complete.
+                    coordination_event = coordination.done_event
+
+        if coordination_event is not None:
+            coordination_event.set()
+        if scheduled_operation is not None:
+            self._schedule_pending_remove(state, raise_start_error=False)
+        if coordination is not None:
+            self._maybe_close_logs_when_idle(state)
 
     def register_once(self) -> bool:
         return self.register_once_result().success
@@ -304,6 +643,7 @@ class RegistryService:
         self._config.validate_registry()
         state = self._get_process_state()
         cancelled: Optional[_RemoveOperation] = None
+        detached_coordination_event: Optional[threading.Event] = None
 
         with state.state_lock:
             existing = state.worker
@@ -335,6 +675,11 @@ class RegistryService:
             state.generation = candidate_generation
             state.worker = ctx
 
+            coordination = state.register_coordination
+            if coordination is not None:
+                state.register_coordination = None
+                detached_coordination_event = coordination.done_event
+
             # Pending and Active may coexist.  These are intentionally two
             # independent branches, not an if/elif pair.
             if state.pending_remove is not None:
@@ -345,6 +690,8 @@ class RegistryService:
 
         if cancelled is not None:
             cancelled.done_event.set()
+        if detached_coordination_event is not None:
+            detached_coordination_event.set()
         self._logger.info(
             "XXL-JOB registry lifecycle started generation=%s.",
             candidate_generation,
@@ -438,6 +785,10 @@ class RegistryService:
                     self._record_result_locked(
                         state, result, operation="worker"
                     )
+                    if result.success:
+                        self._invalidate_successful_cleanup_locked(
+                            state, ctx.generation, None
+                        )
                     state.last_applied_rpc_sequence = sequence
                     accepted = True
 
@@ -474,22 +825,34 @@ class RegistryService:
         state.stopping_workers[ctx.generation] = ctx
         ctx.stop_event.set()
 
-    @staticmethod
     def _request_remove_locked(
+        self,
         state: _RegistryProcessState,
     ) -> Optional[_RemoveOperation]:
         generation = state.generation
         if generation == 0:
             return None
-        if state.last_remove_requested_generation == generation:
+
+        coordination = state.register_coordination
+        if (
+            coordination is not None
+            and coordination.generation == generation
+        ):
+            coordination.cleanup_requested = True
+            operation = self._reconcile_register_coordination_locked(
+                state, coordination
+            )
+            if operation is not None:
+                return operation
+            if (
+                state.last_successfully_removed_generation == generation
+                or coordination.inflight_count > 0
+            ):
+                return None
+
+        if state.last_successfully_removed_generation == generation:
             return None
-        state.last_remove_requested_generation = generation
-        operation = _RemoveOperation(
-            generation=generation,
-            done_event=threading.Event(),
-        )
-        state.pending_remove = operation
-        return operation
+        return self._ensure_pending_remove_locked(state, generation)
 
     def _finish_worker(
         self,
@@ -585,7 +948,16 @@ class RegistryService:
                     error="Failed to start Registry cleanup actor.",
                     error_type=type(exc).__name__,
                 )
+                operation.result = self._safe_result(failure)
                 self._record_result_locked(state, failure, operation="local")
+                coordination = state.register_coordination
+                if (
+                    coordination is not None
+                    and coordination.generation == operation.generation
+                ):
+                    self._reconcile_register_coordination_locked(
+                        state, coordination
+                    )
                 failed_operation = operation
                 start_error = exc
 
@@ -615,6 +987,10 @@ class RegistryService:
         claimed = False
         try:
             if not self._state_is_current(state):
+                operation.result = self._internal_operation_result(
+                    "Registry process state changed before cleanup actor claim."
+                )
+                operation.done_event.set()
                 return
             with state.state_lock:
                 if (
@@ -645,6 +1021,10 @@ class RegistryService:
         operation: _RemoveOperation,
     ) -> None:
         if not self._state_is_current(state):
+            operation.result = self._internal_operation_result(
+                "Registry process state changed before executor removal."
+            )
+            operation.done_event.set()
             return
 
         with state.network_lock:
@@ -660,27 +1040,86 @@ class RegistryService:
                 )
                 result = self._unexpected_result("removal", exc)
 
-        if self._state_is_current(state):
-            with state.state_lock:
-                owns_active = state.active_remove is operation
-                if (
-                    owns_active
-                    and sequence > state.last_applied_rpc_sequence
-                ):
-                    self._record_result_locked(
-                        state, result, operation="remove"
-                    )
-                    state.last_applied_rpc_sequence = sequence
-                # Completion may clear only its own Active identity.
-                if state.active_remove is operation:
-                    state.active_remove = None
+        cancelled_pending = self._complete_remove_operation(
+            state, operation, result, sequence
+        )
 
         # done_event means both the RPC and this operation's local state
         # cleanup have ended.  It is deliberately set after releasing the lock.
         operation.done_event.set()
+        if cancelled_pending is not None:
+            cancelled_pending.done_event.set()
         self._log_rpc_result(result, "removal")
         self._schedule_pending_remove(state, raise_start_error=False)
         self._maybe_close_logs_when_idle(state)
+
+    def _complete_remove_operation(
+        self,
+        state: _RegistryProcessState,
+        operation: _RemoveOperation,
+        result: CallResult,
+        sequence: int,
+    ) -> Optional[_RemoveOperation]:
+        """Finish one Active Remove after its network lock is released."""
+        safe_result = self._safe_result(result)
+        cancelled_pending: Optional[_RemoveOperation] = None
+        if self._state_is_current(state):
+            with state.state_lock:
+                # Operation-local completion is independent from whether this
+                # result is still allowed to update the process-wide snapshot.
+                operation.result = safe_result
+                owns_active = state.active_remove is operation
+                completion_accepted = bool(
+                    owns_active
+                    and sequence > state.last_applied_rpc_sequence
+                )
+                if completion_accepted:
+                    self._record_result_locked(
+                        state, result, operation="remove"
+                    )
+                    state.last_applied_rpc_sequence = sequence
+
+                    cleanup_satisfied = bool(
+                        safe_result.success
+                        and operation.generation > 0
+                        and state.generation == operation.generation
+                        and state.worker is None
+                    )
+                    if cleanup_satisfied:
+                        state.last_remove_requested_generation = (
+                            operation.generation
+                        )
+                        state.last_successfully_removed_generation = (
+                            operation.generation
+                        )
+                        state.last_successfully_removed_result = (
+                            self._safe_result(safe_result)
+                        )
+                        pending = state.pending_remove
+                        if (
+                            pending is not None
+                            and pending.generation == operation.generation
+                        ):
+                            state.pending_remove = None
+                            cancelled_pending = pending
+
+                # Completion may clear only its own Active identity.
+                if state.active_remove is operation:
+                    state.active_remove = None
+
+                coordination = state.register_coordination
+                if (
+                    coordination is not None
+                    and coordination.generation == operation.generation
+                ):
+                    self._reconcile_register_coordination_locked(
+                        state, coordination
+                    )
+        else:
+            # Never acquire a replaced ProcessState lock, but always complete
+            # this private Operation for any observers that still hold it.
+            operation.result = safe_result
+        return cancelled_pending
 
     # ------------------------------------------------------------------
     # Status, finalization and log closing
@@ -718,12 +1157,29 @@ class RegistryService:
             self._stop_local_locked(state)
             state.close_logs_when_idle = True
             target_generation = state.generation
+            coordination = state.register_coordination
+            open_coordination = bool(
+                coordination is not None
+                and coordination.generation == target_generation
+                and not coordination.cleanup_requested
+                and coordination.inflight_count > 0
+            )
+            cleanup_satisfied = (
+                state.last_successfully_removed_generation
+                == target_generation
+            )
             should_validate_remove = bool(
                 self._config.enabled
                 and deregister_on_exit
                 and target_generation > 0
-                and state.last_remove_requested_generation
-                != target_generation
+                and (
+                    open_coordination
+                    or (
+                        not cleanup_satisfied
+                        and state.last_remove_requested_generation
+                        != target_generation
+                    )
+                )
             )
 
         if should_validate_remove:
@@ -747,8 +1203,6 @@ class RegistryService:
                     if (
                         state.generation == target_generation
                         and target_generation > 0
-                        and state.last_remove_requested_generation
-                        != target_generation
                     ):
                         operation = self._request_remove_locked(state)
                 if operation is not None:
@@ -781,6 +1235,7 @@ class RegistryService:
                 and state.active_remove is None
                 and state.pending_remove is None
                 and not state.cleanup_actors
+                and state.register_coordination is None
                 and not state.logs_closed
             ):
                 state.logs_closed = True

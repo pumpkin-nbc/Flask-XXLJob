@@ -72,8 +72,10 @@ app.config.update(
 
 `stop_registry()` 默认只做本地停止：唤醒并分离当前续约 Worker，不 join、不访问
 Admin，也不修改 `registered`。`stop_registry(remove=True)` 会同步校验 Registry
-配置，并为最近一个非零 lifecycle generation 至多申请一次后台 `registryRemove`。
-需要确定性结果时，先调用 `stop_registry()`，再调用 `remove_executor()`。
+配置，并为最近一个非零 generation 当前的清理责任申请一次后台 `registryRemove`。
+成功的终止清理会被后续 lifecycle shutdown 复用；同 generation 后来出现 accepted
+register 并重新建立远端身份时，可以产生一份新的必要清理责任。需要确定性结果时，
+先调用 `stop_registry()`，再调用 `remove_executor()`。
 
 退出注销默认关闭。显式开启后仍是非阻塞 best-effort；解释器立即退出、`SIGKILL`
 或容器强制终止都可能使其无法完成。

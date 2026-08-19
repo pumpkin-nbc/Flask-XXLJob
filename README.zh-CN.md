@@ -134,6 +134,12 @@ with app.app_context():
 `CallResult` 时，先调用 `stop_registry()`，再调用 `remove_executor()`。退出注销默认
 关闭，避免单个 Worker 退出时删除共享执行器身份。
 
+终止清理按“清理责任”幂等，而不是永久限制整个 generation。一次成功的终止 Remove
+会被后续 shutdown 或同步终止注销复用；如果同 generation 后来又有被正式接受的
+register 重新建立远端身份，就会产生一份新的必要清理责任。严格 RPC sequence、一个
+Active 与最多一个 Pending fallback 会按真实远端顺序完成收敛。Worker 仍在续约时
+调用 `remove_executor()` 仍只是普通单次 RPC，不会停止或消耗 lifecycle。
+
 初始化会先执行无副作用 Preflight。已删除配置、字段值、自动 Registry 完整配置以及
 路由/Blueprint 冲突会在创建日志 Handler、打开文件、注册路由/CLI、写入扩展状态、
 安装 finalizer 或启动 Worker 前失败。修正确定性配置错误后，同一个 Flask app 可以
@@ -157,8 +163,7 @@ CLI `remove` 是当前续约生命周期的终止型命令：先停止本地 Reg
 （Python 3.8-3.14 x Flask 1/2/3）已在 `.github/workflows/ci.yml` 中配置。
 本版本已在 Python 3.12.13 与 Flask 3.1.3
 上完成本地验证；其余组合已在 CI 中配置但未在本地执行。请在你自己的环境中
-运行测试后再声明特定组合可用。0.4.0 最终本地测试结果为 484 项通过、2 项可选
-官方 Admin 测试跳过，行覆盖率 94.15%。
+运行测试后再声明特定组合可用。0.4.0 最终本地测试与覆盖率结果记录在更新日志中。
 
 当同一个 `FlaskXXLJob` 实例初始化了多个 Flask 应用时，请在应用上下文之外调用回调、注册、状态与生命周期辅助方法时显式传入 `app=`。只有恰好初始化了一个应用时才可省略；在初始化前注册的 `on_*` 装饰器仍会作为默认处理函数注入其后初始化的每个应用。
 

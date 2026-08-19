@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `stop_registry(remove=False)` is now the default: it detaches and wakes local
   renewal immediately without joining, contacting Admin, or changing the
   latest `registered` snapshot. `remove=True` schedules one background Remove
-  for that lifecycle generation.
+  for the current cleanup responsibility.
 - All real Registry RPCs in one process share one network lock. Completions use
   strictly increasing sequences so a late older success or failure cannot
   overwrite newer accepted state.
@@ -29,6 +29,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Runtime finalization is non-blocking. Exit removal is best-effort, uses the
   same generation eligibility and scheduler, and managed logs close once after
   all background cleanup is idle.
+- Terminal Remove is now idempotent by generation cleanup responsibility.
+  Successful synchronous, Worker or cleanup-actor removal is reused by later
+  lifecycle shutdown. An accepted same-generation register reopens a new
+  responsibility, with one Active and at most one Pending fallback resolving
+  the real RPC order without retrying failed removals.
+- Active Remove completion acceptance remains based only on strict sequence,
+  ProcessState identity and Active identity. Exact generation and current
+  Worker state are checked separately when recording cleanup satisfaction, so
+  a new generation still waits for and correctly orders behind an older Active
+  Remove.
 - `init_app()` now completes a side-effect-free deterministic preflight before
   creating managed log resources or committing Blueprint, CLI, hook, extension,
   application-registry, finalizer or Registry state. Corrected configuration
@@ -69,8 +79,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   new wheel and sdist (including file-only RECORD mappings and authoritative
   top-level PKG-INFO), reject development/signature files, and run a
   source-isolated installed-wheel smoke test with `pip check`.
-- The final local suite completed with 484 passed, 2 optional official-Admin
-  tests skipped, and 94.15% line coverage. It covers PID/disabled ordering,
+- The final local suite completed with 503 passed, 2 optional official-Admin
+  tests skipped, and 93.27% line coverage. It covers PID/disabled ordering,
   generation ownership, Remove races, cleanup failures, strict completion
   sequences, non-blocking finalization and one-time log closure.
 

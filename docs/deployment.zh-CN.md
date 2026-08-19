@@ -47,11 +47,33 @@ flowchart TD
 
 `stop_registry()` 是本地非阻塞停止：不 join、不访问 Admin，也不修改最近的
 `registered` 快照。即使 Worker 已经退出，稍后调用 `stop_registry(remove=True)`
-仍可消耗同一 lifecycle generation 尚未使用的一次自动 Remove 资格。
+仍可为该 generation 尚未满足的清理责任申请 Remove。
 
 `stop_registry(remove=True)` 在后台执行注销。Pending Remove 可以被更新的成功 start
 取消；Active Remove 不强制取消，新 Worker 会在后台等待它结束。当前进程中的续约、
 后台注销、`register_executor()` 与 `remove_executor()` 共用一个网络锁，绝不并发。
+
+终止清理精确区分 generation，但按“清理责任”幂等。一次成功的终止型 Active Remove
+会被后续 shutdown 或同步终止注销复用；如果同 generation 后来又有正式 accepted
+register，远端身份已经重新建立，因此会产生新的清理责任。lifecycle cleanup 完成
+线性化前加入协调窗口的 register，会与当前 Active 及最多一个 Pending fallback 收敛：
+
+```mermaid
+flowchart TD
+    A["终止 Remove 成功"] --> B["清理责任已满足"]
+    B --> C{"协调窗口内又有 accepted register？"}
+    C -->|"否"| D["后续 lifecycle cleanup 复用成功结果"]
+    C -->|"是"| E["重新产生清理责任"]
+    E --> F{"真实 RPC 顺序"}
+    F -->|"register 后 Active Remove"| G["Active 满足责任并取消 Pending"]
+    F -->|"Active Remove 后 register"| H["保留 Pending fallback"]
+    H --> I["Pending 执行新的必要 Remove"]
+```
+
+Active Remove completion 是否接受，只检查 strict sequence、ProcessState identity 与
+Active identity；精确 generation 和当前无有效 Worker 只用于判断是否记录“清理责任
+已满足”。因此旧 Active 与新 generation 的既有顺序不变：新 Worker 等待旧 Active
+结束，重新校验 ownership 后再 registry。
 
 需要确定性注销及其 `CallResult` 时使用：
 
@@ -115,9 +137,11 @@ Flask-XXLJob 不检测 Celery，也不创建 Celery 任务。
 时才应开启。退出注销是 best-effort，finalizer 永不等待 Worker、Event、cleanup actor
 或 Admin RPC；解释器立即退出、`SIGKILL` 与容器强制终止都可能导致注销未完成。
 
-退出路径遵守同一套 lifecycle Remove 资格：generation 为零时不注销，同一代最多自动
-尝试一次。同步 `register_executor()` 不创建 lifecycle，因此退出时不会自动配对；
-需要时请显式调用 `remove_executor()`。
+退出路径遵守同一套 lifecycle Remove 资格：generation 为零时不注销，同一份清理责任
+最多申请一次。后续 accepted register 是新的远端状态变化而不是失败重试，因此同一
+generation 可以产生一份新的必要责任。generation 为零时的同步
+`register_executor()` 不创建 lifecycle，因此退出时不会自动配对；需要时请显式调用
+`remove_executor()`。
 
 ## 任务超时与日志
 

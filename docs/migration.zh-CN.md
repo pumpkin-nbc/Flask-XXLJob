@@ -53,9 +53,11 @@ xxl_job.start_registry(app)  # fork 后在拥有 Registry 的进程中执行
 ```
 
 `XXL_JOB_DEREGISTER_ON_EXIT` 现在默认 `False`。`stop_registry()` 也默认只做本地
-立即停止并保留 `registered`。需要一次后台自动注销时使用
+立即停止并保留 `registered`。需要为当前清理责任申请后台注销时使用
 `stop_registry(remove=True)`；需要确定性结果时，本地停止后同步调用
-`remove_executor()`。
+`remove_executor()`。成功的终止 Remove 会被 finalizer 复用；如果同 generation
+后来又有 accepted register 重新建立远端身份，就会产生新的必要清理责任，而不是对
+失败 Remove 的重试。
 
 完整 Registry 配置仅在 enabled 状态真正请求 Registry 操作时校验，因此
 `AUTO_REGISTER=False` 可在没有 Admin 配置时完成纯协议初始化。`ENABLED=False` 会

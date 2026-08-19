@@ -64,10 +64,14 @@ result = xxl_job.remove_executor(app)     # CallResult
 ```
 
 Both are synchronous one-shot Admin operations. They share the current
-process's Registry network lock but do not start or stop a lifecycle, advance a
-lifecycle generation, or consume automatic Remove eligibility. A failed call
-preserves the existing `registered` snapshot. When the extension is disabled,
-both return a local config-failure `CallResult` without an Admin RPC.
+process's Registry network lock but do not start or stop a lifecycle or advance
+a lifecycle generation. While a renewal Worker is current, `remove_executor()`
+remains an ordinary one-shot RPC and does not consume lifecycle cleanup state.
+After a non-zero generation has been stopped, the same API participates in
+terminal Active/Pending ownership so a successful synchronous Remove can be
+reused by shutdown instead of being sent twice. A failed call preserves the
+existing `registered` snapshot. When the extension is disabled, both return a
+local config-failure `CallResult` without an Admin RPC.
 
 ### Task-result callbacks
 
@@ -99,8 +103,12 @@ Admin, and preserves the latest `registered` snapshot. Consequently
 `registry_thread_running=False` and `registered=True` is valid.
 
 `stop_registry(remove=True)` first validates configuration, performs the same
-local stop, and schedules at most one background `registryRemove` for that
-lifecycle generation. To obtain a deterministic synchronous result, use:
+local stop, and schedules one background `registryRemove` for the current
+cleanup responsibility. A successful terminal Remove satisfies that
+responsibility. A later accepted register in the same generation recreates the
+remote identity and therefore opens a new cleanup responsibility; this is not
+an automatic retry of a failed Remove. To obtain a deterministic synchronous
+result, use:
 
 ```python
 xxl_job.stop_registry(app)

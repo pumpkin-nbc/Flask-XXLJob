@@ -58,8 +58,11 @@ xxl_job.start_registry(app)  # Run after fork in the Registry-owning process.
 
 `XXL_JOB_DEREGISTER_ON_EXIT` now defaults to `False`. `stop_registry()` also
 defaults to a local-only, immediate stop and preserves `registered`. Use
-`stop_registry(remove=True)` for one background automatic Remove, or pair a
-local stop with synchronous `remove_executor()` when the result is required.
+`stop_registry(remove=True)` for one background Remove for the current cleanup
+responsibility, or pair a local stop with synchronous `remove_executor()` when
+the result is required. A successful terminal Remove is reused by finalization;
+if a later accepted register recreates the remote identity in the same
+generation, it opens a new necessary cleanup responsibility rather than a retry.
 
 Registry completeness is checked only when an enabled Registry operation is
 actually requested, so `AUTO_REGISTER=False` supports protocol-only

@@ -78,9 +78,12 @@ the application may call `start_registry(app)` later.
 `stop_registry()` is local-only by default: it wakes and detaches the current
 renewal Worker without joining, accessing Admin, or changing `registered`.
 `stop_registry(remove=True)` validates Registry configuration synchronously,
-then requests at most one background `registryRemove` for the latest non-zero
-lifecycle generation. For deterministic removal, use `stop_registry()` and
-then `remove_executor()`.
+then requests one background `registryRemove` for the latest non-zero
+generation's current cleanup responsibility. Successful terminal cleanup is
+reused by later lifecycle shutdown. A subsequent accepted register can recreate
+the remote identity and open a new cleanup responsibility in the same
+generation. For deterministic removal, use `stop_registry()` and then
+`remove_executor()`.
 
 Exit removal defaults to off. When explicitly enabled it is best-effort and
 non-blocking; interpreter termination, `SIGKILL`, or forced container shutdown

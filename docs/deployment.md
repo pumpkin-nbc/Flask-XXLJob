@@ -49,14 +49,41 @@ are unchanged. Registry still registers immediately and then renews every
 
 `stop_registry()` is a local, non-blocking stop. It does not join, contact
 Admin, or change the latest `registered` snapshot. A later
-`stop_registry(remove=True)` may still consume the same lifecycle generation's
-single automatic Remove eligibility, even after its Worker has exited.
+`stop_registry(remove=True)` may still request that generation's outstanding
+cleanup responsibility, even after its Worker has exited.
 
 `stop_registry(remove=True)` schedules the removal in the background. A Pending
 Remove can be cancelled by a newer successful start; an Active Remove completes
 first while the new Worker waits in the background. All Registry RPCs in one
 process—renewal, background removal, `register_executor()` and
 `remove_executor()`—share one network lock and never overlap.
+
+Terminal cleanup is generation-aware but responsibility-based. One successful
+terminal Active Remove is cached and reused by later shutdown or synchronous
+terminal removal. If a register completion is accepted afterward in the same
+generation, the remote identity exists again and a new cleanup responsibility
+is opened. Registers that joined the coordination window before lifecycle
+cleanup linearized are reconciled with the current Active and at most one
+Pending fallback:
+
+```mermaid
+flowchart TD
+    A["Terminal Remove succeeds"] --> B["Cleanup responsibility satisfied"]
+    B --> C{"Accepted register in the coordinated window?"}
+    C -->|"No"| D["Later lifecycle cleanup reuses success"]
+    C -->|"Yes"| E["Cleanup responsibility required again"]
+    E --> F{"RPC order"}
+    F -->|"register then Active Remove"| G["Active satisfies cleanup; cancel Pending"]
+    F -->|"Active Remove then register"| H["Keep Pending fallback"]
+    H --> I["Pending performs the necessary newer Remove"]
+```
+
+An Active Remove completion is accepted by strict sequence, ProcessState
+identity and Active identity. Exact generation and the absence of a current
+Worker are checked separately only when recording that cleanup responsibility
+as satisfied. This preserves the existing old-Active/new-generation order: the
+new Worker waits for the old Active completion, rechecks ownership, then
+registers.
 
 For deterministic removal and its `CallResult`, use:
 
@@ -130,9 +157,12 @@ cleanup actor, or Admin RPC; immediate interpreter exit, `SIGKILL`, and forced
 container shutdown can prevent completion.
 
 The exit path obeys the same lifecycle eligibility as explicit automatic
-Remove: generation zero is not removed and one generation is attempted at most
-once. A one-shot `register_executor()` does not create a lifecycle and therefore
-is not automatically paired at exit; call `remove_executor()` explicitly.
+Remove: generation zero is not removed and one cleanup responsibility is
+requested at most once. A later accepted register is a new remote state change,
+not a failed-Remove retry, and may create a new responsibility in that same
+generation. A one-shot `register_executor()` at generation zero does not create
+a lifecycle and therefore is not automatically paired at exit; call
+`remove_executor()` explicitly.
 
 ## Job timeout and logging
 

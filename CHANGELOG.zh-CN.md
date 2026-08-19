@@ -17,13 +17,20 @@
   公开 `start_registry()` 路径。
 - `stop_registry(remove=False)` 变成默认：立即分离并唤醒本地续约，不 join、不访问
   Admin，也不修改最近 `registered` 快照。`remove=True` 为该 generation 排队一次
-  后台 Remove。
+  当前清理责任的后台 Remove。
 - 当前进程全部真实 Registry RPC 共用一个网络锁；completion 通过严格递增 sequence
   提交，旧成功或失败都不能晚写覆盖更新状态。
 - PID 变化会在接触继承的 Lock、Thread 或 Event 前只替换空白 Registry 进程状态；
   应用 Runtime、Handler、Callback、路由、配置与无进程资源的 AdminClient 保持不变。
 - Runtime finalizer 始终非阻塞；退出注销复用 generation 资格和统一 Scheduler，托管
   日志在全部后台收尾空闲后恰好关闭一次。
+- 终止 Remove 改为按 generation 清理责任幂等。同步、Worker 或 cleanup actor 的成功
+  注销都会被后续 lifecycle shutdown 复用；同 generation 的 accepted register 会重新
+  产生一份新责任，由一个 Active 与最多一个 Pending fallback 按真实 RPC 顺序收敛，
+  Remove 失败本身不会触发重试。
+- Active Remove completion 是否接受仍只依赖 strict sequence、ProcessState identity 与
+  Active identity；精确 generation 和当前 Worker 状态仅用于记录清理责任是否满足，
+  因而新 generation 仍会等待并正确排序在旧 Active Remove 之后。
 - `init_app()` 会先完成无副作用的确定性 Preflight，再创建托管日志资源或提交
   Blueprint、CLI、Hook、扩展、应用注册、finalizer 与 Registry 状态；修正配置后可在
   同一个 Flask app 上重试。
@@ -56,7 +63,7 @@
 - 发布检查改为在干净临时目录构建，只验证本轮新 wheel/sdist（包括仅针对文件成员的
   RECORD 映射与标准顶层 PKG-INFO），拒绝开发/签名文件，并在 `pip check` 后执行与
   源码隔离的安装后冒烟。
-- 最终本地测试为 484 项通过、2 项可选官方 Admin 测试跳过，行覆盖率 94.15%。覆盖
+- 最终本地测试为 503 项通过、2 项可选官方 Admin 测试跳过，行覆盖率 93.27%。覆盖
   PID/disabled 顺序、generation ownership、Remove 竞态、cleanup 启动失败、严格
   completion sequence、非阻塞 finalizer 与日志恰好关闭一次。
 
