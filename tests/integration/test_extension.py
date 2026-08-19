@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from flask import Flask
+from flask import Blueprint, Flask
 
 from flask_xxljob import FlaskXXLJob, XXLJobResponse
 from flask_xxljob.exceptions import (
@@ -164,6 +164,82 @@ def test_post_route_conflict_fails_without_partial_initialization(path):
     assert EXTENSION_KEY not in app.extensions
     assert "xxljob" not in app.cli.commands
     assert not any(name.startswith("xxljob_") for name in app.blueprints)
+
+
+def test_auto_registry_preflight_failure_is_atomic_and_retryable(
+    tmp_path, mocker
+):
+    app = Flask("preflight_retry")
+    log_path = tmp_path / "must-not-exist"
+    app.config.update(
+        XXL_JOB_AUTO_REGISTER=True,
+        XXL_JOB_ADMIN_ADDRESSES=[],
+        XXL_JOB_EXECUTOR_ADDRESS="",
+        XXL_JOB_LOG_ENABLED=True,
+        XXL_JOB_LOG_PATH=str(log_path),
+    )
+    ext = FlaskXXLJob()
+    initial_rules = tuple(
+        (rule.rule, rule.endpoint, tuple(sorted(rule.methods or ())))
+        for rule in app.url_map.iter_rules()
+    )
+    initial_blueprints = dict(app.blueprints)
+    initial_cli = dict(app.cli.commands)
+    initial_hooks = {
+        key: tuple(value) for key, value in app.before_request_funcs.items()
+    }
+
+    with pytest.raises(XXLJobConfigError):
+        ext.init_app(app)
+
+    assert EXTENSION_KEY not in app.extensions
+    assert tuple(
+        (rule.rule, rule.endpoint, tuple(sorted(rule.methods or ())))
+        for rule in app.url_map.iter_rules()
+    ) == initial_rules
+    assert app.blueprints == initial_blueprints
+    assert app.cli.commands == initial_cli
+    assert {
+        key: tuple(value) for key, value in app.before_request_funcs.items()
+    } == initial_hooks
+    assert ext._applications.is_empty  # noqa: SLF001 - atomicity contract
+    assert not log_path.exists()
+
+    app.config.update(
+        XXL_JOB_ADMIN_ADDRESSES=["http://admin:8080"],
+        XXL_JOB_EXECUTOR_ADDRESS="http://127.0.0.1:5001",
+    )
+    start = mocker.patch.object(ext, "start_registry")
+    ext.init_app(app)
+
+    assert EXTENSION_KEY in app.extensions
+    assert "xxljob" in app.cli.commands
+    assert start.call_count == 1
+
+
+def test_blueprint_name_conflict_fails_during_preflight(tmp_path):
+    app = Flask("blueprint_conflict")
+    app.config.update(BASE_CONFIG)
+    log_path = tmp_path / "must-not-exist"
+    app.config.update(
+        XXL_JOB_LOG_ENABLED=True,
+        XXL_JOB_LOG_PATH=str(log_path),
+    )
+    app.register_blueprint(Blueprint("xxljob_blueprint_conflict", __name__))
+    initial_cli = dict(app.cli.commands)
+    initial_hooks = {
+        key: tuple(value) for key, value in app.before_request_funcs.items()
+    }
+
+    with pytest.raises(XXLJobInitializationError, match="blueprint name conflict"):
+        FlaskXXLJob(app)
+
+    assert EXTENSION_KEY not in app.extensions
+    assert app.cli.commands == initial_cli
+    assert {
+        key: tuple(value) for key, value in app.before_request_funcs.items()
+    } == initial_hooks
+    assert not log_path.exists()
 
 
 def test_prefixed_post_route_conflict_fails():

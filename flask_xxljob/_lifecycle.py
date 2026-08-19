@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import weakref
 
 from flask import Flask
@@ -21,4 +22,9 @@ def safe_close_runtime(runtime: XXLJobRuntime) -> None:
     try:
         runtime.close()
     except Exception:  # noqa: BLE001 - interpreter shutdown must remain quiet
-        pass
+        try:
+            logging.getLogger("flask_xxljob.lifecycle").exception(
+                "Unexpected error while finalizing Flask-XXLJob runtime."
+            )
+        except Exception:  # noqa: BLE001 - logging may already be unavailable
+            pass

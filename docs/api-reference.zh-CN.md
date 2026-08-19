@@ -192,4 +192,8 @@ flask xxljob remove
 flask xxljob status
 ```
 
+`xxljob remove` 会先停止当前本地 Registry 续约生命周期，再执行一次同步 Remove。
+Admin 注销失败时命令返回非零退出码，但不会重新启动续约。这一终止型 CLI 语义与公开
+低层 `remove_executor()` 有意区分；后者只执行一次同步 RPC，不停止 Worker。
+
 配置项完整列表见 [配置](configuration.zh-CN.md)。

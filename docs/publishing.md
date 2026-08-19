@@ -8,25 +8,50 @@ uploading is performed by `.github/workflows/release.yml`.
 
 ## Build
 
-```bash
-.venv\Scripts\python.exe -m build
+Build into a new, empty directory so historical files under `dist/` cannot be
+mistaken for this release. PowerShell example:
+
+```powershell
+$buildDir = Join-Path $env:TEMP "flask-xxljob-0.4.0-dist"
+Remove-Item -LiteralPath $buildDir -Recurse -Force -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Path $buildDir | Out-Null
+.venv\Scripts\python.exe -m build --outdir $buildDir
 ```
 
-This produces a wheel and a source distribution in `dist/`:
+The clean directory must contain exactly:
 
 ```text
-dist/
-  flask_xxljob-0.4.0-py3-none-any.whl
-  flask_xxljob-0.4.0.tar.gz
+flask_xxljob-0.4.0-py3-none-any.whl
+flask_xxljob-0.4.0.tar.gz
 ```
 
 ## Check
 
-```bash
+```powershell
 .venv\Scripts\python.exe scripts\check_docs.py
-.venv\Scripts\python.exe scripts\check_package.py
-.venv\Scripts\python.exe -m twine check dist\flask_xxljob-0.4.0-py3-none-any.whl dist\flask_xxljob-0.4.0.tar.gz
+.venv\Scripts\python.exe scripts\check_package.py --dist-dir $buildDir
+.venv\Scripts\python.exe -m twine check `
+  (Join-Path $buildDir "flask_xxljob-0.4.0-py3-none-any.whl") `
+  (Join-Path $buildDir "flask_xxljob-0.4.0.tar.gz")
 ```
+
+The project-specific validator checks wheel RECORD file/hash/size mappings,
+rejects Wheel signature files, verifies the standard top-level sdist
+`PKG-INFO`, compares wheel/sdist names and versions, checks required source,
+typing and legal files, caches and development directories.
+It validates only freshly built Flask-XXLJob artifacts; it is not a general
+Wheel or sdist validator.
+
+## Isolated installed-wheel smoke
+
+Create a separate virtual environment and working directory outside the source
+checkout. Install only the new wheel and its dependencies, run `pip check`, copy
+`scripts/smoke_installed_wheel.py` into the temporary working directory, clear
+`PYTHONPATH`, and execute it from there. The smoke test fails unless
+`flask_xxljob.__file__` comes from that environment's `site-packages` and all
+existing package/metadata version sources report 0.4.0. It exercises all five
+executor endpoints, Callback Client, and both CLI implementations, including
+successful and failed terminal Remove lifecycles.
 
 ## Configure Trusted Publishing
 
@@ -80,8 +105,5 @@ Run all checks above and confirm that the wheel and source distribution contain
 `LICENSE` and `NOTICE`, declare `Apache-2.0`, use the real project URLs, and do
 not include secrets, internal hostnames or tokens.
 
-```bash
-.venv\Scripts\python.exe scripts\check_docs.py
-.venv\Scripts\python.exe scripts\check_package.py
-.venv\Scripts\python.exe -m twine check dist\flask_xxljob-0.4.0-py3-none-any.whl dist\flask_xxljob-0.4.0.tar.gz
-```
+Use the clean `$buildDir` commands above; never validate a mixed historical
+`dist/` directory or run the installed-wheel smoke from the source checkout.

@@ -11,7 +11,12 @@ from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional, cast
 
 from flask import Flask, current_app, has_app_context
 
-from ._app import ApplicationRegistry, ensure_executor_routes_available, executor_paths
+from ._app import (
+    ApplicationRegistry,
+    ensure_blueprint_name_available,
+    ensure_executor_routes_available,
+    executor_paths,
+)
 from ._lifecycle import install_runtime_finalizer
 from ._logging import XXLJobLogManager
 from .callback.registry import (
@@ -25,7 +30,12 @@ from .callback.registry import (
 from .client.admin_client import AdminClient
 from .client.callback_client import CallbackClient
 from .config import XXLJobConfig
-from .exceptions import XXLJobAlreadyInitializedError, XXLJobError, XXLJobRequestError
+from .exceptions import (
+    XXLJobAlreadyInitializedError,
+    XXLJobConfigError,
+    XXLJobError,
+    XXLJobRequestError,
+)
 from .protocol.blueprint import build_blueprint
 from .registry.registry_service import RegistryService
 from .response.executor import FAIL_CODE, SUCCESS_CODE
@@ -97,35 +107,45 @@ class FlaskXXLJob:
         ``app.extensions["xxljob"]``, and starts auto-registration when
         configured.
         """
-        if not hasattr(app, "extensions"):
-            app.extensions = {}
-
-        if EXTENSION_KEY in app.extensions:
+        extensions = getattr(app, "extensions", None)
+        if extensions is not None and EXTENSION_KEY in extensions:
             raise XXLJobAlreadyInitializedError(
                 "Flask-XXLJob has already been initialized on this application. "
                 "Call init_app(app) only once per application."
             )
 
+        # Preflight: deterministic validation only.  No Flask registration,
+        # logger handler, file, runtime or background worker is created here.
         try:
             config = XXLJobConfig.from_mapping(app.config)
-        except Exception as exc:
+            if config.enabled and config.auto_register:
+                config.validate_registry()
+        except XXLJobConfigError as exc:
             logger.error(
                 "Flask-XXLJob configuration validation failed "
                 "exception_type=%s.",
                 type(exc).__name__,
             )
             raise
+        except Exception:
+            logger.exception(
+                "Unexpected error while validating Flask-XXLJob configuration."
+            )
+            raise
+
+        blueprint = None
         if config.enabled:
             ensure_executor_routes_available(app, config.route_prefix)
+            blueprint_name = _blueprint_name(app)
+            ensure_blueprint_name_available(app, blueprint_name)
+            blueprint = build_blueprint(blueprint_name, config.route_prefix)
 
+        # Commit starts here.  Resource creation and Flask mutations happen
+        # only after every deterministic preflight check has succeeded.
         try:
             log_manager = XXLJobLogManager(app, config)
-        except Exception as exc:
-            logger.error(
-                "Flask-XXLJob logging initialization failed "
-                "exception_type=%s.",
-                type(exc).__name__,
-            )
+        except Exception:
+            logger.exception("Flask-XXLJob logging initialization failed.")
             raise
         callback_registry = CallbackRegistry()
         # 将模块级默认处理函数注入到本应用的注册表，支持在 init_app 之前注册。
@@ -155,13 +175,13 @@ class FlaskXXLJob:
         )
         try:
             if config.enabled:
-                blueprint = build_blueprint(
-                    _blueprint_name(app), config.route_prefix
-                )
+                assert blueprint is not None
                 app.register_blueprint(blueprint)
                 self._register_protocol_error_handlers(app, config.route_prefix)
 
             self._register_cli(app)
+            if not hasattr(app, "extensions"):
+                app.extensions = {}
             app.extensions[EXTENSION_KEY] = runtime
             self._applications.add(app)
             runtime.attach_finalizer(install_runtime_finalizer(app, runtime))
@@ -174,10 +194,9 @@ class FlaskXXLJob:
             if config.enabled and config.auto_register:
                 # Automatic and explicit starts share exactly one public path.
                 self.start_registry(app)
-        except Exception as exc:
-            log_manager.get_logger("runtime").error(
-                "Flask-XXLJob initialization failed exception_type=%s.",
-                type(exc).__name__,
+        except Exception:
+            log_manager.get_logger("runtime").exception(
+                "Flask-XXLJob initialization failed."
             )
             runtime.close()
             raise

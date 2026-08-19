@@ -197,7 +197,7 @@ def build_blueprint(name: str, url_prefix: str) -> Blueprint:
         except Exception as exc:  # noqa: BLE001 - isolate user callback
             # traceback 仅写入本地日志，不返回给 XXL-JOB。
             # The traceback is logged locally only and never returned to XXL-JOB.
-            runtime.log_manager.get_logger("protocol").error(
+            runtime.log_manager.get_logger("protocol").exception(
                 "XXL-JOB /log callback failed log_id=%s exception_type=%s.",
                 model.log_id,
                 type(exc).__name__,
@@ -230,6 +230,7 @@ def build_blueprint(name: str, url_prefix: str) -> Blueprint:
         runtime.log_manager.get_logger("protocol").error(
             "Unexpected error in XXL-JOB executor endpoint exception_type=%s.",
             type(exc).__name__,
+            exc_info=(type(exc), exc, exc.__traceback__),
         )
         return _json(XXLJobResponse.failure("XXL-JOB internal protocol error"))
 
@@ -262,7 +263,7 @@ def build_blueprint(name: str, url_prefix: str) -> Blueprint:
         except Exception as exc:  # noqa: BLE001 - isolate user callback
             # traceback 仅写入本地日志，不返回给 XXL-JOB。
             # The traceback is logged locally only and never returned to XXL-JOB.
-            _runtime().log_manager.get_logger("protocol").error(
+            _runtime().log_manager.get_logger("protocol").exception(
                 "XXL-JOB /%s callback failed exception_type=%s.",
                 endpoint,
                 type(exc).__name__,

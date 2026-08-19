@@ -24,6 +24,13 @@
   应用 Runtime、Handler、Callback、路由、配置与无进程资源的 AdminClient 保持不变。
 - Runtime finalizer 始终非阻塞；退出注销复用 generation 资格和统一 Scheduler，托管
   日志在全部后台收尾空闲后恰好关闭一次。
+- `init_app()` 会先完成无副作用的确定性 Preflight，再创建托管日志资源或提交
+  Blueprint、CLI、Hook、扩展、应用注册、finalizer 与 Registry 状态；修正配置后可在
+  同一个 Flask app 上重试。
+- Flask 与独立 CLI 的 `remove` 现在先停止本地续约，再同步 Remove；即使 Admin 注销
+  失败，Worker 仍保持停止。低层 `remove_executor()` 行为不变。
+- 用户回调与包内未预期异常会保留完整本地 traceback；预期网络/HTTP/远端失败仍是
+  简洁 `CallResult` 事件，协议响应继续使用通用错误。
 - 构建后端继续限制在 Hatchling 1.32 以下，使当前 Twine 可以校验 Core Metadata 2.4。
 
 ### 配置
@@ -46,7 +53,10 @@
 
 ### 测试
 
-- 最终本地测试为 456 项通过、2 项可选官方 Admin 测试跳过，行覆盖率 93.87%。覆盖
+- 发布检查改为在干净临时目录构建，只验证本轮新 wheel/sdist（包括仅针对文件成员的
+  RECORD 映射与标准顶层 PKG-INFO），拒绝开发/签名文件，并在 `pip check` 后执行与
+  源码隔离的安装后冒烟。
+- 最终本地测试为 484 项通过、2 项可选官方 Admin 测试跳过，行覆盖率 94.15%。覆盖
   PID/disabled 顺序、generation ownership、Remove 竞态、cleanup 启动失败、严格
   completion sequence、非阻塞 finalizer 与日志恰好关闭一次。
 

@@ -29,6 +29,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Runtime finalization is non-blocking. Exit removal is best-effort, uses the
   same generation eligibility and scheduler, and managed logs close once after
   all background cleanup is idle.
+- `init_app()` now completes a side-effect-free deterministic preflight before
+  creating managed log resources or committing Blueprint, CLI, hook, extension,
+  application-registry, finalizer or Registry state. Corrected configuration
+  can be retried on the same Flask application.
+- Flask and standalone CLI `remove` commands now stop local renewal before the
+  synchronous Remove. The Worker stays stopped even when Admin removal fails;
+  the low-level `remove_executor()` behavior is unchanged.
+- User callback and unexpected internal exceptions retain full local
+  tracebacks, while expected network/HTTP/remote failures remain concise
+  `CallResult` events and protocol responses remain generic.
 - The build backend remains capped below Hatchling 1.32 so current Twine can
   validate Core Metadata 2.4 artifacts.
 
@@ -55,8 +65,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Testing
 
-- The final local suite completed with 456 passed, 2 optional official-Admin
-  tests skipped, and 93.87% line coverage. It covers PID/disabled ordering,
+- Release checks now build into a clean temporary directory, validate the one
+  new wheel and sdist (including file-only RECORD mappings and authoritative
+  top-level PKG-INFO), reject development/signature files, and run a
+  source-isolated installed-wheel smoke test with `pip check`.
+- The final local suite completed with 484 passed, 2 optional official-Admin
+  tests skipped, and 94.15% line coverage. It covers PID/disabled ordering,
   generation ownership, Remove races, cleanup failures, strict completion
   sequences, non-blocking finalization and one-time log closure.
 

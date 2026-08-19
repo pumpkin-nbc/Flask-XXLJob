@@ -122,9 +122,10 @@ with app.app_context():
 
 Managed logging is off by default and creates no directory, file or console
 handler. Enabling only `XXL_JOB_LOG_ENABLED` writes to
-`./logs/flask-xxljob.log` and the console. For containers, disable the file
-target and retain the default console target. See the
-[logging guide](docs/logging.md).
+`./logs/flask-xxljob.log` and the console. The built-in rotating file target is
+appropriate for a single process; multiple processes must not share that file.
+For containers and multi-worker servers, prefer console or host-managed logs.
+See the [logging guide](docs/logging.md).
 
 `init_app()` starts Registry only when `XXL_JOB_ENABLED` and
 `XXL_JOB_AUTO_REGISTER` are both `True`. Set `XXL_JOB_AUTO_REGISTER=False` for
@@ -141,6 +142,12 @@ background Remove for that lifecycle, or use `stop_registry()` followed by
 deregistration is off by default so one worker does not remove a shared
 executor identity.
 
+Initialization first performs a side-effect-free preflight. Removed keys,
+field values, automatic Registry completeness and route/Blueprint conflicts
+are rejected before log handlers, files, Flask routes, CLI commands, extension
+state, finalizers or workers are committed. After correcting a deterministic
+configuration error, the same Flask application can be initialized again.
+
 ## CLI
 
 ```bash
@@ -149,6 +156,11 @@ flask --app "project:create_app" xxljob remove
 flask --app "project:create_app" xxljob status
 ```
 
+The CLI `remove` command is terminal for the current renewal lifecycle: it
+stops the local Registry Worker before attempting synchronous deregistration.
+The Worker remains stopped even when Admin removal fails. The low-level
+`remove_executor()` API remains a one-shot RPC and does not stop renewal.
+
 ## Compatibility
 
 Target support is `Flask >= 1.0` and `Python >= 3.8`. The compatibility matrix
@@ -156,8 +168,8 @@ Target support is `Flask >= 1.0` and `Python >= 3.8`. The compatibility matrix
 `.github/workflows/ci.yml`. This release was verified locally on Python 3.12.13
 with Flask 3.1.3; the remaining combinations are configured in CI but were not
 executed locally. Run the test suite in your own environment before claiming a
-specific combination. The final local 0.4.0 suite completed with 456 tests
-passed, 2 optional official-Admin tests skipped, and 93.87% line coverage.
+specific combination. The final local 0.4.0 suite completed with 484 tests
+passed, 2 optional official-Admin tests skipped, and 94.15% line coverage.
 
 When one `FlaskXXLJob` instance initializes multiple Flask applications, pass
 `app=` to callback, registration, status and lifecycle helpers outside an

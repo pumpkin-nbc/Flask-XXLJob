@@ -258,6 +258,9 @@ class RegistryService:
                 else:
                     result = self._admin_client.registry(self._build_request())
             except Exception as exc:  # noqa: BLE001 - expose a safe CallResult
+                self._logger.exception(
+                    "Unexpected error during one-shot Registry RPC."
+                )
                 action = "removal" if remove else "registration"
                 result = self._unexpected_result(action, exc)
         return result, sequence
@@ -415,6 +418,9 @@ class RegistryService:
             try:
                 result = self._admin_client.registry(self._build_request())
             except Exception as exc:  # noqa: BLE001 - worker must keep retrying
+                self._logger.exception(
+                    "Unexpected error during Registry renewal."
+                )
                 result = self._unexpected_result("registration", exc)
 
         accepted = False
@@ -590,6 +596,11 @@ class RegistryService:
                 "XXL-JOB Registry cleanup actor failed to start "
                 "exception_type=%s.",
                 type(start_error).__name__,
+                exc_info=(
+                    type(start_error),
+                    start_error,
+                    start_error.__traceback__,
+                ),
             )
             if raise_start_error:
                 raise start_error
@@ -644,6 +655,9 @@ class RegistryService:
                     self._build_request()
                 )
             except Exception as exc:  # noqa: BLE001 - cleanup must terminate
+                self._logger.exception(
+                    "Unexpected error during Registry removal."
+                )
                 result = self._unexpected_result("removal", exc)
 
         if self._state_is_current(state):
@@ -775,11 +789,8 @@ class RegistryService:
         if should_close and self._close_logs is not None:
             try:
                 self._close_logs()
-            except Exception as exc:  # noqa: BLE001 - final cleanup is safe
-                self._logger.error(
-                    "XXL-JOB log cleanup failed exception_type=%s.",
-                    type(exc).__name__,
-                )
+            except Exception:  # noqa: BLE001 - final cleanup is safe
+                self._logger.exception("XXL-JOB log cleanup failed.")
 
     def _log_rpc_result(self, result: CallResult, operation: str) -> None:
         if result.success:

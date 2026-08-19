@@ -79,11 +79,16 @@ ANSI 转义码。着色不会改变等级过滤、格式字段或敏感信息脱
 
 ## 敏感信息
 
-插件事件只包含安全上下文、结果分类、HTTP 状态和异常类型，不包含请求体、请求头、
-Access Token、`executorParams`、`glueSource`、`handleMsg` 或用户异常文本。每个托管
-Handler 上还有最终脱敏 Filter，即使 `DEBUG` 等级也会替换已识别的凭据与私钥文本。
+插件自身编写的事件只包含安全上下文、结果分类与 HTTP 状态，不会主动记录请求体、
+请求头、Access Token、`executorParams`、`glueSource` 或 `handleMsg`。每个托管 Handler
+上还有最终脱敏 Filter，即使 `DEBUG` 等级也会替换已识别的凭据与私钥文本。
 
-这是额外防线，不表示可以向插件 Logger 写入任意业务数据。业务日志请由应用单独配置。
+用户回调抛出的异常或包内未预期缺陷会在本地日志保留异常类型、消息和完整 traceback。
+预期的网络、HTTP 与远端业务失败仍使用简洁 `CallResult` 事件，不会在每个 Registry
+间隔输出一整段 traceback。异常诊断不会进入执行器 HTTP 响应。
+
+这是额外防线，不表示可以向插件 Logger 写入任意业务数据。应用代码不得把密码、Token、
+私钥或其他凭据写入异常消息；业务日志请由应用单独配置。
 
 ## 容器与多进程
 
@@ -98,7 +103,7 @@ app.config.update(
 ```
 
 由平台采集、保留、检索和轮转该输出流。Python 标准 `RotatingFileHandler` 不保证多个
-工作进程共享同一文件时安全。多进程部署请使用控制台聚合、宿主管理的 Handler，或为
-每个进程配置独立文件。
+工作进程共享同一文件时安全。内置文件目标仅适合单进程；多进程部署请使用控制台聚合、
+宿主管理的多进程安全 Handler，或为每个进程配置独立文件。
 
 全部选项见[配置](configuration.zh-CN.md)。

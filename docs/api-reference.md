@@ -209,4 +209,10 @@ flask xxljob remove
 flask xxljob status
 ```
 
+`xxljob remove` first stops the current local Registry renewal lifecycle and
+then performs one synchronous Remove. A failed Admin Remove produces a non-zero
+exit code but never restarts renewal. This terminal CLI behavior is deliberately
+different from the public low-level `remove_executor()`, which performs only
+one synchronous RPC and does not stop a Worker.
+
 See [configuration](configuration.md) for the full list of configuration keys.

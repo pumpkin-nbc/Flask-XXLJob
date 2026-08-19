@@ -64,10 +64,9 @@ class SensitiveDataFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         record.msg = redact_text(record.getMessage(), self._access_token)
         record.args = ()
-        # Plugin code logs exception types instead of values. Drop accidental
-        # exception payloads as a final safeguard for managed output.
-        record.exc_info = None
-        record.exc_text = None
+        # Preserve traceback data.  The filter redacts plugin-authored message
+        # fields; application code remains responsible for not placing secrets
+        # directly in exception messages.
         return True
 
 

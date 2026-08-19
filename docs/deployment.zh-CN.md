@@ -9,12 +9,13 @@
 
 ```mermaid
 flowchart TD
-    A["init_app()"] --> B["检查已删除配置与已提供字段的值"]
-    B --> C["创建 Runtime 并安装 finalizer"]
-    C --> D{"ENABLED？"}
-    D -->|"是"| E["注册 beat / idleBeat / run / kill / log"]
-    E --> F["HTTP 执行器协议可用"]
-    D -->|"否"| G["扩展保持禁用，不注册插件路由"]
+    A["init_app()"] --> B["Preflight：配置与 Flask 冲突"]
+    B -->|"失败"| C["不提交 XXL-JOB 资源并返回"]
+    B -->|"成功"| D["Commit Runtime、日志、CLI、Hook 与 finalizer"]
+    D --> E{"ENABLED？"}
+    E -->|"是"| F["注册 beat / idleBeat / run / kill / log"]
+    F --> G["HTTP 执行器协议可用"]
+    E -->|"否"| H["扩展保持禁用，不注册插件路由"]
 ```
 
 Registry 是另一条独立的进程级路径：
@@ -60,6 +61,10 @@ result = xxl_job.remove_executor(app)
 ```
 
 不要针对同一次意图再同时使用 `stop_registry(remove=True)`。
+
+Flask 与独立 CLI 的 `remove` 都是终止型管理命令：先停止本地续约，再执行上述同步
+Remove。Admin 注销失败会返回非零退出码，但本地 Worker 仍保持停止且不会再次注册。
+这不会改变低层 `remove_executor()` API。
 
 ## 执行器地址
 

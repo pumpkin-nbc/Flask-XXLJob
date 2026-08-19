@@ -406,14 +406,46 @@ def test_protocol_logs_safe_failure_categories(tmp_path, capsys):
     assert "request parsing failed" in output
     assert "unsupported_handler=unknown" in output
     assert "exception_type=RuntimeError" in output
+    assert "Traceback (most recent call last):" in output
+    assert "RuntimeError: user-secret-message" in output
     for secret in (
         token,
         "wrong-secret",
         "not-json-business-secret",
         "business-secret",
-        "user-secret-message",
     ):
         assert secret not in output
+
+
+def test_callback_exception_traceback_is_formatted_but_not_returned(
+    tmp_path, capsys
+):
+    app, ext = make_app(
+        XXL_JOB_LOG_ENABLED=True,
+        XXL_JOB_LOG_FILE_ENABLED=False,
+        XXL_JOB_LOG_CONSOLE_ENABLED=True,
+        XXL_JOB_LOG_FORMAT="%(levelname)s|%(message)s",
+    )
+
+    @ext.on_run("diagnostic")
+    def _run(_request):
+        raise RuntimeError("diagnostic-detail")
+
+    response = app.test_client().post(
+        "/run",
+        json={"executorHandler": "diagnostic", "executorParams": "safe"},
+    )
+
+    rendered = capsys.readouterr().err
+    assert "Traceback (most recent call last):" in rendered
+    assert "RuntimeError: diagnostic-detail" in rendered
+    assert response.status_code == 200
+    assert response.json["code"] == 500
+    response_text = response.get_data(as_text=True)
+    assert "RuntimeError" not in response_text
+    assert "diagnostic-detail" not in response_text
+    assert "Traceback" not in response_text
+    assert __file__ not in response_text
 
 
 @pytest.mark.parametrize(
@@ -528,6 +560,7 @@ def test_admin_failover_registry_renewal_removal_and_callback_events(
     assert "executor renewal succeeded" in output
     assert "callback failed" in output
     assert "executor removal succeeded" in output
+    assert "Traceback (most recent call last):" not in output
     assert post.call_count == 5
     for secret in (
         "network-message-secret",

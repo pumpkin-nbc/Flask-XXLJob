@@ -119,8 +119,9 @@ with app.app_context():
 | `XXL_JOB_LOG_PROPAGATE` | `False` | 存在托管 Handler 时是否继续传播。 |
 
 托管日志默认关闭，不创建目录、文件或控制台 Handler。只开启
-`XXL_JOB_LOG_ENABLED` 时默认同时写入 `./logs/flask-xxljob.log` 和控制台；容器环境
-建议关闭文件目标并保留默认控制台目标。详见[日志指南](docs/logging.zh-CN.md)。
+`XXL_JOB_LOG_ENABLED` 时默认同时写入 `./logs/flask-xxljob.log` 和控制台。内置轮转
+文件目标适合单进程，多个进程不得共享该文件；容器与多 Worker 服务建议使用控制台
+或宿主管理的日志。详见[日志指南](docs/logging.zh-CN.md)。
 
 只有 `XXL_JOB_ENABLED` 与 `XXL_JOB_AUTO_REGISTER` 同时为 `True` 时，`init_app()`
 才会启动 Registry。Gunicorn preload 或 Flask Application Factory 与 Celery 共用时，
@@ -133,6 +134,11 @@ with app.app_context():
 `CallResult` 时，先调用 `stop_registry()`，再调用 `remove_executor()`。退出注销默认
 关闭，避免单个 Worker 退出时删除共享执行器身份。
 
+初始化会先执行无副作用 Preflight。已删除配置、字段值、自动 Registry 完整配置以及
+路由/Blueprint 冲突会在创建日志 Handler、打开文件、注册路由/CLI、写入扩展状态、
+安装 finalizer 或启动 Worker 前失败。修正确定性配置错误后，同一个 Flask app 可以
+重新初始化。
+
 ## 命令行
 
 ```bash
@@ -141,14 +147,18 @@ flask --app "project:create_app" xxljob remove
 flask --app "project:create_app" xxljob status
 ```
 
+CLI `remove` 是当前续约生命周期的终止型命令：先停止本地 Registry Worker，再同步
+尝试远端注销。即使 Admin 注销失败，Worker 仍保持停止。低层 `remove_executor()`
+仍然只是一次同步 RPC，不会停止续约。
+
 ## 兼容性
 
 目标支持 `Flask >= 1.0` 与 `Python >= 3.8`。兼容性矩阵
 （Python 3.8-3.14 x Flask 1/2/3）已在 `.github/workflows/ci.yml` 中配置。
 本版本已在 Python 3.12.13 与 Flask 3.1.3
 上完成本地验证；其余组合已在 CI 中配置但未在本地执行。请在你自己的环境中
-运行测试后再声明特定组合可用。0.4.0 最终本地测试结果为 456 项通过、2 项可选
-官方 Admin 测试跳过，行覆盖率 93.87%。
+运行测试后再声明特定组合可用。0.4.0 最终本地测试结果为 484 项通过、2 项可选
+官方 Admin 测试跳过，行覆盖率 94.15%。
 
 当同一个 `FlaskXXLJob` 实例初始化了多个 Flask 应用时，请在应用上下文之外调用回调、注册、状态与生命周期辅助方法时显式传入 `app=`。只有恰好初始化了一个应用时才可省略；在初始化前注册的 `on_*` 装饰器仍会作为默认处理函数注入其后初始化的每个应用。
 

@@ -16,10 +16,15 @@ affected version.
 
 Flask-XXLJob uses the official `XXL-JOB-ACCESS-TOKEN` header. The access token:
 
-- is never written to logs;
-- never appears in exception messages;
+- is never deliberately written to plugin-authored logs;
+- is never included in package-authored exception messages;
 - must never be hard-coded in example projects.
 
 Configure it through `XXL_JOB_ACCESS_TOKEN`, ideally from an environment
 variable, and never commit real tokens, internal hostnames or internal IP
 addresses.
+
+Local logs preserve full tracebacks for user callback exceptions and unexpected
+package errors. Application code must never place passwords, tokens, private
+keys or other credentials directly in an exception message. Executor HTTP
+responses remain generic and never expose those traceback details.

@@ -55,7 +55,7 @@ def test_close_logs_shutdown_error_without_raising(mocker):
 
     runtime.close()
 
-    logger.error.assert_called_once()
+    logger.exception.assert_called_once()
 
 
 def test_close_resets_runtime_cleanup_state_after_pid_change(mocker):

@@ -23,7 +23,7 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
-    name: py${{ matrix.python-version }} / ${{ matrix.label || 'latest Flask' }}
+    name: py${{ matrix.python-version }} / Flask ${{ matrix.flask-version }}.x
     strategy:
       fail-fast: false
       matrix:
@@ -75,6 +75,10 @@ jobs:
 
   package:
     runs-on: ubuntu-latest
+    env:
+      BUILD_DIR: ${{ runner.temp }}/flask-xxljob-dist
+      SMOKE_VENV: ${{ runner.temp }}/flask-xxljob-smoke-venv
+      SMOKE_WORK: ${{ runner.temp }}/flask-xxljob-smoke-work
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -83,15 +87,32 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: pip install build twine
       - run: python scripts/check_docs.py
-      - run: python -m build
-      - run: python -m twine check dist/*
-      - run: python scripts/check_package.py
-      - run: python -m pip install --force-reinstall dist/*.whl
-      - name: Smoke-test installed wheel
+      - name: Build fresh 0.4.0 artifacts
         run: |
-          cd "${RUNNER_TEMP}"
-          python -c "import flask_xxljob; from importlib.metadata import version; assert flask_xxljob.__version__ == version('flask-xxljob') == '0.4.0'"
-          flask-xxljob --version
+          rm -rf "${BUILD_DIR}"
+          mkdir -p "${BUILD_DIR}"
+          python -m build --outdir "${BUILD_DIR}"
+      - name: Check fresh artifacts
+        run: |
+          python -m twine check \
+            "${BUILD_DIR}/flask_xxljob-0.4.0-py3-none-any.whl" \
+            "${BUILD_DIR}/flask_xxljob-0.4.0.tar.gz"
+          python scripts/check_package.py --dist-dir "${BUILD_DIR}"
+      - name: Smoke-test isolated installed wheel
+        run: |
+          rm -rf "${SMOKE_VENV}" "${SMOKE_WORK}"
+          python -m venv "${SMOKE_VENV}"
+          "${SMOKE_VENV}/bin/python" -m pip install --upgrade pip
+          "${SMOKE_VENV}/bin/python" -m pip install \
+            "${BUILD_DIR}/flask_xxljob-0.4.0-py3-none-any.whl"
+          "${SMOKE_VENV}/bin/python" -m pip check
+          mkdir -p "${SMOKE_WORK}"
+          cp scripts/smoke_installed_wheel.py "${SMOKE_WORK}/smoke_installed_wheel.py"
+          cd "${SMOKE_WORK}"
+          unset PYTHONPATH
+          export PYTHONNOUSERSITE=1
+          "${SMOKE_VENV}/bin/python" smoke_installed_wheel.py \
+            --source-root "${GITHUB_WORKSPACE}"
 
   required-ci:
     name: Required CI

@@ -10,12 +10,13 @@ five HTTP routes.
 
 ```mermaid
 flowchart TD
-    A["init_app()"] --> B["Validate removed keys and supplied field values"]
-    B --> C["Create Runtime and register finalizer"]
-    C --> D{"ENABLED?"}
-    D -->|"Yes"| E["Register beat / idleBeat / run / kill / log"]
-    E --> F["HTTP executor protocol is available"]
-    D -->|"No"| G["Keep the extension disabled; do not register its routes"]
+    A["init_app()"] --> B["Preflight: configuration and Flask conflicts"]
+    B -->|"Failure"| C["Return without committing XXL-JOB resources"]
+    B -->|"Success"| D["Commit Runtime, logging, CLI, hooks and finalizer"]
+    D --> E{"ENABLED?"}
+    E -->|"Yes"| F["Register beat / idleBeat / run / kill / log"]
+    F --> G["HTTP executor protocol is available"]
+    E -->|"No"| H["Keep the extension disabled; do not register its routes"]
 ```
 
 Registry is a separate, process-local path:
@@ -66,6 +67,12 @@ result = xxl_job.remove_executor(app)
 
 Do not combine this with `stop_registry(remove=True)` for the same intended
 removal.
+
+The Flask and standalone CLI `remove` commands are terminal management
+operations. They stop local renewal first and then perform the synchronous
+Remove above. A failed Admin Remove returns a non-zero exit code, but the local
+Worker stays stopped and does not register again. This does not change the
+low-level `remove_executor()` API.
 
 ## Executor address
 

@@ -105,6 +105,15 @@ empty (no-token mode), while a non-empty token is preserved. Validation messages
 name the offending key, its received type and the expected format. Bad
 configuration is never silently ignored.
 
+`init_app()` treats these deterministic checks as a side-effect-free preflight.
+When automatic Registry startup is requested, full Registry completeness and
+executor route/Blueprint conflicts are also checked before any managed log
+handler or file, Blueprint, CLI command, request hook, extension state,
+application registration, finalizer or Worker is created. Commit starts only
+after preflight succeeds, so the same Flask application can be retried after a
+deterministic configuration error is corrected. This is not a general rollback
+mechanism for operating-system resource failures during commit.
+
 All boolean settings accept real booleans only. Levels, encodings, rotation
 values and log formats are validated during initialization; the format is
 exercised against a synthetic `LogRecord`, so an unknown field fails before

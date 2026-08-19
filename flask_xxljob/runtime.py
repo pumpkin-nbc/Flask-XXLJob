@@ -85,8 +85,5 @@ class XXLJobRuntime:
             self.registry_service.shutdown(
                 deregister_on_exit=self.config.deregister_on_exit,
             )
-        except Exception as exc:  # noqa: BLE001 - shutdown remains best effort
-            logger.error(
-                "Flask-XXLJob runtime shutdown failed exception_type=%s.",
-                type(exc).__name__,
-            )
+        except Exception:  # noqa: BLE001 - shutdown remains best effort
+            logger.exception("Flask-XXLJob runtime shutdown failed.")

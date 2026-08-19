@@ -13,6 +13,10 @@ jobs:
   build:
     name: Build and validate distributions
     runs-on: ubuntu-latest
+    env:
+      BUILD_DIR: ${{ runner.temp }}/flask-xxljob-release-dist
+      SMOKE_VENV: ${{ runner.temp }}/flask-xxljob-release-smoke-venv
+      SMOKE_WORK: ${{ runner.temp }}/flask-xxljob-release-smoke-work
     steps:
       - uses: actions/checkout@v4
         with:
@@ -43,15 +47,36 @@ jobs:
       - name: Check documentation
         run: python scripts/check_docs.py
       - name: Build wheel and source distribution
-        run: python -m build
+        run: |
+          rm -rf "${BUILD_DIR}"
+          mkdir -p "${BUILD_DIR}"
+          python -m build --outdir "${BUILD_DIR}"
       - name: Check distribution metadata
-        run: python -m twine check dist/*
+        run: |
+          python -m twine check \
+            "${BUILD_DIR}/flask_xxljob-0.4.0-py3-none-any.whl" \
+            "${BUILD_DIR}/flask_xxljob-0.4.0.tar.gz"
       - name: Check distribution contents
-        run: python scripts/check_package.py
+        run: python scripts/check_package.py --dist-dir "${BUILD_DIR}"
+      - name: Smoke-test isolated installed wheel
+        run: |
+          rm -rf "${SMOKE_VENV}" "${SMOKE_WORK}"
+          python -m venv "${SMOKE_VENV}"
+          "${SMOKE_VENV}/bin/python" -m pip install --upgrade pip
+          "${SMOKE_VENV}/bin/python" -m pip install \
+            "${BUILD_DIR}/flask_xxljob-0.4.0-py3-none-any.whl"
+          "${SMOKE_VENV}/bin/python" -m pip check
+          mkdir -p "${SMOKE_WORK}"
+          cp scripts/smoke_installed_wheel.py "${SMOKE_WORK}/smoke_installed_wheel.py"
+          cd "${SMOKE_WORK}"
+          unset PYTHONPATH
+          export PYTHONNOUSERSITE=1
+          "${SMOKE_VENV}/bin/python" smoke_installed_wheel.py \
+            --source-root "${GITHUB_WORKSPACE}"
       - uses: actions/upload-artifact@v4
         with:
           name: python-distributions
-          path: dist/
+          path: ${{ env.BUILD_DIR }}/
           if-no-files-found: error
           retention-days: 7
 

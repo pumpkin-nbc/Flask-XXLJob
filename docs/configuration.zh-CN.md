@@ -89,6 +89,12 @@ Admin，也不修改 `registered`。`stop_registry(remove=True)` 会同步校验
 允许上下文路径。地址会在加载时规范化，`XXL_JOB_ROUTE_PREFIX` 会始终附加到执行器
 地址。错误配置绝不会被静默忽略。
 
+`init_app()` 将这些确定性检查作为无副作用 Preflight。请求自动启动 Registry 时，
+完整 Registry 配置以及执行器路由/Blueprint 冲突也会在创建托管日志 Handler 或文件、
+注册 Blueprint、CLI、请求 Hook、扩展状态、应用记录、finalizer 或 Worker 前完成。
+只有 Preflight 成功才进入 Commit，因此修正确定性配置错误后可以在同一个 Flask app
+上重试。这不是针对 Commit 阶段操作系统资源异常的通用 rollback 机制。
+
 所有布尔配置只接受真正的布尔值。等级、编码、轮转值与日志格式均在初始化
 阶段校验；格式会使用模拟 `LogRecord` 实际格式化一次，因此未知字段会在应用启动前
 失败。托管日志关闭或两个输出目标都关闭时，扩展不会覆盖 Runtime Logger 的等级和
