@@ -249,7 +249,11 @@ def test_sdist_requires_authoritative_top_level_pkg_info(tmp_path):
 
 def test_forbidden_project_files_are_rejected(tmp_path):
     files = _wheel_files()
+    files["flask_xxljob/__pycache__/module.pyc"] = b"cache"
 
     errors = _wheel_errors(_write_wheel(tmp_path, files=files))
 
-    assert any("Forbidden path" in error for error in errors)
+    assert any(
+        "Forbidden path" in error and "__pycache__" in error
+        for error in errors
+    )
