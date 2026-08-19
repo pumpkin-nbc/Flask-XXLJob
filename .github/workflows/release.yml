@@ -13,10 +13,6 @@ jobs:
   build:
     name: Build and validate distributions
     runs-on: ubuntu-latest
-    env:
-      BUILD_DIR: ${{ runner.temp }}/flask-xxljob-release-dist
-      SMOKE_VENV: ${{ runner.temp }}/flask-xxljob-release-smoke-venv
-      SMOKE_WORK: ${{ runner.temp }}/flask-xxljob-release-smoke-work
     steps:
       - uses: actions/checkout@v4
         with:
@@ -47,18 +43,28 @@ jobs:
       - name: Check documentation
         run: python scripts/check_docs.py
       - name: Build wheel and source distribution
+        env:
+          BUILD_DIR: ${{ runner.temp }}/flask-xxljob-release-dist
         run: |
           rm -rf "${BUILD_DIR}"
           mkdir -p "${BUILD_DIR}"
           python -m build --outdir "${BUILD_DIR}"
       - name: Check distribution metadata
+        env:
+          BUILD_DIR: ${{ runner.temp }}/flask-xxljob-release-dist
         run: |
           python -m twine check \
             "${BUILD_DIR}/flask_xxljob-0.4.0-py3-none-any.whl" \
             "${BUILD_DIR}/flask_xxljob-0.4.0.tar.gz"
       - name: Check distribution contents
+        env:
+          BUILD_DIR: ${{ runner.temp }}/flask-xxljob-release-dist
         run: python scripts/check_package.py --dist-dir "${BUILD_DIR}"
       - name: Smoke-test isolated installed wheel
+        env:
+          BUILD_DIR: ${{ runner.temp }}/flask-xxljob-release-dist
+          SMOKE_VENV: ${{ runner.temp }}/flask-xxljob-release-smoke-venv
+          SMOKE_WORK: ${{ runner.temp }}/flask-xxljob-release-smoke-work
         run: |
           rm -rf "${SMOKE_VENV}" "${SMOKE_WORK}"
           python -m venv "${SMOKE_VENV}"
@@ -76,7 +82,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: python-distributions
-          path: ${{ env.BUILD_DIR }}/
+          path: ${{ runner.temp }}/flask-xxljob-release-dist/
           if-no-files-found: error
           retention-days: 7
 

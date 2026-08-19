@@ -75,10 +75,6 @@ jobs:
 
   package:
     runs-on: ubuntu-latest
-    env:
-      BUILD_DIR: ${{ runner.temp }}/flask-xxljob-dist
-      SMOKE_VENV: ${{ runner.temp }}/flask-xxljob-smoke-venv
-      SMOKE_WORK: ${{ runner.temp }}/flask-xxljob-smoke-work
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -88,17 +84,25 @@ jobs:
       - run: pip install build twine
       - run: python scripts/check_docs.py
       - name: Build fresh 0.4.0 artifacts
+        env:
+          BUILD_DIR: ${{ runner.temp }}/flask-xxljob-dist
         run: |
           rm -rf "${BUILD_DIR}"
           mkdir -p "${BUILD_DIR}"
           python -m build --outdir "${BUILD_DIR}"
       - name: Check fresh artifacts
+        env:
+          BUILD_DIR: ${{ runner.temp }}/flask-xxljob-dist
         run: |
           python -m twine check \
             "${BUILD_DIR}/flask_xxljob-0.4.0-py3-none-any.whl" \
             "${BUILD_DIR}/flask_xxljob-0.4.0.tar.gz"
           python scripts/check_package.py --dist-dir "${BUILD_DIR}"
       - name: Smoke-test isolated installed wheel
+        env:
+          BUILD_DIR: ${{ runner.temp }}/flask-xxljob-dist
+          SMOKE_VENV: ${{ runner.temp }}/flask-xxljob-smoke-venv
+          SMOKE_WORK: ${{ runner.temp }}/flask-xxljob-smoke-work
         run: |
           rm -rf "${SMOKE_VENV}" "${SMOKE_WORK}"
           python -m venv "${SMOKE_VENV}"
