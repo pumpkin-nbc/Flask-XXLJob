@@ -27,18 +27,21 @@ from tests.conftest import BASE_CONFIG, make_app
 def _capture_log_managers(mocker):
     managers = []
     handlers = []
+    close_spies = {}
 
     def create_manager(*args, **kwargs):
         manager = XXLJobLogManager(*args, **kwargs)
         managers.append(manager)
-        handlers.extend(manager.managed_handlers)
+        for handler in manager.managed_handlers:
+            handlers.append(handler)
+            close_spies[handler] = mocker.spy(handler, "close")
         return manager
 
     mocker.patch(
         "flask_xxljob.extension.XXLJobLogManager",
         side_effect=create_manager,
     )
-    return managers, handlers
+    return managers, handlers, close_spies
 
 
 def test_lazy_init():
@@ -349,7 +352,7 @@ def test_finalizer_prepare_failure_is_atomic_and_retryable(mocker):
         XXL_JOB_REGISTRY_INTERVAL=3600,
     )
     ext = FlaskXXLJob()
-    managers, handlers = _capture_log_managers(mocker)
+    managers, handlers, close_spies = _capture_log_managers(mocker)
     prepared_tokens = []
     real_prepare = RegistryService._prepare_start
     failure = RuntimeError("finalizer prepare failed")
@@ -411,7 +414,7 @@ def test_finalizer_prepare_failure_is_atomic_and_retryable(mocker):
     assert ext._applications.is_empty  # noqa: SLF001 - ownership contract
     assert managers[0].managed_handlers == ()
     assert handlers[0] not in managers[0].logger.handlers
-    assert getattr(handlers[0], "_closed", False) is True
+    close_spies[handlers[0]].assert_called_once_with()
 
     ext.init_app(app)
 
@@ -436,7 +439,7 @@ def test_prepared_thread_start_failure_closes_handlers_and_can_retry(
         XXL_JOB_REGISTRY_INTERVAL=3600,
     )
     ext = FlaskXXLJob()
-    managers, handlers = _capture_log_managers(mocker)
+    managers, handlers, close_spies = _capture_log_managers(mocker)
     install_finalizer = mocker.patch(
         "flask_xxljob.extension.install_runtime_finalizer"
     )
@@ -489,7 +492,7 @@ def test_prepared_thread_start_failure_closes_handlers_and_can_retry(
     assert len(managers) == 1
     assert managers[0].managed_handlers == ()
     assert handlers[0] not in managers[0].logger.handlers
-    assert getattr(handlers[0], "_closed", False) is True
+    close_spies[handlers[0]].assert_called_once_with()
 
     ext.init_app(app)
 
@@ -530,7 +533,7 @@ def test_uncommitted_constructor_failure_closes_private_handlers(
         XXL_JOB_LOG_CONSOLE_ENABLED=True,
     )
     ext = FlaskXXLJob()
-    managers, handlers = _capture_log_managers(mocker)
+    managers, handlers, close_spies = _capture_log_managers(mocker)
     failure = RuntimeError("{} construction failed".format(constructor))
     mocker.patch(
         "flask_xxljob.extension.{}".format(constructor),
@@ -546,7 +549,7 @@ def test_uncommitted_constructor_failure_closes_private_handlers(
     assert len(managers) == 1
     assert managers[0].managed_handlers == ()
     assert handlers[0] not in managers[0].logger.handlers
-    assert getattr(handlers[0], "_closed", False) is True
+    close_spies[handlers[0]].assert_called_once_with()
 
 
 def test_commit_failure_cancels_prepared_and_closes_private_handlers(
@@ -561,7 +564,7 @@ def test_commit_failure_cancels_prepared_and_closes_private_handlers(
         XXL_JOB_LOG_CONSOLE_ENABLED=True,
     )
     ext = FlaskXXLJob()
-    managers, handlers = _capture_log_managers(mocker)
+    managers, handlers, close_spies = _capture_log_managers(mocker)
     prepared_tokens = []
     services = []
     finalizers = []
@@ -610,7 +613,7 @@ def test_commit_failure_cancels_prepared_and_closes_private_handlers(
     assert registry.call_count == 0
     assert managers[0].managed_handlers == ()
     assert handlers[0] not in managers[0].logger.handlers
-    assert getattr(handlers[0], "_closed", False) is True
+    close_spies[handlers[0]].assert_called_once_with()
     assert EXTENSION_KEY not in app.extensions
     assert "xxljob" not in app.cli.commands
     assert ext._applications.is_empty  # noqa: SLF001 - ownership contract
@@ -627,7 +630,7 @@ def test_commit_failure_preserves_replacement_extension_and_cli(mocker):
         XXL_JOB_LOG_CONSOLE_ENABLED=True,
     )
     ext = FlaskXXLJob()
-    managers, handlers = _capture_log_managers(mocker)
+    managers, handlers, close_spies = _capture_log_managers(mocker)
     finalizers = []
     foreign_runtime = object()
     foreign_cli = click.Command("xxljob")
@@ -664,7 +667,7 @@ def test_commit_failure_preserves_replacement_extension_and_cli(mocker):
     assert finalizers[0].alive is False
     assert managers[0].managed_handlers == ()
     assert handlers[0] not in managers[0].logger.handlers
-    assert getattr(handlers[0], "_closed", False) is True
+    close_spies[handlers[0]].assert_called_once_with()
 
 
 def test_commit_failure_preserves_preinstalled_project_cli(mocker):
