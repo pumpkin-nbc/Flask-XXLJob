@@ -131,8 +131,9 @@ with app.app_context():
 
 enabled 时，Admin 与非空执行器 URL 会拒绝空白、控制字符、userinfo、query、fragment
 及非法主机/端口，只允许 HTTP/HTTPS。Route Prefix 兼容根路径、可选前导斜杠和单个
-尾斜杠，但拒绝动态 converter、点段、连续斜杠以及 URL/控制语法。Admin POST 从不
-跟随重定向；JSON 对象结构非法时归类为 `invalid_response`。
+尾斜杠，但拒绝动态 converter、点段、连续斜杠、百分号编码以及 URL/控制语法。
+它是 Flask 静态路径，因此直接拒绝 `%`，不解码也不自动修复。Admin POST 从不跟随
+重定向；JSON 对象结构非法时归类为 `invalid_response`。
 
 只有 `XXL_JOB_ENABLED` 与 `XXL_JOB_AUTO_REGISTER` 同时为 `True` 时，`init_app()`
 才会启动 Registry。Gunicorn preload 或 Flask Application Factory 与 Celery 共用时，
@@ -175,6 +176,10 @@ Prepare 随后启动一个只等待本地激活门、不会访问 Admin 的 Prep
 detach finalizer、取消已启动的 Prepared、只撤销本次仍持有 identity 的状态、关闭托管
 Handler，并保留原始异常。已正式提交的 Worker 即使在首次 Registry RPC 前被停止，也
 仍会执行 lifecycle `finally`。这是私有资源原子性，不是 Flask 路由/Hook 的通用回滚。
+一旦本次 `init_app()` 创建的 exact Blueprint 对象已在当前 app 可见，即使
+activation 抛异常，Runtime、CLI、应用记录与 finalizer ownership 也保持发布。
+原异常仍继续传播，但协议路由不会失去 Runtime。activation Event 补发仍失败时，
+已提交 Worker 也保持 ownership，交由现有 stop/shutdown/finalizer lifecycle 收敛。
 
 ## 命令行
 

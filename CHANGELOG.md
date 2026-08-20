@@ -63,7 +63,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Protocol routes and the routing-error hook are constructed on an unregistered
   Blueprint. Reversible CLI, extension, application-registry and finalizer
   ownership is published first; Blueprint registration is the final irreversible
-  commit before Prepared creator activation.
+  commit before Prepared creator activation. Once the exact Blueprint object
+  from this initialization is accepted by the app, later activation failures
+  preserve its Runtime and lifecycle ownership instead of leaving live routes
+  without extension state.
 - A Prepared `Thread.start()` failure now leaves Flask uncommitted, closes the
   initialization's private managed handlers/resources, preserves the original
   error and permits retry on the same app/extension instance. Creator-only
@@ -81,8 +84,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   validate Core Metadata 2.4 artifacts.
 - Admin/executor URLs now reject raw C0/DEL/whitespace, userinfo, query,
   fragment and invalid host/port input; static Route Prefix validation rejects
-  converters, dot segments and ambiguous URL syntax. Admin POST never follows
-  redirects. Invalid JSON structure is classified separately as
+  converters, dot segments, percent encoding and ambiguous URL syntax. Admin
+  POST never follows redirects. Invalid JSON structure is classified separately as
   `invalid_response` (exported from `flask_xxljob.client`) and reuses the
   invalid-JSON failover option.
 
@@ -115,8 +118,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   new wheel and sdist (including file-only RECORD mappings and authoritative
   top-level PKG-INFO), reject development/signature files, and run a
   source-isolated installed-wheel smoke test with `pip check`.
-- The final local suite completed with 602 passed, 2 optional official-Admin
-  tests skipped, and 92.32% line coverage. It covers the total disabled switch,
+- The final local suite completed with 616 passed, 2 optional official-Admin
+  tests skipped, and 92.04% line coverage. It covers the total disabled switch,
   strict URLs/Admin responses, generation-zero cleanup and transitions,
   PID/generation ownership, Remove races, strict completion sequences, Prepared
   ownership, identity-safe pre-commit cleanup and one-time log closure.

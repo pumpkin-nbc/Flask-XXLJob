@@ -390,6 +390,10 @@ def test_route_prefix_normalization_variants(prefix, expected):
         "//xxl-job//",
         "/xxl?tenant=a",
         "/xxl#fragment",
+        "/%2e%2e/xxl",
+        "/xxl%2fjob",
+        "/xxl%%job",
+        "/xxl%252fjob",
         "/a\\b",
         "/<path:anything>",
         "/a//b",
@@ -404,6 +408,17 @@ def test_invalid_static_route_prefix_rejected(prefix):
         XXLJobConfig.from_mapping(
             base_mapping(XXL_JOB_ROUTE_PREFIX=prefix)
         )
+
+
+def test_disabled_route_prefix_skips_percent_semantics():
+    config = XXLJobConfig.from_mapping(
+        {
+            "XXL_JOB_ENABLED": False,
+            "XXL_JOB_ROUTE_PREFIX": "/%2e%2e/xxl",
+        }
+    )
+
+    assert config.route_prefix == "/%2e%2e/xxl"
 
 
 @pytest.mark.parametrize("value", [None, 1, [], {}])

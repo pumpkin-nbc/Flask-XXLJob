@@ -24,6 +24,9 @@ class _RegistryWorkerContext:
     stop_event: threading.Event
     thread: Optional[threading.Thread] = None
     wait_remove_event: Optional[threading.Event] = None
+    # Exact Prepared ownership token retained only for activation identity.
+    # This is not a lifecycle phase or a second state machine.
+    prepared_owner: Optional["_PreparedRegistryStart"] = None
 
 
 @dataclass(eq=False)
@@ -721,6 +724,7 @@ class RegistryService:
                 activate_event=activate_event,
                 thread=thread,
             )
+            ctx.prepared_owner = prepared
             state.prepared_start = prepared
 
             # Ownership publication and OS Thread creation are one short
@@ -732,6 +736,8 @@ class RegistryService:
             except Exception:
                 if state.prepared_start is prepared:
                     state.prepared_start = None
+                if ctx.prepared_owner is prepared:
+                    ctx.prepared_owner = None
                 raise
 
         return prepared
@@ -753,6 +759,12 @@ class RegistryService:
                 # stop(), shutdown(), or another valid state transition won
                 # the lock first.  Cancellation is an expected no-op result.
                 return False
+
+            if ctx.prepared_owner is not prepared:
+                raise RuntimeError(
+                    "Prepared Registry activation ownership no longer "
+                    "matches its Worker Context."
+                )
 
             if ctx.generation != state.generation + 1:
                 raise RuntimeError(
@@ -813,10 +825,80 @@ class RegistryService:
             if state.prepared_start is not prepared:
                 return False
             state.prepared_start = None
+            if prepared.context.prepared_owner is prepared:
+                prepared.context.prepared_owner = None
 
         prepared.context.stop_event.set()
         prepared.activate_event.set()
         return True
+
+    def _settle_prepared_after_publish_failure(
+        self,
+        prepared: _PreparedRegistryStart,
+        timeout: float = 1.0,
+    ) -> None:
+        """Settle only an exact Prepared token after Blueprint publication."""
+        state = prepared.state
+        # Never inspect or signal synchronization objects inherited across a
+        # PID/ProcessState boundary.
+        if os.getpid() != state.pid or self._get_process_state() is not state:
+            return
+
+        ctx = prepared.context
+        cancel_uncommitted = False
+        wake_committed = False
+        with state.state_lock:
+            if (
+                state.prepared_start is prepared
+                and ctx.prepared_owner is prepared
+            ):
+                state.prepared_start = None
+                ctx.prepared_owner = None
+                cancel_uncommitted = True
+            elif (
+                ctx.prepared_owner is prepared
+                and prepared.thread is ctx.thread
+                and (
+                    state.worker is ctx
+                    or state.stopping_workers.get(ctx.generation) is ctx
+                )
+            ):
+                # The caller still owns the exact Prepared token, and its
+                # Context/Thread identity proves that activation committed.
+                wake_committed = True
+
+        if cancel_uncommitted:
+            ctx.stop_event.set()
+            try:
+                prepared.activate_event.set()
+            except Exception:  # noqa: BLE001 - preserve initialization error
+                self._logger.exception(
+                    "Failed to wake an uncommitted Registry preparation "
+                    "after Blueprint publication."
+                )
+            try:
+                self._join_prepared_start(prepared, timeout=timeout)
+            except Exception:  # noqa: BLE001 - preserve initialization error
+                self._logger.exception(
+                    "Failed to join an uncommitted Registry preparation "
+                    "after Blueprint publication."
+                )
+            return
+
+        if not wake_committed:
+            return
+
+        # _activate_prepared_start() already attempted this Event once. This
+        # is the single best-effort retry, authorized only by the exact token,
+        # ProcessState and current/stopping Worker identities checked above.
+        try:
+            prepared.activate_event.set()
+        except Exception:  # noqa: BLE001 - preserve initialization error
+            self._logger.exception(
+                "Failed to release a committed Registry Worker after "
+                "Blueprint publication; Runtime and Worker ownership are "
+                "preserved for normal lifecycle cleanup."
+            )
 
     @staticmethod
     def _join_prepared_start(
@@ -1048,6 +1130,8 @@ class RegistryService:
                 del state.stopping_workers[ctx.generation]
             if state.worker is ctx:
                 state.worker = None
+            if ctx.prepared_owner is not None:
+                ctx.prepared_owner = None
 
         self._logger.info(
             "XXL-JOB registry lifecycle stopped generation=%s.",

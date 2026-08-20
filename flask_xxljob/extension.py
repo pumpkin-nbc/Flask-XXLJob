@@ -154,6 +154,7 @@ class FlaskXXLJob:
         finalizer: Optional[finalize] = None
         cli_added = False
         application_added = False
+        blueprint_published = False
         try:
             log_manager = XXLJobLogManager(app, config)
             callback_registry = CallbackRegistry()
@@ -229,7 +230,18 @@ class FlaskXXLJob:
                 assert blueprint is not None
                 # Blueprint registration publishes both routes and the
                 # pre-bound routing hook. It is the last irreversible commit.
-                app.register_blueprint(blueprint)
+                try:
+                    app.register_blueprint(blueprint)
+                finally:
+                    # 只有本次 init_app() 创建的 exact Blueprint 对象
+                    # 被当前 app 接受，才能将本次提交视为不可逆。
+                    # Names, endpoints and routes cannot prove ownership.
+                    # This check intentionally runs only after this call to
+                    # register_blueprint() has returned or raised.
+                    blueprint_published = any(
+                        item is blueprint
+                        for item in app.blueprints.values()
+                    )
 
             activated = True
             if prepared is not None:
@@ -249,16 +261,34 @@ class FlaskXXLJob:
                 )
         except Exception:
             logger.exception("Flask-XXLJob initialization commit failed.")
-            self._close_uncommitted_runtime_resources(
-                app=app,
-                runtime=runtime,
-                registry_service=registry_service,
-                prepared=prepared,
-                finalizer=finalizer,
-                cli_added=cli_added,
-                application_added=application_added,
-                log_manager=log_manager,
-            )
+            if blueprint_published:
+                # Flask has no public Blueprint rollback API. Once this exact
+                # Blueprint is visible, its Runtime ownership must remain
+                # visible too; only settle this init call's Prepared token.
+                if prepared is not None:
+                    try:
+                        registry_service._settle_prepared_after_publish_failure(
+                            prepared
+                        )
+                    except Exception:  # noqa: BLE001 - preserve commit error
+                        try:
+                            logger.exception(
+                                "Failed to settle Registry activation after "
+                                "Blueprint publication."
+                            )
+                        except Exception:  # noqa: BLE001 - preserve root error
+                            pass
+            else:
+                self._close_uncommitted_runtime_resources(
+                    app=app,
+                    runtime=runtime,
+                    registry_service=registry_service,
+                    prepared=prepared,
+                    finalizer=finalizer,
+                    cli_added=cli_added,
+                    application_added=application_added,
+                    log_manager=log_manager,
+                )
             raise
 
     def _close_uncommitted_runtime_resources(

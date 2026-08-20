@@ -528,6 +528,158 @@ def test_cancelled_unactivated_prepared_exits_without_worker_finally(mocker):
     schedule.assert_not_called()
 
 
+def test_published_failure_cancels_exact_uncommitted_prepared(mocker):
+    admin = FakeAdmin()
+    service = RegistryService(make_config(), admin)
+    finish = mocker.spy(service, "_finish_worker")
+    prepared = service._prepare_start()
+    assert prepared is not None
+
+    service._settle_prepared_after_publish_failure(prepared)
+
+    state = service._get_process_state()
+    assert prepared.thread.is_alive() is False
+    assert prepared.context.prepared_owner is None
+    assert state.prepared_start is None
+    assert state.generation == 0
+    assert state.worker is None
+    assert not state.stopping_workers
+    assert admin.registry_calls == admin.remove_calls == 0
+    finish.assert_not_called()
+
+
+def test_published_failure_retries_exact_committed_activation_event():
+    admin = FakeAdmin()
+    service = RegistryService(make_config(), admin)
+    prepared = service._prepare_start()
+    assert prepared is not None
+    original_set = prepared.activate_event.set
+    set_calls = 0
+
+    def fail_once():
+        nonlocal set_calls
+        set_calls += 1
+        if set_calls == 1:
+            raise RuntimeError("activation gate failed")
+        original_set()
+
+    prepared.activate_event.set = fail_once
+
+    with pytest.raises(RuntimeError, match="activation gate failed"):
+        service._activate_prepared_start(prepared)
+
+    state = service._get_process_state()
+    assert state.worker is prepared.context
+    assert prepared.context.prepared_owner is prepared
+
+    service._settle_prepared_after_publish_failure(prepared)
+
+    wait_for(lambda: admin.registry_calls == 1)
+    assert set_calls == 2
+    service.stop()
+    prepared.thread.join(timeout=1)
+    assert prepared.thread.is_alive() is False
+    assert prepared.context.prepared_owner is None
+    assert state.worker is None
+    assert not state.stopping_workers
+
+
+def test_published_failure_preserves_worker_when_event_retry_fails(mocker):
+    admin = FakeAdmin()
+    service = RegistryService(make_config(), admin)
+    log_exception = mocker.spy(service._logger, "exception")
+    prepared = service._prepare_start()
+    assert prepared is not None
+    original_set = prepared.activate_event.set
+    failed_set = mocker.Mock(side_effect=RuntimeError("gate unavailable"))
+    prepared.activate_event.set = failed_set
+
+    with pytest.raises(RuntimeError, match="gate unavailable"):
+        service._activate_prepared_start(prepared)
+
+    state = service._get_process_state()
+    service._settle_prepared_after_publish_failure(prepared)
+
+    assert failed_set.call_count == 2
+    assert state.generation == 1
+    assert state.worker is prepared.context
+    assert prepared.context.prepared_owner is prepared
+    assert prepared.thread.is_alive() is True
+    assert admin.registry_calls == 0
+    log_exception.assert_called_once()
+
+    # Restore the real Event solely to release the test-owned daemon Thread.
+    prepared.activate_event.set = original_set
+    service.stop()
+    original_set()
+    prepared.thread.join(timeout=1)
+    assert prepared.thread.is_alive() is False
+    assert prepared.context.prepared_owner is None
+    assert state.worker is None
+    assert not state.stopping_workers
+
+
+def test_published_failure_does_not_wake_stale_prepared_token():
+    admin = FakeAdmin()
+    service = RegistryService(make_config(), admin)
+    prepared = service._prepare_start()
+    assert prepared is not None
+    original_set = prepared.activate_event.set
+
+    def fail_activation_gate():
+        raise RuntimeError("activation gate failed")
+
+    prepared.activate_event.set = fail_activation_gate
+
+    with pytest.raises(RuntimeError, match="activation gate failed"):
+        service._activate_prepared_start(prepared)
+
+    foreign_event = threading.Event()
+    foreign = _PreparedRegistryStart(
+        state=prepared.state,
+        context=prepared.context,
+        activate_event=foreign_event,
+        thread=prepared.thread,
+    )
+
+    service._settle_prepared_after_publish_failure(foreign)
+
+    state = service._get_process_state()
+    assert foreign_event.is_set() is False
+    assert state.worker is prepared.context
+    assert prepared.context.prepared_owner is prepared
+    assert admin.registry_calls == 0
+
+    prepared.activate_event.set = original_set
+    service.stop()
+    original_set()
+    prepared.thread.join(timeout=1)
+    assert prepared.thread.is_alive() is False
+
+
+def test_published_failure_does_not_touch_replaced_process_state():
+    service = RegistryService(make_config(), FakeAdmin())
+    prepared = service._prepare_start()
+    assert prepared is not None
+    old_state = prepared.state
+    service._process_state = service._new_process_state(old_state.pid)
+
+    service._settle_prepared_after_publish_failure(prepared)
+
+    assert old_state.prepared_start is prepared
+    assert prepared.activate_event.is_set() is False
+    assert prepared.context.stop_event.is_set() is False
+    assert service._process_state.prepared_start is None
+    assert service._process_state.worker is None
+
+    # Release the detached test-owned state without asking the service to
+    # acquire or mutate its inherited/private ownership again.
+    prepared.context.stop_event.set()
+    prepared.activate_event.set()
+    prepared.thread.join(timeout=1)
+    assert prepared.thread.is_alive() is False
+
+
 def test_stale_prepared_cancel_does_not_stop_activated_worker():
     admin = BlockingRegistryAdmin()
     service = RegistryService(make_config(), admin)

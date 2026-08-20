@@ -108,10 +108,12 @@ trimmed. When set, `XXL_JOB_ROUTE_PREFIX` is always appended to
 `XXL_JOB_EXECUTOR_ADDRESS`; do not embed the route prefix in the executor
 address. Root, an optional leading slash and one trailing slash are compatible;
 whitespace/control characters, `?`, `#`, backslash, angle brackets, consecutive
-slashes, Flask converters and `.`/`..` segments are rejected. A whitespace-only access token is normalized to
-empty (no-token mode), while a non-empty token is preserved. Validation messages
-name the offending key, its received type and the expected format. Bad
-configuration is never silently ignored.
+slashes, `%`, Flask converters and `.`/`..` segments are rejected. Route Prefix
+is a static Flask path; percent-encoded input is rejected as written and is
+never decoded or repaired. A whitespace-only access token is normalized to
+empty (no-token mode), while a non-empty token is preserved. Validation
+messages name the offending key, its received type and the expected format.
+Bad configuration is never silently ignored.
 
 `init_app()` treats these deterministic checks as a side-effect-free preflight.
 When automatic Registry startup is requested, full Registry completeness plus
@@ -121,6 +123,10 @@ activation-gated Thread and a detachable finalizer handle, but publishes none of
 them through Flask or the application registry. A failure removes only
 reversible state still owned by that initialization. The project does not edit
 Flask's private route/hook structures to provide a general commit rollback.
+After the exact Blueprint object created by this initialization is accepted by
+the current app, the Runtime and its reversible ownership remain published if
+activation fails. The original exception propagates and the app is not
+retryable, but protocol routes are not left without Runtime state.
 
 All boolean settings accept real booleans only. Levels, encodings, rotation
 values and log formats are validated during initialization; the format is

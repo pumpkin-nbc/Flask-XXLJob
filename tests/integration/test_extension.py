@@ -621,6 +621,180 @@ def test_commit_failure_cancels_prepared_and_closes_private_handlers(
     assert finalizers[0].alive is False
 
 
+def test_published_blueprint_preserves_runtime_when_activation_fails(mocker):
+    app = Flask("published_activation_failure")
+    app.config.update(BASE_CONFIG, XXL_JOB_AUTO_REGISTER=True)
+    ext = FlaskXXLJob()
+    prepared_tokens = []
+    real_prepare = RegistryService._prepare_start
+    failure = RuntimeError("activation failed before Worker commit")
+
+    def capture_prepare(service):
+        prepared = real_prepare(service)
+        prepared_tokens.append(prepared)
+        return prepared
+
+    mocker.patch.object(
+        RegistryService,
+        "_prepare_start",
+        autospec=True,
+        side_effect=capture_prepare,
+    )
+    mocker.patch.object(
+        RegistryService,
+        "_activate_prepared_start",
+        autospec=True,
+        side_effect=failure,
+    )
+    registry = mocker.patch(
+        "flask_xxljob.client.admin_client.AdminClient.registry"
+    )
+
+    with pytest.raises(RuntimeError) as raised:
+        ext.init_app(app)
+
+    assert raised.value is failure
+    runtime = app.extensions[EXTENSION_KEY]
+    prepared = prepared_tokens[0]
+    assert prepared is not None
+    assert prepared.thread.is_alive() is False
+    state = runtime.registry_service._get_process_state()
+    assert state.prepared_start is None
+    assert state.generation == 0
+    assert state.worker is None
+    assert not state.stopping_workers
+    assert registry.call_count == 0
+    assert "xxljob" in app.cli.commands
+    assert tuple(ext._applications.snapshot()) == (app,)  # noqa: SLF001
+    assert runtime._finalizer is not None  # noqa: SLF001
+    assert runtime._finalizer.alive is True  # noqa: SLF001
+    assert app.test_client().post("/beat").get_json()["code"] == 200
+
+    with pytest.raises(XXLJobAlreadyInitializedError):
+        ext.init_app(app)
+    runtime.close()
+
+
+def test_blueprint_publish_then_exception_keeps_its_runtime(mocker):
+    app = Flask("blueprint_publish_then_exception")
+    app.config.update(BASE_CONFIG)
+    ext = FlaskXXLJob()
+    real_register_blueprint = app.register_blueprint
+    failure = RuntimeError("raised after exact Blueprint publication")
+
+    def publish_then_fail(blueprint, *args, **kwargs):
+        real_register_blueprint(blueprint, *args, **kwargs)
+        raise failure
+
+    mocker.patch.object(
+        app,
+        "register_blueprint",
+        side_effect=publish_then_fail,
+    )
+
+    with pytest.raises(RuntimeError) as raised:
+        ext.init_app(app)
+
+    assert raised.value is failure
+    runtime = app.extensions[EXTENSION_KEY]
+    assert any(
+        item.name.startswith("xxljob_")
+        for item in app.blueprints.values()
+    )
+    assert tuple(ext._applications.snapshot()) == (app,)  # noqa: SLF001
+    assert "xxljob" in app.cli.commands
+    assert runtime._finalizer is not None  # noqa: SLF001
+    assert runtime._finalizer.alive is True  # noqa: SLF001
+    assert app.test_client().post("/beat").get_json()["code"] == 200
+
+    with pytest.raises(XXLJobAlreadyInitializedError):
+        ext.init_app(app)
+    runtime.close()
+
+
+def test_same_name_foreign_blueprint_does_not_claim_commit_ownership(mocker):
+    app = Flask("foreign_blueprint_identity")
+    app.config.update(BASE_CONFIG)
+    ext = FlaskXXLJob()
+    failure = RuntimeError("foreign object inserted during commit")
+    foreign = []
+
+    def insert_foreign_then_fail(blueprint):
+        other = Blueprint(blueprint.name, __name__)
+        app.blueprints[blueprint.name] = other
+        foreign.append(other)
+        raise failure
+
+    mocker.patch.object(
+        app,
+        "register_blueprint",
+        side_effect=insert_foreign_then_fail,
+    )
+
+    with pytest.raises(RuntimeError) as raised:
+        ext.init_app(app)
+
+    assert raised.value is failure
+    assert len(foreign) == 1
+    assert tuple(app.blueprints.values()) == (foreign[0],)
+    assert EXTENSION_KEY not in app.extensions
+    assert "xxljob" not in app.cli.commands
+    assert ext._applications.is_empty  # noqa: SLF001 - identity boundary
+
+
+def test_failed_activation_event_retry_preserves_published_worker(mocker):
+    app = Flask("published_worker_event_failure")
+    app.config.update(BASE_CONFIG, XXL_JOB_AUTO_REGISTER=True)
+    ext = FlaskXXLJob()
+    prepared_tokens = []
+    original_setters = []
+    real_prepare = RegistryService._prepare_start
+    failure = RuntimeError("activation Event unavailable")
+
+    def prepare_with_failing_event(service):
+        prepared = real_prepare(service)
+        assert prepared is not None
+        prepared_tokens.append(prepared)
+        original_setters.append(prepared.activate_event.set)
+        prepared.activate_event.set = mocker.Mock(side_effect=failure)
+        return prepared
+
+    mocker.patch.object(
+        RegistryService,
+        "_prepare_start",
+        autospec=True,
+        side_effect=prepare_with_failing_event,
+    )
+    registry = mocker.patch(
+        "flask_xxljob.client.admin_client.AdminClient.registry"
+    )
+
+    with pytest.raises(RuntimeError) as raised:
+        ext.init_app(app)
+
+    assert raised.value is failure
+    runtime = app.extensions[EXTENSION_KEY]
+    prepared = prepared_tokens[0]
+    state = runtime.registry_service._get_process_state()
+    assert prepared.activate_event.set.call_count == 2
+    assert state.generation == 1
+    assert state.worker is prepared.context
+    assert prepared.context.prepared_owner is prepared
+    assert prepared.thread.is_alive() is True
+    assert registry.call_count == 0
+    assert tuple(ext._applications.snapshot()) == (app,)  # noqa: SLF001
+    assert app.test_client().post("/beat").get_json()["code"] == 200
+
+    # Release only this test's exact Worker through the existing lifecycle.
+    prepared.activate_event.set = original_setters[0]
+    runtime.close()
+    original_setters[0]()
+    prepared.thread.join(timeout=1)
+    assert prepared.thread.is_alive() is False
+    assert state.worker is None
+    assert not state.stopping_workers
+
+
 def test_commit_failure_preserves_replacement_extension_and_cli(mocker):
     app = Flask("identity_safe_commit_failure")
     app.config.update(

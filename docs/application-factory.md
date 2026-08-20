@@ -67,7 +67,12 @@ no Flask extension resources have been committed, and the original exception is
 preserved. During a later commit failure, only reversible CLI, extension and
 application-registry entries still owned by this initialization are removed.
 Flask-XXLJob does not mutate private Flask routing structures to provide a
-general rollback.
+general rollback. Once the current app accepts the exact Blueprint object
+created by this `init_app()` call, that Blueprint and its Runtime ownership are
+both treated as published. A later activation exception still propagates, but
+does not remove Runtime, CLI, application-registry or finalizer ownership. If a
+committed Worker's activation Event cannot be retried, its ownership is left to
+the existing Worker finally, stop/shutdown and finalizer lifecycle.
 
 ## Direct initialization
 

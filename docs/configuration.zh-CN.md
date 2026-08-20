@@ -93,14 +93,17 @@ IPv6 及端口，同时允许上下文路径。解析前拒绝原始 C0/DEL 控�
 userinfo、query 和 fragment；只规范多余尾斜杠，不会静默 trim 首尾空白。
 `XXL_JOB_ROUTE_PREFIX` 会始终附加到执行器地址；根路径、可选前导斜杠及一个尾斜杠
 保持兼容，空白/控制字符、`?`、`#`、反斜杠、尖括号、连续斜杠、Flask converter 与
-`.`/`..` 点段均会被拒绝。错误配置绝不会被静默忽略。
+`.`/`..` 点段均会被拒绝。Route Prefix 是 Flask 静态路径，`%` 会按原始输入
+直接拒绝，不做 URL decode 或自动修复。错误配置绝不会被静默忽略。
 
 `init_app()` 将这些确定性检查作为无副作用 Preflight。请求自动启动 Registry 时，
 完整 Registry 配置以及执行器路由、Blueprint、CLI 名称冲突也会在创建托管资源或
 Flask 状态前完成。Private Prepare 可以创建日志、带激活门的 Thread 与可 detach 的
 finalizer handle，但不会通过 Flask 或 ApplicationRegistry 发布它们。失败时只撤销本次
 仍持有 identity 的可逆状态；项目不会修改 Flask 私有路由/Hook 结构来提供通用 Commit
-rollback。
+rollback。本次创建的 exact Blueprint 对象被当前 app 接受后，如果 activation
+失败，Runtime 及其可逆 ownership 仍保持发布。原异常会继续传播，且该 app 不保证
+可重试，但协议路由不会失去 Runtime 状态。
 
 所有布尔配置只接受真正的布尔值。等级、编码、轮转值与日志格式均在初始化
 阶段校验；格式会使用模拟 `LogRecord` 实际格式化一次，因此未知字段会在应用启动前

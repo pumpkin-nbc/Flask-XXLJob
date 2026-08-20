@@ -139,8 +139,10 @@ When enabled, Admin and non-empty executor URLs reject whitespace and control
 characters, userinfo, query strings, fragments and invalid hosts/ports; only
 HTTP/HTTPS is accepted. Route Prefix accepts root, an optional leading slash
 and one trailing slash, but rejects dynamic converters, dot segments, repeated
-slashes and URL/control syntax. Admin POST requests never follow redirects, and
-malformed JSON objects are reported as `invalid_response`.
+slashes, percent-encoded paths and URL/control syntax. It is a static Flask
+path, so `%` is rejected directly rather than decoded or repaired. Admin POST
+requests never follow redirects, and malformed JSON objects are reported as
+`invalid_response`.
 
 `init_app()` starts Registry only when `XXL_JOB_ENABLED` and
 `XXL_JOB_AUTO_REGISTER` are both `True`. Set `XXL_JOB_AUTO_REGISTER=False` for
@@ -198,7 +200,12 @@ removes only state still owned by that initialization, closes its managed log
 handlers and preserves the original error. A committed Worker still runs its
 lifecycle `finally`, even if stopped before its first Registry RPC. This is
 targeted private-resource atomicity, not a general rollback of arbitrary Flask
-route or hook mutations.
+route or hook mutations. Once the exact Blueprint object created by this
+`init_app()` call is visible in the current app, Runtime, CLI, application
+record and finalizer ownership remain published even if activation raises. The
+original error still propagates, but live protocol routes are never left
+without their Runtime. A failed activation-Event retry likewise preserves an
+already committed Worker for the existing stop/shutdown/finalizer lifecycle.
 
 ## CLI
 

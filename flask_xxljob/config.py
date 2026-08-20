@@ -542,7 +542,7 @@ def _normalize_prefix(prefix: str) -> str:
     if prefix == "/":
         return ""
 
-    forbidden = {"?", "#", "\\", "<", ">"}
+    forbidden = {"?", "#", "%", "\\", "<", ">"}
     if any(
         character in forbidden
         or ord(character) < 0x20
@@ -553,7 +553,7 @@ def _normalize_prefix(prefix: str) -> str:
         raise XXLJobConfigError(
             "XXL_JOB_ROUTE_PREFIX must be a static Flask path without "
             "whitespace, control characters, query syntax, fragments, "
-            "backslashes, or converters."
+            "percent encoding, backslashes, or converters."
         )
     if "//" in prefix:
         raise XXLJobConfigError(

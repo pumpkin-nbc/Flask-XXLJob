@@ -56,7 +56,11 @@ Registry lifecycle。
 Private Prepare 失败时，已经启动的 Prepared 会被取消，finalizer 会在不关闭 Runtime
 的情况下 detach，本次 Handler 会关闭，且原始异常保持不变。后续 Flask Commit 失败
 时，只撤销本次仍持有 identity 的 CLI、extension 与应用记录等可逆状态；项目不会修改
-Flask 私有路由结构来实现通用 rollback。
+Flask 私有路由结构来实现通用 rollback。当前 app 一旦接受本次 `init_app()`
+创建的 exact Blueprint 对象，Blueprint 与 Runtime ownership 便同时视为已发布。
+后续 activation 异常仍会传播，但不再删除 Runtime、CLI、应用记录或 finalizer。
+已提交 Worker 的 activation Event 补发仍失败时，ownership 交由现有 Worker finally、
+stop/shutdown 与 finalizer lifecycle 收敛。
 
 ## 直接初始化
 
