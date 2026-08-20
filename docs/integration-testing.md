@@ -56,10 +56,10 @@ compatibility:
 
 ## Locally verified matrix (honest report)
 
-Only the following was actually executed in this environment on 2026-08-17:
+Only the following was actually executed in this environment on 2026-08-19:
 
-- Python 3.12.13 with Flask 3.1.3 in the project `.venv`: 503 offline tests
-  passing, 2 live-Admin tests skipped by environment, and 93.27% coverage.
+- Python 3.12.13 with Flask 3.1.3 in the project `.venv`: 509 offline tests
+  passing, 2 live-Admin tests skipped by environment, and 93.33% coverage.
 - `pip check`, Ruff, mypy, bilingual documentation checks, wheel/sdist checks,
   and clean installed-wheel smoke tests passing.
 

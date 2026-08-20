@@ -151,6 +151,15 @@ fallback ensure that the newer remote state is removed exactly when needed.
 Calling `remove_executor()` while renewal is still running remains an ordinary
 one-shot RPC and does not stop or consume the lifecycle.
 
+Every explicit `register_executor()` that enters a non-zero generation before
+lifecycle cleanup is linearized is counted before it waits for the Registry
+network lock. Shutdown closes that coordination window without blocking and
+defers its Remove until the already-counted calls finish. A later explicit
+register is still a normal one-shot operation and is not permanently rejected.
+Its real RPC completion is accepted by strict sequence and ProcessState
+identity; generation and coordination ownership only decide whether that
+accepted success changes lifecycle cleanup responsibility.
+
 Initialization first performs a side-effect-free preflight. Removed keys,
 field values, automatic Registry completeness and route/Blueprint conflicts
 are rejected before log handlers, files, Flask routes, CLI commands, extension

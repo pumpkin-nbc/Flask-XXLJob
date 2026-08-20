@@ -78,6 +78,34 @@ flowchart TD
     H --> I["Pending performs the necessary newer Remove"]
 ```
 
+An explicit one-shot Register enters the current non-zero generation's open
+coordination window before waiting for the network lock. Cleanup closes that
+window under the state lock, remains non-blocking, and does not schedule its
+Remove until every Register that entered earlier has completed local
+coordination:
+
+```mermaid
+sequenceDiagram
+    participant R as register_executor()
+    participant S as Registry ProcessState
+    participant C as shutdown / stop(remove=True)
+    participant A as Admin
+    R->>S: join Coordination; inflight += 1
+    C->>S: cleanup_requested = true
+    Note over C,S: cleanup linearized; return without waiting
+    R->>A: registry
+    A-->>R: CallResult
+    R->>S: accepted completion; inflight -= 1; reconcile
+    S->>A: scheduled registryRemove
+```
+
+A real one-shot Register completion is accepted by strict sequence and the
+captured ProcessState identity. Generation and Coordination identity are not
+RPC ownership: if they changed, the accepted completion still advances the
+global sequence and a success still updates `registered=True`. Those identities
+are checked separately before changing cleanup responsibility, preventing an
+old generation from creating Pending/Active work for a newer generation.
+
 An Active Remove completion is accepted by strict sequence, ProcessState
 identity and Active identity. Exact generation and the absence of a current
 Worker are checked separately only when recording that cleanup responsibility

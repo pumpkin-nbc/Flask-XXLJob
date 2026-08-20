@@ -235,10 +235,11 @@ class RegistryService:
                 # point that closes this coordination window.
                 if coordination.cleanup_requested:
                     coordination = None
-            elif (
-                generation > 0
-                and state.last_successfully_removed_generation == generation
-            ):
+            elif generation > 0:
+                # Every explicit one-shot register that reaches a live
+                # generation before lifecycle cleanup is linearized must be
+                # visible to that cleanup.  Worker renewals do not call this
+                # helper and remain governed by Worker ownership.
                 coordination = _RegisterCoordination(generation=generation)
                 state.register_coordination = coordination
 
@@ -342,6 +343,7 @@ class RegistryService:
         operation: Optional[_RemoveOperation] = None
         if (
             coordination.cleanup_requested
+            and coordination.inflight_count == 0
             and state.last_successfully_removed_generation != generation
         ):
             operation = self._ensure_pending_remove_locked(
@@ -585,8 +587,10 @@ class RegistryService:
         coordination_event: Optional[threading.Event] = None
         scheduled_operation: Optional[_RemoveOperation] = None
         with state.state_lock:
-            accepted = sequence > state.last_applied_rpc_sequence
-            if accepted:
+            completion_accepted = (
+                sequence > state.last_applied_rpc_sequence
+            )
+            if completion_accepted:
                 self._record_result_locked(
                     state,
                     result,
@@ -596,11 +600,17 @@ class RegistryService:
                 # accepted successes.
                 state.last_applied_rpc_sequence = sequence
 
-                if (
+                cleanup_mutation_allowed = bool(
                     not remove
                     and result.success
                     and generation is not None
-                ):
+                    and coordination is not None
+                    and state.generation == generation
+                    and coordination.generation == generation
+                    and state.register_coordination is coordination
+                )
+                if cleanup_mutation_allowed:
+                    assert generation is not None
                     self._invalidate_successful_cleanup_locked(
                         state, generation, coordination
                     )

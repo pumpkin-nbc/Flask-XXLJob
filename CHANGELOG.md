@@ -39,6 +39,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Worker state are checked separately when recording cleanup satisfaction, so
   a new generation still waits for and correctly orders behind an older Active
   Remove.
+- Explicit one-shot Register calls now join the current non-zero generation's
+  open coordination window before waiting for the Registry network lock.
+  Lifecycle cleanup closes that window without blocking and defers Remove until
+  all earlier participants finish. Register RPC completion remains ordered only
+  by strict sequence and ProcessState identity; generation and Coordination
+  ownership separately guard cleanup-responsibility changes.
 - `init_app()` now completes a side-effect-free deterministic preflight before
   creating managed log resources or committing Blueprint, CLI, hook, extension,
   application-registry, finalizer or Registry state. Corrected configuration
@@ -79,8 +85,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   new wheel and sdist (including file-only RECORD mappings and authoritative
   top-level PKG-INFO), reject development/signature files, and run a
   source-isolated installed-wheel smoke test with `pip check`.
-- The final local suite completed with 503 passed, 2 optional official-Admin
-  tests skipped, and 93.27% line coverage. It covers PID/disabled ordering,
+- The final local suite completed with 509 passed, 2 optional official-Admin
+  tests skipped, and 93.33% line coverage. It covers PID/disabled ordering,
   generation ownership, Remove races, cleanup failures, strict completion
   sequences, non-blocking finalization and one-time log closure.
 

@@ -140,6 +140,13 @@ register 重新建立远端身份，就会产生一份新的必要清理责任�
 Active 与最多一个 Pending fallback 会按真实远端顺序完成收敛。Worker 仍在续约时
 调用 `remove_executor()` 仍只是普通单次 RPC，不会停止或消耗 lifecycle。
 
+每个在 lifecycle cleanup 线性化前进入非零 generation 的显式
+`register_executor()`，都会先登记到当前 Register Coordination，再等待 Registry
+网络锁。shutdown 会非阻塞地关闭该协调窗口，并等已登记调用全部完成后再安排 Remove；
+线性化后才进入的显式 register 仍是普通 one-shot 操作，不会被永久禁止。真实 RPC
+completion 只按 strict sequence 与 ProcessState identity 接受，generation 与协调
+ownership 仅决定 accepted success 是否改变 lifecycle 清理责任。
+
 初始化会先执行无副作用 Preflight。已删除配置、字段值、自动 Registry 完整配置以及
 路由/Blueprint 冲突会在创建日志 Handler、打开文件、注册路由/CLI、写入扩展状态、
 安装 finalizer 或启动 Worker 前失败。修正确定性配置错误后，同一个 Flask app 可以

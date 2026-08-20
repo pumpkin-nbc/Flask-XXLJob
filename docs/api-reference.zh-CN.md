@@ -65,6 +65,17 @@ lifecycle，也不会推进 generation。当前仍有续约 Worker 时，`remove
 重复发送。调用失败时保留原有 `registered` 快照；扩展 disabled 时返回本地配置失败
 `CallResult`，不执行 Admin RPC。
 
+对于有效的非零 generation，显式 `register_executor()` 会在等待网络锁前加入该代仍
+开放的 Register Coordination。此后 lifecycle cleanup 若完成线性化，shutdown 仍然
+非阻塞，只把 Remove 延后到这些已参与调用全部结束。协调窗口关闭后才开始的调用保持
+原有 one-shot API 语义。
+
+真实 one-shot Register completion 是否接受，只取决于 strict sequence 与调用捕获的
+ProcessState identity。generation 或 Coordination 变化不能抹掉已经发生的 Admin RPC：
+accepted success 仍会设置 `registered=True` 并推进 applied sequence。生命周期 identity
+另行决定该成功能否重新产生清理责任，因此旧 generation completion 不会修改新代的
+cleanup cache、Coordination、Pending 或 Active ownership。
+
 ### 任务结果回调
 
 ```python

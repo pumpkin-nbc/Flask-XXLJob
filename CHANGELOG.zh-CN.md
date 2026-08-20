@@ -31,6 +31,10 @@
 - Active Remove completion 是否接受仍只依赖 strict sequence、ProcessState identity 与
   Active identity；精确 generation 和当前 Worker 状态仅用于记录清理责任是否满足，
   因而新 generation 仍会等待并正确排序在旧 Active Remove 之后。
+- 显式 one-shot Register 现在会在等待 Registry 网络锁前加入当前非零 generation 的
+  开放协调窗口。lifecycle cleanup 非阻塞关闭该窗口，并等此前参与者全部完成后再安排
+  Remove。Register RPC completion 仍只按 strict sequence 与 ProcessState identity
+  提交，generation 和 Coordination ownership 仅另行保护清理责任变更。
 - `init_app()` 会先完成无副作用的确定性 Preflight，再创建托管日志资源或提交
   Blueprint、CLI、Hook、扩展、应用注册、finalizer 与 Registry 状态；修正配置后可在
   同一个 Flask app 上重试。
@@ -63,7 +67,7 @@
 - 发布检查改为在干净临时目录构建，只验证本轮新 wheel/sdist（包括仅针对文件成员的
   RECORD 映射与标准顶层 PKG-INFO），拒绝开发/签名文件，并在 `pip check` 后执行与
   源码隔离的安装后冒烟。
-- 最终本地测试为 503 项通过、2 项可选官方 Admin 测试跳过，行覆盖率 93.27%。覆盖
+- 最终本地测试为 509 项通过、2 项可选官方 Admin 测试跳过，行覆盖率 93.33%。覆盖
   PID/disabled 顺序、generation ownership、Remove 竞态、cleanup 启动失败、严格
   completion sequence、非阻塞 finalizer 与日志恰好关闭一次。
 

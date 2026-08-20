@@ -70,6 +70,31 @@ flowchart TD
     H --> I["Pending 执行新的必要 Remove"]
 ```
 
+显式 one-shot Register 会在等待网络锁前，先进入当前非零 generation 仍开放的协调窗口。
+cleanup 在 state lock 内关闭窗口，保持非阻塞，并将 Remove 延后到此前已经进入的所有
+Register 都完成本地协调收尾以后：
+
+```mermaid
+sequenceDiagram
+    participant R as register_executor()
+    participant S as Registry ProcessState
+    participant C as shutdown / stop(remove=True)
+    participant A as Admin
+    R->>S: 加入 Coordination；inflight += 1
+    C->>S: cleanup_requested = true
+    Note over C,S: cleanup 完成线性化；不等待即返回
+    R->>A: registry
+    A-->>R: CallResult
+    R->>S: accepted completion；inflight -= 1；reconcile
+    S->>A: 调度 registryRemove
+```
+
+真实 one-shot Register completion 只按 strict sequence 与调用捕获的 ProcessState
+identity 接受。generation 和 Coordination identity 不是 RPC ownership：即使它们已
+变化，accepted completion 仍推进全局 sequence，成功时仍更新 `registered=True`。
+这些 identity 只在改变 cleanup responsibility 前另行校验，从而防止旧 generation
+为新 generation 创建错误的 Pending/Active 清理。
+
 Active Remove completion 是否接受，只检查 strict sequence、ProcessState identity 与
 Active identity；精确 generation 和当前无有效 Worker 只用于判断是否记录“清理责任
 已满足”。因此旧 Active 与新 generation 的既有顺序不变：新 Worker 等待旧 Active

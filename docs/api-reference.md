@@ -73,6 +73,20 @@ reused by shutdown instead of being sent twice. A failed call preserves the
 existing `registered` snapshot. When the extension is disabled, both return a
 local config-failure `CallResult` without an Admin RPC.
 
+For a live non-zero generation, an explicit `register_executor()` joins the
+generation's still-open Register Coordination before waiting for the network
+lock. If lifecycle cleanup then linearizes, shutdown remains non-blocking and
+defers its Remove until those already-participating calls complete. Calls that
+begin after the window closes retain the existing one-shot API semantics.
+
+A real one-shot Register completion is accepted solely by strict sequence and
+the captured ProcessState identity. Generation or Coordination changes do not
+erase an Admin RPC that actually occurred: an accepted success still updates
+`registered=True` and advances the applied sequence. Those lifecycle identities
+are checked separately before the success may reopen cleanup responsibility,
+so an old-generation completion cannot alter a newer generation's cleanup
+cache, Coordination, Pending or Active ownership.
+
 ### Task-result callbacks
 
 ```python
