@@ -43,6 +43,22 @@ Each initialized application gets its own runtime stored in
 clients and registry service. Callbacks registered while configuring one
 application are not shared with another.
 
+## Initialization boundary
+
+`init_app()` validates deterministic configuration and Flask conflicts before
+creating managed resources. With automatic Registry enabled, it then starts a
+Prepared Thread that waits locally, commits the Flask extension, and only then
+lets the Prepared creator commit the generation/Worker and wake the Thread.
+The Prepared stage performs no Admin RPC and is not a running Registry
+lifecycle.
+
+If `Thread.start()` fails, handlers and other private resources created by that
+initialization are closed, no Flask extension resources have been committed,
+and the original exception is preserved. Correct the system condition and call
+`init_app()` again on the same application and extension instance. Unknown
+errors during Flask's irreversible commit receive best-effort cleanup of
+Flask-XXLJob-owned private resources; this is not a general Flask rollback.
+
 ## Direct initialization
 
 Direct initialization is also supported:

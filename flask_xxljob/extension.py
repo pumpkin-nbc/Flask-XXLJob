@@ -37,7 +37,10 @@ from .exceptions import (
     XXLJobRequestError,
 )
 from .protocol.blueprint import build_blueprint
-from .registry.registry_service import RegistryService
+from .registry.registry_service import (
+    RegistryService,
+    _PreparedRegistryStart,
+)
 from .response.executor import FAIL_CODE, SUCCESS_CODE
 from .runtime import XXLJobRuntime
 
@@ -140,39 +143,54 @@ class FlaskXXLJob:
             ensure_blueprint_name_available(app, blueprint_name)
             blueprint = build_blueprint(blueprint_name, config.route_prefix)
 
-        # Commit starts here.  Resource creation and Flask mutations happen
-        # only after every deterministic preflight check has succeeded.
+        # These resources remain private to this init_app() call until Flask
+        # commit and Prepared activation have completed.
+        log_manager: Optional[XXLJobLogManager] = None
+        registry_service: Optional[RegistryService] = None
+        prepared: Optional[_PreparedRegistryStart] = None
         try:
             log_manager = XXLJobLogManager(app, config)
-        except Exception:
-            logger.exception("Flask-XXLJob logging initialization failed.")
-            raise
-        callback_registry = CallbackRegistry()
-        # 将模块级默认处理函数注入到本应用的注册表，支持在 init_app 之前注册。
-        # Seed this application's registry with module-level default callbacks,
-        # enabling registration before init_app.
-        callback_registry.seed_from(self._deferred_callbacks)
-        admin_client = AdminClient(
-            config, logger=log_manager.get_logger("admin")
-        )
-        callback_client = CallbackClient(
-            config, logger=log_manager.get_logger("callback")
-        )
-        registry_service = RegistryService(
-            config,
-            admin_client,
-            logger=log_manager.get_logger("registry"),
-            close_logs=log_manager.close,
-        )
+            callback_registry = CallbackRegistry()
+            # 将模块级默认处理函数注入到本应用的注册表，支持在 init_app 之前注册。
+            # Seed this application's registry with module-level default
+            # callbacks, enabling registration before init_app.
+            callback_registry.seed_from(self._deferred_callbacks)
+            admin_client = AdminClient(
+                config, logger=log_manager.get_logger("admin")
+            )
+            callback_client = CallbackClient(
+                config, logger=log_manager.get_logger("callback")
+            )
+            registry_service = RegistryService(
+                config,
+                admin_client,
+                logger=log_manager.get_logger("registry"),
+                close_logs=log_manager.close,
+            )
 
-        runtime = XXLJobRuntime(
-            config=config,
-            callback_registry=callback_registry,
-            admin_client=admin_client,
-            callback_client=callback_client,
-            registry_service=registry_service,
-            log_manager=log_manager,
-        )
+            runtime = XXLJobRuntime(
+                config=config,
+                callback_registry=callback_registry,
+                admin_client=admin_client,
+                callback_client=callback_client,
+                registry_service=registry_service,
+                log_manager=log_manager,
+            )
+            if config.enabled and config.auto_register:
+                prepared = registry_service._prepare_start()
+        except Exception:
+            logger.exception(
+                "Flask-XXLJob private runtime preparation failed."
+            )
+            self._close_uncommitted_runtime_resources(
+                registry_service=registry_service,
+                prepared=prepared,
+                log_manager=log_manager,
+            )
+            raise
+
+        # Flask commit starts only after the activation-gated OS Thread has
+        # been created successfully.  The Prepared Thread has issued no RPC.
         try:
             if config.enabled:
                 assert blueprint is not None
@@ -185,21 +203,70 @@ class FlaskXXLJob:
             app.extensions[EXTENSION_KEY] = runtime
             self._applications.add(app)
             runtime.attach_finalizer(install_runtime_finalizer(app, runtime))
+
+            activated = True
+            if prepared is not None:
+                activated = registry_service._activate_prepared_start(
+                    prepared
+                )
+
             log_manager.get_logger("runtime").info(
                 "Flask-XXLJob initialized enabled=%s auto_register=%s.",
                 config.enabled,
                 config.auto_register,
             )
-
-            if config.enabled and config.auto_register:
-                # Automatic and explicit starts share exactly one public path.
-                self.start_registry(app)
+            if prepared is not None and not activated:
+                log_manager.get_logger("runtime").info(
+                    "Automatic Registry activation was cancelled by a "
+                    "concurrent Registry lifecycle operation."
+                )
         except Exception:
-            log_manager.get_logger("runtime").exception(
-                "Flask-XXLJob initialization failed."
+            logger.exception("Flask-XXLJob initialization commit failed.")
+            self._close_uncommitted_runtime_resources(
+                registry_service=registry_service,
+                prepared=prepared,
+                log_manager=log_manager,
             )
-            runtime.close()
             raise
+
+    @staticmethod
+    def _close_uncommitted_runtime_resources(
+        *,
+        registry_service: Optional[RegistryService],
+        prepared: Optional[_PreparedRegistryStart],
+        log_manager: Optional[XXLJobLogManager],
+    ) -> None:
+        """Close only resources privately owned by a failed init_app call."""
+        if registry_service is not None and prepared is not None:
+            try:
+                registry_service._cancel_prepared_start(prepared)
+            except Exception:  # noqa: BLE001 - preserve initialization error
+                try:
+                    logger.exception(
+                        "Failed to cancel an uncommitted Registry Thread."
+                    )
+                except Exception:  # noqa: BLE001 - cleanup cannot replace root
+                    pass
+            try:
+                registry_service._join_prepared_start(prepared, timeout=1.0)
+            except Exception:  # noqa: BLE001 - preserve initialization error
+                try:
+                    logger.exception(
+                        "Failed to join an uncommitted Registry Thread."
+                    )
+                except Exception:  # noqa: BLE001 - cleanup cannot replace root
+                    pass
+
+        if log_manager is not None:
+            try:
+                log_manager.close()
+            except Exception:  # noqa: BLE001 - preserve initialization error
+                try:
+                    logger.exception(
+                        "Failed to close uncommitted logging resources."
+                    )
+                except Exception:  # noqa: BLE001 - cleanup cannot replace root
+                    pass
 
     def _register_cli(self, app: Flask) -> None:
         from .cli.commands import xxljob_cli

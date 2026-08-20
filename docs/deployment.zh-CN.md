@@ -11,7 +11,12 @@
 flowchart TD
     A["init_app()"] --> B["Preflight：配置与 Flask 冲突"]
     B -->|"失败"| C["不提交 XXL-JOB 资源并返回"]
-    B -->|"成功"| D["Commit Runtime、日志、CLI、Hook 与 finalizer"]
+    B -->|"成功"| P["创建本次初始化私有 Runtime 资源"]
+    P --> Q{"ENABLED 且 AUTO_REGISTER？"}
+    Q -->|"是"| R["Thread.start()：Prepared 等待；Admin RPC 为零"]
+    R -->|"失败"| S["关闭私有 Handler/资源；保留原异常"]
+    R -->|"成功"| D["Commit Runtime、日志、CLI、Hook 与 finalizer"]
+    Q -->|"否"| D
     D --> E{"ENABLED？"}
     E -->|"是"| F["注册 beat / idleBeat / run / kill / log"]
     F --> G["HTTP 执行器协议可用"]
@@ -23,16 +28,17 @@ Registry 是另一条独立的进程级路径：
 ```mermaid
 flowchart TD
     A["init_app()"] --> B{"ENABLED？"}
-    B -->|"否"| C["Registry API 保持禁用"]
-    B -->|"是"| D{"AUTO_REGISTER？"}
-    D -->|"是"| E["公开 start_registry(app)"]
-    D -->|"否"| F["等待业务显式 start_registry(app)"]
-    F --> E
-    E --> G["同步校验完整 Registry 配置"]
-    G --> H["PID guard 与当前 ProcessState"]
-    H --> I["准备候选 generation 和 Worker"]
-    I --> J["Thread.start()"]
-    J --> K["提交 generation 与 Worker ownership"]
+    B -->|"否"| Z["Registry API 保持禁用"]
+    B -->|"是"| C{"AUTO_REGISTER？"}
+    C -->|"否"| J["Commit Flask；等待显式 start_registry(app)"]
+    C -->|"是"| D["同步校验完整 Registry 配置"]
+    D --> E["Thread.start()：创建者拥有 Prepared token"]
+    E --> F["Prepared Thread 等待本地激活门"]
+    F --> G["Flask Commit"]
+    G --> H["创建者激活 Prepared"]
+    J --> I["显式 start_registry()：校验并 prepare"]
+    I --> H
+    H --> K["提交 generation 与 Worker ownership"]
     K --> L["立即返回"]
     K --> M["Worker：立即 registry"]
     M --> N["stop_event.wait(REGISTRY_INTERVAL)"]
@@ -42,6 +48,18 @@ flowchart TD
 
 五个执行器端点、Handler 分发、任务执行与 Callback API 都没有变化。Registry 仍然
 在 Worker 启动后立即注册，随后每隔 `REGISTRY_INTERVAL` 续约。
+
+Prepared ownership 只是本地初始化 gate，不是公共 lifecycle 状态：`is_running` 与
+`registry_thread_running` 仍为 false，activation 前不可能访问 Admin。只有创建并成功
+启动该 Prepared Thread 的调用者可以激活，另一个并发 start 不能接管 token。Registry
+`stop()`/shutdown 可以非阻塞取消它。如果 activation 先提交、stop 又在首次 RPC 前
+获胜，Thread 仍会进入正式 Worker `try/finally`，Registry 调用为零，并正常完成
+stopping/Pending/Scheduler ownership 收尾。
+
+Prepared ownership 建立与 `Thread.start()` 共用一个很短的 state-lock 区间，因此启动
+失败仍发生在 Flask Commit 前；本次初始化的私有托管 Handler 会被关闭，未启动 Thread
+不会 join。Flask Commit 中的未知异常会 bounded 取消已经启动的 Prepared Thread，并
+best-effort 关闭 Flask-XXLJob 自己拥有的私有资源，但不会通用回滚 Flask 路由或 CLI。
 
 ## 生命周期停止
 

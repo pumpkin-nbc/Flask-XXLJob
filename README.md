@@ -93,7 +93,7 @@ with app.app_context():
 | `XXL_JOB_EXECUTOR_APP_NAME` | `"flask-xxljob-executor"` | Executor application name. |
 | `XXL_JOB_EXECUTOR_ADDRESS` | `""` | Executor service base URL (scheme/host/port). `XXL_JOB_ROUTE_PREFIX` is appended automatically. |
 | `XXL_JOB_ROUTE_PREFIX` | `""` | URL prefix for the executor endpoints; also appended to `XXL_JOB_EXECUTOR_ADDRESS`. |
-| `XXL_JOB_AUTO_REGISTER` | `True` | With `ENABLED=True`, call `start_registry()` after initialization. |
+| `XXL_JOB_AUTO_REGISTER` | `True` | With `ENABLED=True`, prepare an activation-gated Registry Worker during initialization and activate it after Flask commit. |
 | `XXL_JOB_DEREGISTER_ON_EXIT` | `False` | Best-effort background deregistration during Runtime shutdown. |
 | `XXL_JOB_REGISTRY_INTERVAL` | `30` | Registration renewal interval (seconds). |
 | `XXL_JOB_HTTP_CONNECT_TIMEOUT` | `3` | HTTP connect timeout (seconds). |
@@ -163,8 +163,17 @@ accepted success changes lifecycle cleanup responsibility.
 Initialization first performs a side-effect-free preflight. Removed keys,
 field values, automatic Registry completeness and route/Blueprint conflicts
 are rejected before log handlers, files, Flask routes, CLI commands, extension
-state, finalizers or workers are committed. After correcting a deterministic
-configuration error, the same Flask application can be initialized again.
+state, finalizers or workers are committed. For automatic Registry, it then
+starts a Prepared daemon Thread that waits on a local activation gate and makes
+no Admin call. Only its creator may activate it after Flask commit, at which
+point the generation and Worker become current and normal immediate
+registration begins. A `Thread.start()` failure closes this initialization's
+managed log handlers and leaves the Flask application uncommitted, so the same
+application and extension instance can retry. A concurrent Registry
+`stop()`/shutdown may cancel the Prepared candidate normally; a Worker that was
+already committed still runs its lifecycle `finally`, even if stopped before
+its first Registry RPC. This is targeted pre-commit resource atomicity, not a
+general rollback of arbitrary Flask commit failures.
 
 ## CLI
 

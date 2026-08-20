@@ -12,7 +12,12 @@ five HTTP routes.
 flowchart TD
     A["init_app()"] --> B["Preflight: configuration and Flask conflicts"]
     B -->|"Failure"| C["Return without committing XXL-JOB resources"]
-    B -->|"Success"| D["Commit Runtime, logging, CLI, hooks and finalizer"]
+    B -->|"Success"| P["Create init-private Runtime resources"]
+    P --> Q{"ENABLED and AUTO_REGISTER?"}
+    Q -->|"Yes"| R["Thread.start(): Prepared waits; zero Admin RPCs"]
+    R -->|"Failure"| S["Close private handlers/resources; preserve error"]
+    R -->|"Success"| D["Commit Runtime, logging, CLI, hooks and finalizer"]
+    Q -->|"No"| D
     D --> E{"ENABLED?"}
     E -->|"Yes"| F["Register beat / idleBeat / run / kill / log"]
     F --> G["HTTP executor protocol is available"]
@@ -24,16 +29,17 @@ Registry is a separate, process-local path:
 ```mermaid
 flowchart TD
     A["init_app()"] --> B{"ENABLED?"}
-    B -->|"No"| C["Registry APIs stay disabled"]
-    B -->|"Yes"| D{"AUTO_REGISTER?"}
-    D -->|"Yes"| E["Public start_registry(app)"]
-    D -->|"No"| F["Wait for an explicit start_registry(app)"]
-    F --> E
-    E --> G["Validate complete Registry configuration"]
-    G --> H["PID guard and current ProcessState"]
-    H --> I["Prepare candidate generation and Worker"]
-    I --> J["Thread.start()"]
-    J --> K["Commit generation and Worker ownership"]
+    B -->|"No"| Z["Registry APIs stay disabled"]
+    B -->|"Yes"| C{"AUTO_REGISTER?"}
+    C -->|"No"| J["Commit Flask; wait for explicit start_registry(app)"]
+    C -->|"Yes"| D["Validate complete Registry configuration"]
+    D --> E["Thread.start(): creator owns Prepared token"]
+    E --> F["Prepared Thread waits on local activation gate"]
+    F --> G["Flask Commit"]
+    G --> H["Creator activates Prepared"]
+    J --> I["Explicit start_registry(): validate and prepare"]
+    I --> H
+    H --> K["Commit generation and Worker ownership"]
     K --> L["Return immediately"]
     K --> M["Worker: registry immediately"]
     M --> N["stop_event.wait(REGISTRY_INTERVAL)"]
@@ -44,6 +50,22 @@ flowchart TD
 The five executor endpoints, Handler dispatch, task execution and Callback API
 are unchanged. Registry still registers immediately and then renews every
 `REGISTRY_INTERVAL`.
+
+Prepared ownership is a local initialization gate, not a public lifecycle
+state: `is_running` and `registry_thread_running` remain false, and no Admin RPC
+is possible before activation. Only the caller that created and successfully
+started that Prepared Thread may activate it; a concurrent start cannot take
+over the token. Registry `stop()`/shutdown may cancel it without blocking. If
+activation committed first and stop then wins before the first RPC, the Thread
+still enters the formal Worker `try/finally`, sends zero Registry calls, and
+finishes its stopping/Pending/Scheduler ownership normally.
+
+Prepared creation and `Thread.start()` share one short state-lock interval. A
+start failure therefore remains before Flask commit and closes the
+initialization's private managed handlers without joining an unstarted Thread.
+An unknown error during Flask commit gets bounded cancellation of an already
+started Prepared Thread and best-effort closure of Flask-XXLJob-owned private
+resources; it is not a general rollback of Flask routes or CLI state.
 
 ## Lifecycle shutdown
 

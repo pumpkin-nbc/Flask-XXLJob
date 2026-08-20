@@ -13,8 +13,9 @@
 
 - 将 PID 隔离、lifecycle generation、当前/停止中 Worker ownership、Pending/Active
   Remove、cleanup 调度、RPC 顺序及日志最终关闭统一收口到 `RegistryService`。
-- 自动启动只保留 `XXL_JOB_ENABLED && XXL_JOB_AUTO_REGISTER` 一个条件，并统一调用
-  公开 `start_registry()` 路径。
+- 自动启动仍只保留 `XXL_JOB_ENABLED && XXL_JOB_AUTO_REGISTER` 一个条件，但会在
+  Flask Commit 前启动带激活门的 Prepared Thread。只有创建它的调用才能在 Commit 后
+  提交 generation/Worker 并唤醒线程；Prepared 阶段不访问 Admin。
 - `stop_registry(remove=False)` 变成默认：立即分离并唤醒本地续约，不 join、不访问
   Admin，也不修改最近 `registered` 快照。`remove=True` 为该 generation 排队一次
   当前清理责任的后台 Remove。
@@ -38,6 +39,11 @@
 - `init_app()` 会先完成无副作用的确定性 Preflight，再创建托管日志资源或提交
   Blueprint、CLI、Hook、扩展、应用注册、finalizer 与 Registry 状态；修正配置后可在
   同一个 Flask app 上重试。
+- Prepared `Thread.start()` 失败现在会保持 Flask 未提交，关闭本次初始化私有的托管
+  Handler/资源，保留原始异常，并允许同一 app/扩展实例重试。创建者独占 activation
+  与 identity-safe cancellation 会阻止并发 start 接管或 stale cancel 误停正式 Worker；
+  任何已在 stop 前提交的 Worker 即使 Registry RPC 为零，也会经过正式 `try/finally`
+  收尾边界。
 - Flask 与独立 CLI 的 `remove` 现在先停止本地续约，再同步 Remove；即使 Admin 注销
   失败，Worker 仍保持停止。低层 `remove_executor()` 行为不变。
 - 用户回调与包内未预期异常会保留完整本地 traceback；预期网络/HTTP/远端失败仍是
@@ -67,9 +73,10 @@
 - 发布检查改为在干净临时目录构建，只验证本轮新 wheel/sdist（包括仅针对文件成员的
   RECORD 映射与标准顶层 PKG-INFO），拒绝开发/签名文件，并在 `pip check` 后执行与
   源码隔离的安装后冒烟。
-- 最终本地测试为 509 项通过、2 项可选官方 Admin 测试跳过，行覆盖率 93.33%。覆盖
+- 最终本地测试为 528 项通过、2 项可选官方 Admin 测试跳过，行覆盖率 92.65%。覆盖
   PID/disabled 顺序、generation ownership、Remove 竞态、cleanup 启动失败、严格
-  completion sequence、非阻塞 finalizer 与日志恰好关闭一次。
+  completion sequence、Prepared activation/cancellation ownership、提交前资源收尾、
+  非阻塞 finalizer 与日志恰好关闭一次。
 
 ## [0.3.4] - 2026-07-25
 

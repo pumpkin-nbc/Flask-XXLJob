@@ -27,6 +27,16 @@ class _RegistryWorkerContext:
 
 
 @dataclass(eq=False)
+class _PreparedRegistryStart:
+    """A started OS thread that is not yet a committed Registry Worker."""
+
+    state: "_RegistryProcessState"
+    context: _RegistryWorkerContext
+    activate_event: threading.Event
+    thread: threading.Thread
+
+
+@dataclass(eq=False)
 class _RemoveOperation:
     """One terminal/lifecycle Registry Remove ownership."""
 
@@ -60,6 +70,7 @@ class _RegistryProcessState:
     last_successfully_removed_generation: Optional[int] = None
     last_successfully_removed_result: Optional[CallResult] = None
     register_coordination: Optional[_RegisterCoordination] = None
+    prepared_start: Optional[_PreparedRegistryStart] = None
     worker: Optional[_RegistryWorkerContext] = None
     stopping_workers: Dict[int, _RegistryWorkerContext] = field(
         default_factory=dict
@@ -648,42 +659,106 @@ class RegistryService:
 
     def start(self) -> None:
         """Start one current renewal lifecycle and return without networking."""
-        if not self._config.enabled:
+        prepared = self._prepare_start()
+        if prepared is None:
             return
+        self._activate_prepared_start(prepared)
+
+    def _prepare_start(self) -> Optional[_PreparedRegistryStart]:
+        """Start an activation-gated Thread without committing a lifecycle."""
+        if not self._config.enabled:
+            return None
         self._config.validate_registry()
         state = self._get_process_state()
-        cancelled: Optional[_RemoveOperation] = None
-        detached_coordination_event: Optional[threading.Event] = None
 
         with state.state_lock:
             existing = state.worker
             if existing is not None:
                 if self._is_current_worker(state, existing):
-                    return
-                # Defensive repair of an internally inconsistent ownership
-                # record.  Normal lifecycle transitions never enter here.
-                state.worker = None
-                state.stopping_workers[existing.generation] = existing
-                existing.stop_event.set()
+                    return None
+                # Repair is deliberately delayed until activation.  Prepare
+                # owns only the candidate Thread and must not mutate the
+                # previously committed lifecycle.
+
+            if state.prepared_start is not None:
+                # A different caller owns that Prepared token and is solely
+                # responsible for activating it.
+                return None
 
             candidate_generation = state.generation + 1
             ctx = _RegistryWorkerContext(
                 generation=candidate_generation,
                 stop_event=threading.Event(),
             )
+            activate_event = threading.Event()
             thread = threading.Thread(
-                target=self._run_worker,
-                args=(state, ctx),
+                target=self._prepared_worker_entry,
+                args=(state, ctx, activate_event),
                 name="flask-xxljob-registry",
                 daemon=True,
             )
             ctx.thread = thread
+            prepared = _PreparedRegistryStart(
+                state=state,
+                context=ctx,
+                activate_event=activate_event,
+                thread=thread,
+            )
+            state.prepared_start = prepared
 
-            # The worker's first action is to acquire this same state_lock, so
-            # it cannot perform a Registry RPC before ownership is committed.
-            thread.start()
-            state.generation = candidate_generation
+            # Ownership publication and OS Thread creation are one short
+            # state-lock linearization interval.  The target only waits on the
+            # activation Event, so it cannot contend for this lock or issue an
+            # Admin RPC before Thread.start() returns.
+            try:
+                thread.start()
+            except Exception:
+                if state.prepared_start is prepared:
+                    state.prepared_start = None
+                raise
+
+        return prepared
+
+    def _activate_prepared_start(
+        self, prepared: _PreparedRegistryStart
+    ) -> bool:
+        """Commit a caller-owned Prepared Thread as the current Worker."""
+        state = prepared.state
+        # Never touch an inherited state lock or Event after a PID boundary.
+        if os.getpid() != state.pid or self._get_process_state() is not state:
+            return False
+
+        cancelled: Optional[_RemoveOperation] = None
+        detached_coordination_event: Optional[threading.Event] = None
+        ctx = prepared.context
+        with state.state_lock:
+            if state.prepared_start is not prepared:
+                # stop(), shutdown(), or another valid state transition won
+                # the lock first.  Cancellation is an expected no-op result.
+                return False
+
+            if ctx.generation != state.generation + 1:
+                raise RuntimeError(
+                    "Prepared Registry generation no longer follows the "
+                    "committed generation."
+                )
+
+            existing = state.worker
+            if existing is not None:
+                if self._is_current_worker(state, existing):
+                    raise RuntimeError(
+                        "A current Registry Worker appeared while a Prepared "
+                        "Start retained activation ownership."
+                    )
+                # Preserve the former start() defensive repair, but only at
+                # the point where this candidate is actually committed.
+                state.worker = None
+                state.stopping_workers[existing.generation] = existing
+                existing.stop_event.set()
+
+            state.generation = ctx.generation
             state.worker = ctx
+            state.prepared_start = None
 
             coordination = state.register_coordination
             if coordination is not None:
@@ -702,10 +777,69 @@ class RegistryService:
             cancelled.done_event.set()
         if detached_coordination_event is not None:
             detached_coordination_event.set()
+        prepared.activate_event.set()
         self._logger.info(
             "XXL-JOB registry lifecycle started generation=%s.",
-            candidate_generation,
+            ctx.generation,
         )
+        return True
+
+    def _cancel_prepared_start(
+        self, prepared: _PreparedRegistryStart
+    ) -> bool:
+        """Cancel only a Prepared token still owned by its original state."""
+        state = prepared.state
+        if os.getpid() != state.pid or self._get_process_state() is not state:
+            return False
+
+        with state.state_lock:
+            if state.prepared_start is not prepared:
+                return False
+            state.prepared_start = None
+
+        prepared.context.stop_event.set()
+        prepared.activate_event.set()
+        return True
+
+    @staticmethod
+    def _join_prepared_start(
+        prepared: _PreparedRegistryStart, timeout: float = 1.0
+    ) -> None:
+        """Boundedly join a successfully started, uncommitted Thread."""
+        if os.getpid() != prepared.state.pid:
+            return
+        if prepared.thread is threading.current_thread():
+            return
+        prepared.thread.join(timeout=timeout)
+
+    def _prepared_worker_entry(
+        self,
+        state: _RegistryProcessState,
+        ctx: _RegistryWorkerContext,
+        activate_event: threading.Event,
+    ) -> None:
+        """Wait for activation and distinguish cancellation from Worker stop."""
+        activate_event.wait()
+
+        # Check the immutable PID before acquiring or reading inherited
+        # synchronization objects.
+        if os.getpid() != state.pid or self._get_process_state() is not state:
+            return
+
+        with state.state_lock:
+            committed_worker = bool(
+                state.worker is ctx
+                or state.stopping_workers.get(ctx.generation) is ctx
+            )
+
+        if not committed_worker:
+            # This candidate never owned a committed generation, so it has no
+            # Worker/Remove/Scheduler/log lifecycle to finish.
+            return
+
+        # Even a stop-before-first-RPC is a committed Worker lifecycle.  The
+        # first stop/ownership checks remain inside _run_worker's try/finally.
+        self._run_worker(state, ctx)
 
     def _run_worker(
         self,
@@ -817,11 +951,18 @@ class RegistryService:
 
         state = self._get_process_state()
         operation: Optional[_RemoveOperation] = None
+        prepared_to_cancel: Optional[_PreparedRegistryStart] = None
         with state.state_lock:
+            prepared_to_cancel = state.prepared_start
+            if prepared_to_cancel is not None:
+                state.prepared_start = None
             self._stop_local_locked(state)
             if remove:
                 operation = self._request_remove_locked(state)
 
+        if prepared_to_cancel is not None:
+            prepared_to_cancel.context.stop_event.set()
+            prepared_to_cancel.activate_event.set()
         if operation is not None:
             self._schedule_pending_remove(state, raise_start_error=True)
         self._maybe_close_logs_when_idle(state)
@@ -1162,8 +1303,12 @@ class RegistryService:
         state = self._get_process_state()
         target_generation = 0
         should_validate_remove = False
+        prepared_to_cancel: Optional[_PreparedRegistryStart] = None
 
         with state.state_lock:
+            prepared_to_cancel = state.prepared_start
+            if prepared_to_cancel is not None:
+                state.prepared_start = None
             self._stop_local_locked(state)
             state.close_logs_when_idle = True
             target_generation = state.generation
@@ -1191,6 +1336,10 @@ class RegistryService:
                     )
                 )
             )
+
+        if prepared_to_cancel is not None:
+            prepared_to_cancel.context.stop_event.set()
+            prepared_to_cancel.activate_event.set()
 
         if should_validate_remove:
             try:
@@ -1240,6 +1389,7 @@ class RegistryService:
         with state.state_lock:
             if (
                 state.close_logs_when_idle
+                and state.prepared_start is None
                 and state.worker is None
                 and not state.stopping_workers
                 and state.active_remove is None

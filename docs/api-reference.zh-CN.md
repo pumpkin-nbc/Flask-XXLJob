@@ -103,6 +103,13 @@ daemon 续约 Worker，并在首次 Admin 调用完成前返回。`stop_registry
 并保留最近的 `registered` 快照。因此 `registry_thread_running=False` 与
 `registered=True` 可以同时成立。
 
+`init_app()` 自动启动 Registry 时，会把同一私有 Worker lifecycle 拆成两段：Flask
+Commit 前先创建 OS Thread，但它只等待激活门且 Admin RPC 为零；Commit 后只有创建
+该 Prepared token 的调用者才能提交 generation/Worker 并唤醒线程。Prepared ownership
+不会被状态接口报告为 Registry Thread 正在运行。并发 Registry stop 或 shutdown 可以
+正常取消候选；一旦正式提交，所有 Worker early return（包括首次 RPC 前已经 stop）都
+仍位于正常 Worker `try/finally` 收尾边界内。
+
 `stop_registry(remove=True)` 先校验配置，再完成同样的本地停止，并为当前清理责任
 排队一次后台 `registryRemove`。终止 Remove 成功后该责任即满足；如果同 generation
 后来又有 accepted register 重新建立远端身份，则会产生一份新的必要清理责任，这不

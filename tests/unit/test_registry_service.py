@@ -12,6 +12,7 @@ from flask_xxljob.config import XXLJobConfig
 from flask_xxljob.exceptions import XXLJobConfigError
 from flask_xxljob.registry.registry_service import (
     RegistryService,
+    _PreparedRegistryStart,
     _RegisterCoordination,
     _RegistryWorkerContext,
     _RemoveOperation,
@@ -385,9 +386,11 @@ def test_thread_start_failure_does_not_commit_or_cancel_pending(mocker):
         service.start()
 
     assert state.generation == 0
+    assert state.prepared_start is None
     assert state.worker is None
     assert state.pending_remove is pending
     assert pending.done_event.is_set() is False
+    failed_thread.join.assert_not_called()
 
     mocker.stop(thread_factory)
     service.start()
@@ -396,6 +399,295 @@ def test_thread_start_failure_does_not_commit_or_cancel_pending(mocker):
     assert pending.done_event.is_set() is True
     service.stop()
     wait_for(lambda: not state.stopping_workers)
+
+
+def test_prepare_is_private_and_does_not_mutate_committed_lifecycle():
+    service = RegistryService(make_config(), FakeAdmin())
+    state = service._get_process_state()
+    pending = _RemoveOperation(3, threading.Event())
+    active = _RemoveOperation(2, threading.Event())
+    coordination = _RegisterCoordination(generation=3)
+    cached = CallResult(success=True, address="http://a:8080")
+    state.generation = 3
+    state.pending_remove = pending
+    state.active_remove = active
+    state.last_remove_requested_generation = 3
+    state.last_successfully_removed_generation = 3
+    state.last_successfully_removed_result = cached
+    state.register_coordination = coordination
+    state.registered = True
+    state.rpc_sequence = 7
+    state.last_applied_rpc_sequence = 6
+
+    prepared = service._prepare_start()
+
+    assert isinstance(prepared, _PreparedRegistryStart)
+    assert state.prepared_start is prepared
+    assert prepared.context.generation == 4
+    assert state.generation == 3
+    assert state.worker is None
+    assert state.pending_remove is pending
+    assert state.active_remove is active
+    assert state.last_remove_requested_generation == 3
+    assert state.last_successfully_removed_generation == 3
+    assert state.last_successfully_removed_result is cached
+    assert state.register_coordination is coordination
+    assert state.registered is True
+    assert state.rpc_sequence == 7
+    assert state.last_applied_rpc_sequence == 6
+
+    assert service._cancel_prepared_start(prepared) is True
+    service._join_prepared_start(prepared)
+    assert prepared.thread.is_alive() is False
+
+
+def test_second_start_cannot_activate_another_callers_prepared(mocker):
+    admin = BlockingRegistryAdmin()
+    service = RegistryService(make_config(), admin)
+    prepared = service._prepare_start()
+    assert prepared is not None
+    activate = mocker.spy(service, "_activate_prepared_start")
+
+    service.start()
+
+    activate.assert_not_called()
+    state = service._get_process_state()
+    assert state.prepared_start is prepared
+    assert state.generation == 0
+    assert state.worker is None
+    assert service.is_running is False
+    assert service.status_snapshot()["registry_thread_running"] is False
+    assert admin.registry_calls == 0
+
+    assert service._activate_prepared_start(prepared) is True
+    assert admin.started.wait(timeout=1)
+    service.stop()
+    admin.release.set()
+    wait_for(lambda: not state.stopping_workers)
+
+
+def test_prepare_publication_and_thread_start_share_state_lock(mocker):
+    service = RegistryService(make_config(), FakeAdmin())
+    state = service._get_process_state()
+    start_entered = threading.Event()
+    release_start = threading.Event()
+    prepared_result = []
+
+    class BlockingStartThread:
+        def __init__(self, *args, **kwargs):
+            self.name = kwargs.get("name")
+
+        def start(self):
+            start_entered.set()
+            release_start.wait(timeout=2)
+
+        def join(self, timeout=None):
+            return None
+
+    real_thread = threading.Thread
+    mocker.patch(
+        "flask_xxljob.registry.registry_service.threading.Thread",
+        BlockingStartThread,
+    )
+
+    caller = real_thread(
+        target=lambda: prepared_result.append(service._prepare_start())
+    )
+    caller.start()
+    assert start_entered.wait(timeout=1)
+
+    assert state.state_lock.acquire(blocking=False) is False
+
+    release_start.set()
+    caller.join(timeout=1)
+    assert len(prepared_result) == 1
+    prepared = prepared_result[0]
+    assert isinstance(prepared, _PreparedRegistryStart)
+    assert service._cancel_prepared_start(prepared) is True
+
+
+def test_cancelled_unactivated_prepared_exits_without_worker_finally(mocker):
+    admin = FakeAdmin()
+    service = RegistryService(make_config(), admin)
+    finish = mocker.spy(service, "_finish_worker")
+    schedule = mocker.spy(service, "_schedule_pending_remove")
+    prepared = service._prepare_start()
+    assert prepared is not None
+
+    assert service._cancel_prepared_start(prepared) is True
+    service._join_prepared_start(prepared)
+
+    state = service._get_process_state()
+    assert prepared.thread.is_alive() is False
+    assert state.prepared_start is None
+    assert state.generation == 0
+    assert state.worker is None
+    assert not state.stopping_workers
+    assert admin.registry_calls == admin.remove_calls == 0
+    finish.assert_not_called()
+    schedule.assert_not_called()
+
+
+def test_stale_prepared_cancel_does_not_stop_activated_worker():
+    admin = BlockingRegistryAdmin()
+    service = RegistryService(make_config(), admin)
+    prepared = service._prepare_start()
+    assert prepared is not None
+
+    assert service._activate_prepared_start(prepared) is True
+    assert service._cancel_prepared_start(prepared) is False
+    assert prepared.context.stop_event.is_set() is False
+    assert admin.started.wait(timeout=1)
+
+    service.stop()
+    admin.release.set()
+    wait_for(lambda: not service._get_process_state().stopping_workers)
+
+
+def test_stop_after_activation_commit_still_runs_worker_finally(mocker):
+    admin = FakeAdmin()
+    service = RegistryService(make_config(), admin)
+    finish = mocker.spy(service, "_finish_worker")
+    prepared = service._prepare_start()
+    assert prepared is not None
+    original_set = prepared.activate_event.set
+    activation_reached_event = threading.Event()
+    release_activation_event = threading.Event()
+
+    def delayed_set():
+        activation_reached_event.set()
+        release_activation_event.wait(timeout=2)
+        original_set()
+
+    prepared.activate_event.set = delayed_set
+    activated = []
+    caller = threading.Thread(
+        target=lambda: activated.append(
+            service._activate_prepared_start(prepared)
+        )
+    )
+    caller.start()
+    assert activation_reached_event.wait(timeout=1)
+
+    state = service._get_process_state()
+    assert state.worker is prepared.context
+    service.stop()
+    assert state.stopping_workers[1] is prepared.context
+
+    release_activation_event.set()
+    caller.join(timeout=1)
+    prepared.thread.join(timeout=1)
+
+    assert activated == [True]
+    assert admin.registry_calls == 0
+    finish.assert_called_once_with(state, prepared.context)
+    assert state.prepared_start is None
+    assert state.worker is None
+    assert not state.stopping_workers
+
+
+def test_old_committed_worker_finishes_without_overwriting_new_generation():
+    admin = BlockingRegistryAdmin()
+    service = RegistryService(make_config(), admin)
+    old = service._prepare_start()
+    assert old is not None
+    original_set = old.activate_event.set
+    old_activation_committed = threading.Event()
+    release_old_worker = threading.Event()
+
+    def delayed_set():
+        old_activation_committed.set()
+        release_old_worker.wait(timeout=2)
+        original_set()
+
+    old.activate_event.set = delayed_set
+    old_caller = threading.Thread(
+        target=lambda: service._activate_prepared_start(old)
+    )
+    old_caller.start()
+    assert old_activation_committed.wait(timeout=1)
+
+    state = service._get_process_state()
+    service.stop()
+    service.start()
+    assert state.generation == 2
+    current = state.worker
+    assert current is not None and current.generation == 2
+    assert admin.started.wait(timeout=1)
+
+    release_old_worker.set()
+    old_caller.join(timeout=1)
+    old.thread.join(timeout=1)
+
+    assert admin.registry_calls == 1
+    assert state.worker is current
+    assert 1 not in state.stopping_workers
+    assert state.generation == 2
+
+    service.stop()
+    admin.release.set()
+    wait_for(lambda: not state.stopping_workers)
+
+
+def test_shutdown_cancels_generation_zero_prepared_without_remove():
+    admin = FakeAdmin()
+    service = RegistryService(make_config(), admin)
+    prepared = service._prepare_start()
+    assert prepared is not None
+
+    service.shutdown(deregister_on_exit=True)
+    service._join_prepared_start(prepared)
+
+    state = service._get_process_state()
+    assert state.prepared_start is None
+    assert state.generation == 0
+    assert state.worker is None
+    assert admin.registry_calls == admin.remove_calls == 0
+
+
+def test_shutdown_cancels_prepared_but_cleans_old_committed_generation():
+    admin = FakeAdmin()
+    service = RegistryService(make_config(), admin)
+    state = service._get_process_state()
+    state.generation = 1
+    state.registered = True
+    prepared = service._prepare_start()
+    assert prepared is not None
+    assert prepared.context.generation == 2
+
+    service.shutdown(deregister_on_exit=True)
+    service._join_prepared_start(prepared)
+    wait_for(lambda: admin.remove_calls == 1)
+    wait_for(
+        lambda: state.active_remove is None
+        and state.pending_remove is None
+        and not state.cleanup_actors
+    )
+
+    assert state.generation == 1
+    assert state.last_successfully_removed_generation == 1
+    assert state.prepared_start is None
+    assert admin.registry_calls == 0
+
+
+def test_prepared_ownership_prevents_early_log_idle_close(mocker):
+    closed = mocker.Mock()
+    service = RegistryService(make_config(), FakeAdmin(), close_logs=closed)
+    prepared = service._prepare_start()
+    assert prepared is not None
+    state = service._get_process_state()
+    state.close_logs_when_idle = True
+
+    service._maybe_close_logs_when_idle(state)
+
+    closed.assert_not_called()
+    assert state.logs_closed is False
+
+    assert service._cancel_prepared_start(prepared) is True
+    service._join_prepared_start(prepared)
+    service._maybe_close_logs_when_idle(state)
+    closed.assert_called_once_with()
+    assert state.logs_closed is True
 
 
 def test_stop_is_immediately_local_and_tracks_stopping_worker():
@@ -1862,6 +2154,15 @@ def test_fork_finalizer_uses_only_blank_child_state(mocker):
     parent = service._process_state
     inherited_event = mocker.Mock()
     parent.worker = _RegistryWorkerContext(1, inherited_event)
+    inherited_activate_event = mocker.Mock()
+    inherited_prepared_stop = mocker.Mock()
+    prepared_context = _RegistryWorkerContext(2, inherited_prepared_stop)
+    parent.prepared_start = _PreparedRegistryStart(
+        state=parent,
+        context=prepared_context,
+        activate_event=inherited_activate_event,
+        thread=mocker.Mock(),
+    )
     parent.generation = 1
     parent.state_lock = PoisonLock()
     mocker.patch(
@@ -1873,6 +2174,8 @@ def test_fork_finalizer_uses_only_blank_child_state(mocker):
 
     child = service._process_state
     inherited_event.set.assert_not_called()
+    inherited_prepared_stop.set.assert_not_called()
+    inherited_activate_event.set.assert_not_called()
     assert child.generation == 0
     assert child.logs_closed is True
     closed.assert_called_once_with()

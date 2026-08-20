@@ -91,7 +91,7 @@ with app.app_context():
 | `XXL_JOB_EXECUTOR_APP_NAME` | `"flask-xxljob-executor"` | 执行器应用名称。 |
 | `XXL_JOB_EXECUTOR_ADDRESS` | `""` | 执行器服务基础地址（协议/主机/端口）；会自动附加 `XXL_JOB_ROUTE_PREFIX`。 |
 | `XXL_JOB_ROUTE_PREFIX` | `""` | 执行器接口的 URL 前缀；同时会附加到 `XXL_JOB_EXECUTOR_ADDRESS`。 |
-| `XXL_JOB_AUTO_REGISTER` | `True` | 与 `ENABLED=True` 同时成立时，初始化后调用 `start_registry()`。 |
+| `XXL_JOB_AUTO_REGISTER` | `True` | 与 `ENABLED=True` 同时成立时，在初始化期间准备带激活门的 Registry Worker，并在 Flask Commit 后激活。 |
 | `XXL_JOB_DEREGISTER_ON_EXIT` | `False` | Runtime 关闭时是否 best-effort 后台注销。 |
 | `XXL_JOB_REGISTRY_INTERVAL` | `30` | 注册续约间隔（秒）。 |
 | `XXL_JOB_HTTP_CONNECT_TIMEOUT` | `3` | HTTP 连接超时（秒）。 |
@@ -149,8 +149,13 @@ ownership 仅决定 accepted success 是否改变 lifecycle 清理责任。
 
 初始化会先执行无副作用 Preflight。已删除配置、字段值、自动 Registry 完整配置以及
 路由/Blueprint 冲突会在创建日志 Handler、打开文件、注册路由/CLI、写入扩展状态、
-安装 finalizer 或启动 Worker 前失败。修正确定性配置错误后，同一个 Flask app 可以
-重新初始化。
+安装 finalizer 或提交 Worker 前失败。自动 Registry 随后会启动一个只等待本地激活门、
+不会访问 Admin 的 Prepared daemon Thread；只有创建它的调用者能在 Flask Commit 后
+提交 generation 与 Worker，此后才开始原有的立即 registry。`Thread.start()` 失败会
+关闭本次初始化创建的托管日志 Handler，Flask app 仍未提交，因此同一个 app 与扩展
+实例可以重试。并发 Registry `stop()`/shutdown 可以正常取消 Prepared 候选；已经正式
+提交的 Worker 即使在首次 Registry RPC 前被停止，也仍会执行 lifecycle `finally`
+完成收尾。这是针对提交前资源的原子性保证，不是任意 Flask Commit 异常的通用回滚。
 
 ## 命令行
 

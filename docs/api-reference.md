@@ -116,6 +116,15 @@ default: it immediately detaches and wakes that Worker, does not join or access
 Admin, and preserves the latest `registered` snapshot. Consequently
 `registry_thread_running=False` and `registered=True` is valid.
 
+When `init_app()` performs automatic Registry startup, it uses the same private
+Worker lifecycle in two phases: an OS Thread is created before Flask commit but
+waits on an activation gate with zero Admin RPCs; after commit, only the caller
+that created that Prepared token may commit its generation/Worker and wake it.
+Prepared ownership is not reported as a running Registry thread. A concurrent
+Registry stop or shutdown may cancel the candidate normally. Once committed,
+all early Worker exits—including a stop before the first RPC—remain inside the
+normal Worker `try/finally` cleanup boundary.
+
 `stop_registry(remove=True)` first validates configuration, performs the same
 local stop, and schedules one background `registryRemove` for the current
 cleanup responsibility. A successful terminal Remove satisfies that

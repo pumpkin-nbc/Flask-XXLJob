@@ -9,6 +9,8 @@ from flask_xxljob import FlaskXXLJob
 from flask_xxljob._app import ApplicationRegistry
 from flask_xxljob._lifecycle import install_runtime_finalizer, safe_close_runtime
 from flask_xxljob.exceptions import XXLJobConfigError
+from flask_xxljob.extension import EXTENSION_KEY
+from flask_xxljob.registry.registry_service import RegistryService
 
 
 def configured_app(name, **overrides):
@@ -38,10 +40,22 @@ def test_application_registry_explicit_app_wins():
         (False, False, 0),
     ],
 )
-def test_init_app_auto_start_uses_public_start_registry(
+def test_init_app_auto_start_uses_creator_owned_prepare_then_activate(
     mocker, enabled, auto_register, expected_calls
 ):
-    start = mocker.patch.object(FlaskXXLJob, "start_registry")
+    token = object()
+    prepare = mocker.patch.object(
+        RegistryService,
+        "_prepare_start",
+        autospec=True,
+        return_value=token,
+    )
+    activate = mocker.patch.object(
+        RegistryService,
+        "_activate_prepared_start",
+        autospec=True,
+        return_value=True,
+    )
     app = configured_app(
         "lifecycle-{}-{}".format(enabled, auto_register),
         XXL_JOB_ENABLED=enabled,
@@ -50,9 +64,98 @@ def test_init_app_auto_start_uses_public_start_registry(
 
     FlaskXXLJob(app)
 
-    assert start.call_count == expected_calls
+    assert prepare.call_count == expected_calls
+    assert activate.call_count == expected_calls
     if expected_calls:
-        start.assert_called_once_with(app)
+        service = app.extensions["xxljob"].registry_service
+        prepare.assert_called_once_with(service)
+        activate.assert_called_once_with(service, token)
+    app.extensions["xxljob"].close()
+
+
+def test_auto_start_prepares_before_flask_commit_and_activates_after(
+    mocker,
+):
+    app = configured_app(
+        "prepared-order",
+        XXL_JOB_AUTO_REGISTER=True,
+    )
+    token = object()
+    events = []
+
+    def prepare(service):
+        assert EXTENSION_KEY not in app.extensions
+        assert "xxljob" not in app.cli.commands
+        assert not any(
+            name.startswith("xxljob_") for name in app.blueprints
+        )
+        events.append("prepare")
+        return token
+
+    def activate(service, prepared):
+        assert prepared is token
+        assert app.extensions[EXTENSION_KEY].registry_service is service
+        assert "xxljob" in app.cli.commands
+        assert any(name.startswith("xxljob_") for name in app.blueprints)
+        events.append("activate")
+        return True
+
+    mocker.patch.object(
+        RegistryService, "_prepare_start", autospec=True, side_effect=prepare
+    )
+    mocker.patch.object(
+        RegistryService,
+        "_activate_prepared_start",
+        autospec=True,
+        side_effect=activate,
+    )
+
+    FlaskXXLJob(app)
+
+    assert events == ["prepare", "activate"]
+    app.extensions["xxljob"].close()
+
+
+def test_registry_stop_between_commit_and_activation_is_normal(mocker):
+    app = configured_app(
+        "prepared-cancel",
+        XXL_JOB_AUTO_REGISTER=True,
+    )
+    captured = []
+    real_prepare = RegistryService._prepare_start
+    real_activate = RegistryService._activate_prepared_start
+
+    def prepare(service):
+        prepared = real_prepare(service)
+        captured.append(prepared)
+        return prepared
+
+    def cancel_then_activate(service, prepared):
+        assert EXTENSION_KEY in app.extensions
+        service.stop()
+        return real_activate(service, prepared)
+
+    mocker.patch.object(
+        RegistryService, "_prepare_start", autospec=True, side_effect=prepare
+    )
+    mocker.patch.object(
+        RegistryService,
+        "_activate_prepared_start",
+        autospec=True,
+        side_effect=cancel_then_activate,
+    )
+
+    FlaskXXLJob(app)
+
+    prepared = captured[0]
+    assert prepared is not None
+    prepared.thread.join(timeout=1)
+    service = app.extensions[EXTENSION_KEY].registry_service
+    state = service._get_process_state()
+    assert prepared.thread.is_alive() is False
+    assert state.prepared_start is None
+    assert state.generation == 0
+    assert state.worker is None
     app.extensions["xxljob"].close()
 
 
