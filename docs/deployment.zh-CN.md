@@ -15,8 +15,10 @@ flowchart TD
     P --> Q{"ENABLED 且 AUTO_REGISTER？"}
     Q -->|"是"| R["Thread.start()：Prepared 等待；Admin RPC 为零"]
     R -->|"失败"| S["关闭私有 Handler/资源；保留原异常"]
-    R -->|"成功"| D["Commit Runtime、日志、CLI、Hook 与 finalizer"]
-    Q -->|"否"| D
+    R -->|"成功"| T["准备可 detach 的 finalizer handle；不发布 Flask 状态"]
+    Q -->|"否"| T
+    T -->|"失败"| S
+    T -->|"成功"| D["Commit CLI、Runtime、应用记录、Blueprint 与 Hook"]
     D --> E{"ENABLED？"}
     E -->|"是"| F["注册 beat / idleBeat / run / kill / log"]
     F --> G["HTTP 执行器协议可用"]
@@ -58,8 +60,10 @@ stopping/Pending/Scheduler ownership 收尾。
 
 Prepared ownership 建立与 `Thread.start()` 共用一个很短的 state-lock 区间，因此启动
 失败仍发生在 Flask Commit 前；本次初始化的私有托管 Handler 会被关闭，未启动 Thread
-不会 join。Flask Commit 中的未知异常会 bounded 取消已经启动的 Prepared Thread，并
-best-effort 关闭 Flask-XXLJob 自己拥有的私有资源，但不会通用回滚 Flask 路由或 CLI。
+不会 join。随后创建的 finalizer 只是可 detach 的回调 handle，不发布 Flask 或应用记录
+状态；detach 不会调用 Runtime shutdown 或访问 Admin。Flask Commit 中的未知异常会
+bounded 取消本次仍持有的 Prepared，并按 identity 清理 finalizer、CLI、extension 与
+应用记录。Blueprint 路由和 Hook 不会通过 Flask 私有结构删除，因此这不是通用回滚。
 
 ## 生命周期停止
 

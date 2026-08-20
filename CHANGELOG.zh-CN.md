@@ -16,6 +16,9 @@
 - 自动启动仍只保留 `XXL_JOB_ENABLED && XXL_JOB_AUTO_REGISTER` 一个条件，但会在
   Flask Commit 前启动带激活门的 Prepared Thread。只有创建它的调用才能在 Commit 后
   提交 generation/Worker 并唤醒线程；Prepared 阶段不访问 Admin。
+- Runtime finalizer 也会在 Flask Commit 前准备为本次初始化私有、可 detach 的 handle；
+  它不发布 Flask/应用记录状态，初始化失败时 detach 也不会调用 Runtime shutdown 或
+  访问 Admin。
 - `stop_registry(remove=False)` 变成默认：立即分离并唤醒本地续约，不 join、不访问
   Admin，也不修改最近 `registered` 快照。`remove=True` 为该 generation 排队一次
   当前清理责任的后台 Remove。
@@ -36,9 +39,9 @@
   开放协调窗口。lifecycle cleanup 非阻塞关闭该窗口，并等此前参与者全部完成后再安排
   Remove。Register RPC completion 仍只按 strict sequence 与 ProcessState identity
   提交，generation 和 Coordination ownership 仅另行保护清理责任变更。
-- `init_app()` 会先完成无副作用的确定性 Preflight，再创建托管日志资源或提交
-  Blueprint、CLI、Hook、扩展、应用注册、finalizer 与 Registry 状态；修正配置后可在
-  同一个 Flask app 上重试。
+- `init_app()` 会先完成无副作用的确定性 Preflight，包括路由、Blueprint 与 CLI 名称
+  冲突，再创建托管资源。Commit 失败只撤销本次仍持有 identity 的 CLI、extension 与
+  应用记录，不把 Flask 私有路由/Hook 结构作为通用 rollback 表面。
 - Prepared `Thread.start()` 失败现在会保持 Flask 未提交，关闭本次初始化私有的托管
   Handler/资源，保留原始异常，并允许同一 app/扩展实例重试。创建者独占 activation
   与 identity-safe cancellation 会阻止并发 start 接管或 stale cancel 误停正式 Worker；
@@ -73,10 +76,10 @@
 - 发布检查改为在干净临时目录构建，只验证本轮新 wheel/sdist（包括仅针对文件成员的
   RECORD 映射与标准顶层 PKG-INFO），拒绝开发/签名文件，并在 `pip check` 后执行与
   源码隔离的安装后冒烟。
-- 最终本地测试为 528 项通过、2 项可选官方 Admin 测试跳过，行覆盖率 92.65%。覆盖
+- 最终本地测试为 536 项通过、2 项可选官方 Admin 测试跳过，行覆盖率 91.99%。覆盖
   PID/disabled 顺序、generation ownership、Remove 竞态、cleanup 启动失败、严格
-  completion sequence、Prepared activation/cancellation ownership、提交前资源收尾、
-  非阻塞 finalizer 与日志恰好关闭一次。
+  completion sequence、Prepared activation/cancellation ownership、finalizer 准备、
+  identity-safe 提交前资源收尾、非阻塞 finalizer 与日志恰好关闭一次。
 
 ## [0.3.4] - 2026-07-25
 

@@ -40,15 +40,17 @@ Admin 中的 JobHandler 必须完全等于 `demoJobHandler`。模块级命名 Ha
 
 ## 初始化边界
 
-`init_app()` 会先校验确定性配置与 Flask 冲突，再创建托管资源。启用自动 Registry
-时，它随后启动一个只在本地等待的 Prepared Thread，提交 Flask 扩展资源，最后才由
-Prepared 创建者提交 generation/Worker 并唤醒线程。Prepared 阶段不执行 Admin RPC，
-也不属于正在运行的 Registry lifecycle。
+`init_app()` 会先校验确定性配置与 Flask 冲突，再创建托管资源。Private Prepare
+会在需要时启动一个等待激活门的 Prepared Thread，并创建可 detach 的 finalizer
+handle。这个 handle 只属于本次初始化；准备它不会写入 `app.extensions`、应用记录、
+CLI、Blueprint、路由或 Hook。Flask Commit 后只有 Prepared 创建者可以提交
+generation/Worker 并唤醒线程。Prepared 阶段不执行 Admin RPC，也不属于正在运行的
+Registry lifecycle。
 
-如果 `Thread.start()` 失败，本次初始化创建的 Handler 与其他私有资源会被关闭，Flask
-扩展资源尚未提交，原始异常保持不变；修正系统条件后，可以用同一个 app 和扩展实例
-再次调用 `init_app()`。Flask 不可逆 Commit 中的未知异常只会 best-effort 清理
-Flask-XXLJob 自己拥有的私有资源，本项目不提供通用 Flask rollback。
+Private Prepare 失败时，已经启动的 Prepared 会被取消，finalizer 会在不关闭 Runtime
+的情况下 detach，本次 Handler 会关闭，且原始异常保持不变。后续 Flask Commit 失败
+时，只撤销本次仍持有 identity 的 CLI、extension 与应用记录等可逆状态；项目不会修改
+Flask 私有路由结构来实现通用 rollback。
 
 ## 直接初始化
 

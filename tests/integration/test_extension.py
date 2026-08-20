@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import threading
 
+import click
 import pytest
 from flask import Blueprint, Flask
 
 from flask_xxljob import FlaskXXLJob, XXLJobResponse
+from flask_xxljob._lifecycle import install_runtime_finalizer
 from flask_xxljob._logging import XXLJobLogManager
+from flask_xxljob.cli.commands import xxljob_cli
 from flask_xxljob.client import CallResult
 from flask_xxljob.exceptions import (
     XXLJobAlreadyInitializedError,
@@ -174,6 +177,45 @@ def test_cli_command_registered(app_ext):
     assert "xxljob" in app.cli.commands
 
 
+def test_foreign_cli_command_conflict_fails_during_preflight(mocker):
+    app = Flask("cli_conflict")
+    app.config.update(BASE_CONFIG)
+    foreign = click.Command("xxljob")
+    app.cli.add_command(foreign)
+    ext = FlaskXXLJob()
+    create_log_manager = mocker.patch(
+        "flask_xxljob.extension.XXLJobLogManager"
+    )
+    initial_rules = tuple(app.url_map.iter_rules())
+    initial_hooks = {
+        key: tuple(value) for key, value in app.before_request_funcs.items()
+    }
+
+    with pytest.raises(XXLJobInitializationError, match="CLI command conflict"):
+        ext.init_app(app)
+
+    create_log_manager.assert_not_called()
+    assert app.cli.commands["xxljob"] is foreign
+    assert tuple(app.url_map.iter_rules()) == initial_rules
+    assert {
+        key: tuple(value) for key, value in app.before_request_funcs.items()
+    } == initial_hooks
+    assert EXTENSION_KEY not in app.extensions
+    assert ext._applications.is_empty  # noqa: SLF001 - preflight contract
+
+
+def test_project_cli_command_preinstalled_is_an_idempotent_noop():
+    app = Flask("cli_preinstalled")
+    app.config.update(BASE_CONFIG)
+    app.cli.add_command(xxljob_cli)
+    ext = FlaskXXLJob()
+
+    ext.init_app(app)
+
+    assert app.cli.commands["xxljob"] is xxljob_cli
+    app.extensions[EXTENSION_KEY].close()
+
+
 @pytest.mark.parametrize("path", ["/beat", "/idleBeat", "/run", "/kill", "/log"])
 def test_post_route_conflict_fails_without_partial_initialization(path):
     app = Flask("conflict_" + path.strip("/"))
@@ -241,6 +283,144 @@ def test_auto_registry_preflight_failure_is_atomic_and_retryable(
     prepare.assert_called_once_with(
         app.extensions[EXTENSION_KEY].registry_service
     )
+
+
+def test_finalizer_prepare_does_not_publish_application_state(mocker):
+    app = Flask("finalizer_private_prepare")
+    app.config.update(
+        BASE_CONFIG,
+        XXL_JOB_AUTO_REGISTER=True,
+        XXL_JOB_REGISTRY_INTERVAL=3600,
+    )
+    ext = FlaskXXLJob()
+    registry = mocker.patch(
+        "flask_xxljob.client.admin_client.AdminClient.registry",
+        return_value=CallResult(success=True, address="http://admin:8080"),
+    )
+    initial_rules = tuple(app.url_map.iter_rules())
+    initial_hooks = {
+        key: tuple(value) for key, value in app.before_request_funcs.items()
+    }
+    observed = []
+
+    def observe_private_prepare(prepared_app, runtime):
+        state = runtime.registry_service._get_process_state()
+        assert prepared_app is app
+        assert EXTENSION_KEY not in app.extensions
+        assert ext._applications.is_empty  # noqa: SLF001 - ownership contract
+        assert "xxljob" not in app.cli.commands
+        assert tuple(app.url_map.iter_rules()) == initial_rules
+        assert {
+            key: tuple(value)
+            for key, value in app.before_request_funcs.items()
+        } == initial_hooks
+        assert not any(name.startswith("xxljob_") for name in app.blueprints)
+        assert state.prepared_start is not None
+        assert state.worker is None
+        assert state.generation == 0
+        assert runtime._finalizer is None  # noqa: SLF001 - private prepare
+        assert registry.call_count == 0
+        observed.append(runtime)
+        return install_runtime_finalizer(prepared_app, runtime)
+
+    mocker.patch(
+        "flask_xxljob.extension.install_runtime_finalizer",
+        side_effect=observe_private_prepare,
+    )
+
+    ext.init_app(app)
+
+    assert observed == [app.extensions[EXTENSION_KEY]]
+    runtime = observed[0]
+    worker = runtime.registry_service._get_process_state().worker
+    runtime.close()
+    assert worker is not None and worker.thread is not None
+    worker.thread.join(timeout=1)
+
+
+def test_finalizer_prepare_failure_is_atomic_and_retryable(mocker):
+    app = Flask("finalizer_prepare_retry")
+    app.config.update(
+        BASE_CONFIG,
+        XXL_JOB_AUTO_REGISTER=True,
+        XXL_JOB_LOG_ENABLED=True,
+        XXL_JOB_LOG_FILE_ENABLED=False,
+        XXL_JOB_LOG_CONSOLE_ENABLED=True,
+        XXL_JOB_REGISTRY_INTERVAL=3600,
+    )
+    ext = FlaskXXLJob()
+    managers, handlers = _capture_log_managers(mocker)
+    prepared_tokens = []
+    real_prepare = RegistryService._prepare_start
+    failure = RuntimeError("finalizer prepare failed")
+    attempts = 0
+    registry_called = threading.Event()
+
+    def capture_prepare(service):
+        prepared = real_prepare(service)
+        prepared_tokens.append(prepared)
+        return prepared
+
+    def fail_once(prepared_app, runtime):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise failure
+        return install_runtime_finalizer(prepared_app, runtime)
+
+    def registry_result(*args, **kwargs):
+        registry_called.set()
+        return CallResult(success=True, address="http://admin:8080")
+
+    mocker.patch.object(
+        RegistryService,
+        "_prepare_start",
+        autospec=True,
+        side_effect=capture_prepare,
+    )
+    mocker.patch(
+        "flask_xxljob.extension.install_runtime_finalizer",
+        side_effect=fail_once,
+    )
+    registry = mocker.patch(
+        "flask_xxljob.client.admin_client.AdminClient.registry",
+        side_effect=registry_result,
+    )
+    initial_rules = tuple(app.url_map.iter_rules())
+    initial_blueprints = dict(app.blueprints)
+    initial_cli = dict(app.cli.commands)
+    initial_hooks = {
+        key: tuple(value) for key, value in app.before_request_funcs.items()
+    }
+
+    with pytest.raises(RuntimeError) as raised:
+        ext.init_app(app)
+
+    assert raised.value is failure
+    assert prepared_tokens[0] is not None
+    prepared_tokens[0].thread.join(timeout=1)
+    assert prepared_tokens[0].thread.is_alive() is False
+    assert registry.call_count == 0
+    assert EXTENSION_KEY not in app.extensions
+    assert tuple(app.url_map.iter_rules()) == initial_rules
+    assert app.blueprints == initial_blueprints
+    assert app.cli.commands == initial_cli
+    assert {
+        key: tuple(value) for key, value in app.before_request_funcs.items()
+    } == initial_hooks
+    assert ext._applications.is_empty  # noqa: SLF001 - ownership contract
+    assert managers[0].managed_handlers == ()
+    assert handlers[0] not in managers[0].logger.handlers
+    assert getattr(handlers[0], "_closed", False) is True
+
+    ext.init_app(app)
+
+    assert registry_called.wait(timeout=1)
+    runtime = app.extensions[EXTENSION_KEY]
+    worker = runtime.registry_service._get_process_state().worker
+    runtime.close()
+    assert worker is not None and worker.thread is not None
+    worker.thread.join(timeout=1)
 
 
 def test_prepared_thread_start_failure_closes_handlers_and_can_retry(
@@ -384,6 +564,7 @@ def test_commit_failure_cancels_prepared_and_closes_private_handlers(
     managers, handlers = _capture_log_managers(mocker)
     prepared_tokens = []
     services = []
+    finalizers = []
     real_prepare = RegistryService._prepare_start
 
     def capture_prepare(service):
@@ -391,6 +572,11 @@ def test_commit_failure_cancels_prepared_and_closes_private_handlers(
         prepared = real_prepare(service)
         prepared_tokens.append(prepared)
         return prepared
+
+    def capture_finalizer(prepared_app, runtime):
+        finalizer = install_runtime_finalizer(prepared_app, runtime)
+        finalizers.append(finalizer)
+        return finalizer
 
     mocker.patch.object(
         RegistryService,
@@ -401,8 +587,12 @@ def test_commit_failure_cancels_prepared_and_closes_private_handlers(
     registry = mocker.patch(
         "flask_xxljob.client.admin_client.AdminClient.registry"
     )
+    mocker.patch(
+        "flask_xxljob.extension.install_runtime_finalizer",
+        side_effect=capture_finalizer,
+    )
     failure = RuntimeError("controlled Flask commit failure")
-    mocker.patch.object(ext, "_register_cli", side_effect=failure)
+    mocker.patch.object(app, "register_blueprint", side_effect=failure)
 
     with pytest.raises(RuntimeError) as raised:
         ext.init_app(app)
@@ -422,7 +612,76 @@ def test_commit_failure_cancels_prepared_and_closes_private_handlers(
     assert handlers[0] not in managers[0].logger.handlers
     assert getattr(handlers[0], "_closed", False) is True
     assert EXTENSION_KEY not in app.extensions
+    assert "xxljob" not in app.cli.commands
     assert ext._applications.is_empty  # noqa: SLF001 - ownership contract
+    assert len(finalizers) == 1
+    assert finalizers[0].alive is False
+
+
+def test_commit_failure_preserves_replacement_extension_and_cli(mocker):
+    app = Flask("identity_safe_commit_failure")
+    app.config.update(
+        BASE_CONFIG,
+        XXL_JOB_LOG_ENABLED=True,
+        XXL_JOB_LOG_FILE_ENABLED=False,
+        XXL_JOB_LOG_CONSOLE_ENABLED=True,
+    )
+    ext = FlaskXXLJob()
+    managers, handlers = _capture_log_managers(mocker)
+    finalizers = []
+    foreign_runtime = object()
+    foreign_cli = click.Command("xxljob")
+    failure = RuntimeError("commit ownership replaced")
+
+    def capture_finalizer(prepared_app, runtime):
+        finalizer = install_runtime_finalizer(prepared_app, runtime)
+        finalizers.append(finalizer)
+        return finalizer
+
+    def replace_ownership_then_fail(blueprint):
+        app.extensions[EXTENSION_KEY] = foreign_runtime
+        app.cli.commands["xxljob"] = foreign_cli
+        raise failure
+
+    mocker.patch(
+        "flask_xxljob.extension.install_runtime_finalizer",
+        side_effect=capture_finalizer,
+    )
+    mocker.patch.object(
+        app,
+        "register_blueprint",
+        side_effect=replace_ownership_then_fail,
+    )
+
+    with pytest.raises(RuntimeError) as raised:
+        ext.init_app(app)
+
+    assert raised.value is failure
+    assert app.extensions[EXTENSION_KEY] is foreign_runtime
+    assert app.cli.commands["xxljob"] is foreign_cli
+    assert ext._applications.is_empty  # noqa: SLF001 - identity contract
+    assert len(finalizers) == 1
+    assert finalizers[0].alive is False
+    assert managers[0].managed_handlers == ()
+    assert handlers[0] not in managers[0].logger.handlers
+    assert getattr(handlers[0], "_closed", False) is True
+
+
+def test_commit_failure_preserves_preinstalled_project_cli(mocker):
+    app = Flask("preinstalled_cli_commit_failure")
+    app.config.update(BASE_CONFIG)
+    app.cli.add_command(xxljob_cli)
+    ext = FlaskXXLJob()
+    failure = RuntimeError("commit failed after CLI no-op")
+    mocker.patch.object(app, "register_blueprint", side_effect=failure)
+
+    with pytest.raises(RuntimeError) as raised:
+        ext.init_app(app)
+
+    assert raised.value is failure
+    assert app.cli.commands["xxljob"] is xxljob_cli
+    assert EXTENSION_KEY not in app.extensions
+    assert ext._applications.is_empty  # noqa: SLF001 - CLI ownership contract
 
 
 def test_blueprint_name_conflict_fails_during_preflight(tmp_path):

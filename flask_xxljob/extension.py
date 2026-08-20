@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional, cast
+from weakref import finalize
 
 from flask import Flask, current_app, has_app_context
 
@@ -34,6 +35,7 @@ from .exceptions import (
     XXLJobAlreadyInitializedError,
     XXLJobConfigError,
     XXLJobError,
+    XXLJobInitializationError,
     XXLJobRequestError,
 )
 from .protocol.blueprint import build_blueprint
@@ -142,12 +144,17 @@ class FlaskXXLJob:
             blueprint_name = _blueprint_name(app)
             ensure_blueprint_name_available(app, blueprint_name)
             blueprint = build_blueprint(blueprint_name, config.route_prefix)
+        self._ensure_cli_available(app)
 
         # These resources remain private to this init_app() call until Flask
         # commit and Prepared activation have completed.
         log_manager: Optional[XXLJobLogManager] = None
         registry_service: Optional[RegistryService] = None
+        runtime: Optional[XXLJobRuntime] = None
         prepared: Optional[_PreparedRegistryStart] = None
+        finalizer: Optional[finalize] = None
+        cli_added = False
+        application_added = False
         try:
             log_manager = XXLJobLogManager(app, config)
             callback_registry = CallbackRegistry()
@@ -178,31 +185,49 @@ class FlaskXXLJob:
             )
             if config.enabled and config.auto_register:
                 prepared = registry_service._prepare_start()
+
+            # finalizer 这里只是本次初始化私有的可撤销 handle；不能提前发布
+            # Flask/ApplicationRegistry 状态。
+            # The finalizer is only a private, detachable handle here; preparing
+            # it must not publish Flask or ApplicationRegistry state.
+            finalizer = install_runtime_finalizer(app, runtime)
         except Exception:
             logger.exception(
                 "Flask-XXLJob private runtime preparation failed."
             )
             self._close_uncommitted_runtime_resources(
+                app=app,
+                runtime=runtime,
                 registry_service=registry_service,
                 prepared=prepared,
+                finalizer=finalizer,
+                cli_added=cli_added,
+                application_added=application_added,
                 log_manager=log_manager,
             )
             raise
 
+        assert log_manager is not None
+        assert registry_service is not None
+        assert runtime is not None
+        assert finalizer is not None
+
         # Flask commit starts only after the activation-gated OS Thread has
         # been created successfully.  The Prepared Thread has issued no RPC.
         try:
+            cli_added = self._register_cli(app)
+            if not hasattr(app, "extensions"):
+                app.extensions = {}
+            app.extensions[EXTENSION_KEY] = runtime
+            application_added = True
+            self._applications.add(app)
+
             if config.enabled:
                 assert blueprint is not None
                 app.register_blueprint(blueprint)
                 self._register_protocol_error_handlers(app, config.route_prefix)
 
-            self._register_cli(app)
-            if not hasattr(app, "extensions"):
-                app.extensions = {}
-            app.extensions[EXTENSION_KEY] = runtime
-            self._applications.add(app)
-            runtime.attach_finalizer(install_runtime_finalizer(app, runtime))
+            runtime.attach_finalizer(finalizer)
 
             activated = True
             if prepared is not None:
@@ -223,23 +248,36 @@ class FlaskXXLJob:
         except Exception:
             logger.exception("Flask-XXLJob initialization commit failed.")
             self._close_uncommitted_runtime_resources(
+                app=app,
+                runtime=runtime,
                 registry_service=registry_service,
                 prepared=prepared,
+                finalizer=finalizer,
+                cli_added=cli_added,
+                application_added=application_added,
                 log_manager=log_manager,
             )
             raise
 
-    @staticmethod
     def _close_uncommitted_runtime_resources(
+        self,
         *,
+        app: Flask,
+        runtime: Optional[XXLJobRuntime],
         registry_service: Optional[RegistryService],
         prepared: Optional[_PreparedRegistryStart],
+        finalizer: Optional[finalize],
+        cli_added: bool,
+        application_added: bool,
         log_manager: Optional[XXLJobLogManager],
     ) -> None:
         """Close only resources privately owned by a failed init_app call."""
+        prepared_cancelled = False
         if registry_service is not None and prepared is not None:
             try:
-                registry_service._cancel_prepared_start(prepared)
+                prepared_cancelled = (
+                    registry_service._cancel_prepared_start(prepared)
+                )
             except Exception:  # noqa: BLE001 - preserve initialization error
                 try:
                     logger.exception(
@@ -247,12 +285,75 @@ class FlaskXXLJob:
                     )
                 except Exception:  # noqa: BLE001 - cleanup cannot replace root
                     pass
+            if prepared_cancelled:
+                try:
+                    registry_service._join_prepared_start(
+                        prepared, timeout=1.0
+                    )
+                except Exception:  # noqa: BLE001 - preserve init error
+                    try:
+                        logger.exception(
+                            "Failed to join an uncommitted Registry Thread."
+                        )
+                    except Exception:  # noqa: BLE001 - preserve root error
+                        pass
+
+        if finalizer is not None:
             try:
-                registry_service._join_prepared_start(prepared, timeout=1.0)
+                # detach 只撤销回调；失败初始化绝不能借此进入正式 Runtime
+                # shutdown 或访问 Admin。
+                # detach only disarms the callback; failed initialization must
+                # not enter Runtime shutdown or contact the Admin service.
+                finalizer.detach()
             except Exception:  # noqa: BLE001 - preserve initialization error
                 try:
                     logger.exception(
-                        "Failed to join an uncommitted Registry Thread."
+                        "Failed to detach an uncommitted Runtime finalizer."
+                    )
+                except Exception:  # noqa: BLE001 - cleanup cannot replace root
+                    pass
+
+        if cli_added:
+            try:
+                from .cli.commands import xxljob_cli
+
+                # 只撤销本次仍持有 identity 的命令，避免误删并发替换对象。
+                # Remove only the command identity still owned by this init.
+                if app.cli.commands.get("xxljob") is xxljob_cli:
+                    del app.cli.commands["xxljob"]
+            except Exception:  # noqa: BLE001 - preserve initialization error
+                try:
+                    logger.exception(
+                        "Failed to remove an uncommitted XXL-JOB CLI command."
+                    )
+                except Exception:  # noqa: BLE001 - cleanup cannot replace root
+                    pass
+
+        if runtime is not None:
+            try:
+                # identity guard 防止失败收尾误删后来发布的其他 Runtime。
+                # The identity guard preserves a replacement Runtime.
+                extensions = getattr(app, "extensions", None)
+                if (
+                    extensions is not None
+                    and extensions.get(EXTENSION_KEY) is runtime
+                ):
+                    del extensions[EXTENSION_KEY]
+            except Exception:  # noqa: BLE001 - preserve initialization error
+                try:
+                    logger.exception(
+                        "Failed to remove an uncommitted Runtime extension."
+                    )
+                except Exception:  # noqa: BLE001 - cleanup cannot replace root
+                    pass
+
+        if application_added:
+            try:
+                self._applications.discard(app)
+            except Exception:  # noqa: BLE001 - preserve initialization error
+                try:
+                    logger.exception(
+                        "Failed to discard an uncommitted application record."
                     )
                 except Exception:  # noqa: BLE001 - cleanup cannot replace root
                     pass
@@ -268,12 +369,25 @@ class FlaskXXLJob:
                 except Exception:  # noqa: BLE001 - cleanup cannot replace root
                     pass
 
-    def _register_cli(self, app: Flask) -> None:
+    @staticmethod
+    def _ensure_cli_available(app: Flask) -> None:
         from .cli.commands import xxljob_cli
 
-        # 幂等注册 CLI 分组。 / Register the CLI group idempotently.
-        if "xxljob" not in app.cli.commands:
-            app.cli.add_command(xxljob_cli)
+        existing = app.cli.commands.get("xxljob")
+        if existing is not None and existing is not xxljob_cli:
+            raise XXLJobInitializationError(
+                "Flask-XXLJob CLI command conflict: xxljob. Remove or rename "
+                "the host command before init_app()."
+            )
+
+    def _register_cli(self, app: Flask) -> bool:
+        from .cli.commands import xxljob_cli
+
+        self._ensure_cli_available(app)
+        if app.cli.commands.get("xxljob") is xxljob_cli:
+            return False
+        app.cli.add_command(xxljob_cli)
+        return True
 
     @staticmethod
     def _register_protocol_error_handlers(app: Flask, route_prefix: str) -> None:

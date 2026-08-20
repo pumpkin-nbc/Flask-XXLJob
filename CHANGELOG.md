@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   XXL_JOB_AUTO_REGISTER`), but now starts an activation-gated Prepared Thread
   before Flask commit. Only its creating call may commit the generation/Worker
   and wake it after commit; the Prepared stage performs no Admin RPC.
+- Runtime finalizer creation is also prepared before Flask commit as a private,
+  detachable handle. It publishes no Flask/application-registry state, and a
+  failed initialization detaches it without invoking Runtime shutdown or Admin.
 - `stop_registry(remove=False)` is now the default: it detaches and wakes local
   renewal immediately without joining, contacting Admin, or changing the
   latest `registered` snapshot. `remove=True` schedules one background Remove
@@ -47,10 +50,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   all earlier participants finish. Register RPC completion remains ordered only
   by strict sequence and ProcessState identity; generation and Coordination
   ownership separately guard cleanup-responsibility changes.
-- `init_app()` now completes a side-effect-free deterministic preflight before
-  creating managed log resources or committing Blueprint, CLI, hook, extension,
-  application-registry, finalizer or Registry state. Corrected configuration
-  can be retried on the same Flask application.
+- `init_app()` now completes a side-effect-free deterministic preflight,
+  including route, Blueprint and CLI-name conflicts, before creating managed
+  resources. Commit failures remove only CLI, extension and application records
+  still owned by that initialization; Flask private route/hook structures are
+  not treated as a general rollback surface.
 - A Prepared `Thread.start()` failure now leaves Flask uncommitted, closes the
   initialization's private managed handlers/resources, preserves the original
   error and permits retry on the same app/extension instance. Creator-only
@@ -94,11 +98,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   new wheel and sdist (including file-only RECORD mappings and authoritative
   top-level PKG-INFO), reject development/signature files, and run a
   source-isolated installed-wheel smoke test with `pip check`.
-- The final local suite completed with 528 passed, 2 optional official-Admin
-  tests skipped, and 92.65% line coverage. It covers PID/disabled ordering,
+- The final local suite completed with 536 passed, 2 optional official-Admin
+  tests skipped, and 91.99% line coverage. It covers PID/disabled ordering,
   generation ownership, Remove races, cleanup failures, strict completion
-  sequences, Prepared activation/cancellation ownership, pre-commit resource
-  cleanup, non-blocking finalization and one-time log closure.
+  sequences, Prepared activation/cancellation ownership, finalizer preparation,
+  identity-safe pre-commit cleanup, non-blocking finalization and one-time log
+  closure.
 
 ## [0.3.4] - 2026-07-25
 

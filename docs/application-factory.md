@@ -46,18 +46,21 @@ application are not shared with another.
 ## Initialization boundary
 
 `init_app()` validates deterministic configuration and Flask conflicts before
-creating managed resources. With automatic Registry enabled, it then starts a
-Prepared Thread that waits locally, commits the Flask extension, and only then
-lets the Prepared creator commit the generation/Worker and wake the Thread.
-The Prepared stage performs no Admin RPC and is not a running Registry
-lifecycle.
+creating managed resources. Private prepare then starts an activation-gated
+Thread when required and creates a detachable finalizer handle. The handle is
+owned only by that initialization call: preparing it does not publish
+`app.extensions`, the application registry, CLI, Blueprint, routes or hooks.
+After Flask commit, only the Prepared creator may commit the generation/Worker
+and wake the Thread. The Prepared stage performs no Admin RPC and is not a
+running Registry lifecycle.
 
-If `Thread.start()` fails, handlers and other private resources created by that
-initialization are closed, no Flask extension resources have been committed,
-and the original exception is preserved. Correct the system condition and call
-`init_app()` again on the same application and extension instance. Unknown
-errors during Flask's irreversible commit receive best-effort cleanup of
-Flask-XXLJob-owned private resources; this is not a general Flask rollback.
+If private preparation fails, a started Prepared Thread is cancelled, the
+finalizer is detached without closing the Runtime, owned handlers are closed,
+no Flask extension resources have been committed, and the original exception is
+preserved. During a later commit failure, only reversible CLI, extension and
+application-registry entries still owned by this initialization are removed.
+Flask-XXLJob does not mutate private Flask routing structures to provide a
+general rollback.
 
 ## Direct initialization
 

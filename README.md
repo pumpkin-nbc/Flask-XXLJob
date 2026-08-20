@@ -161,19 +161,19 @@ identity; generation and coordination ownership only decide whether that
 accepted success changes lifecycle cleanup responsibility.
 
 Initialization first performs a side-effect-free preflight. Removed keys,
-field values, automatic Registry completeness and route/Blueprint conflicts
-are rejected before log handlers, files, Flask routes, CLI commands, extension
-state, finalizers or workers are committed. For automatic Registry, it then
-starts a Prepared daemon Thread that waits on a local activation gate and makes
-no Admin call. Only its creator may activate it after Flask commit, at which
-point the generation and Worker become current and normal immediate
-registration begins. A `Thread.start()` failure closes this initialization's
-managed log handlers and leaves the Flask application uncommitted, so the same
-application and extension instance can retry. A concurrent Registry
-`stop()`/shutdown may cancel the Prepared candidate normally; a Worker that was
-already committed still runs its lifecycle `finally`, even if stopped before
-its first Registry RPC. This is targeted pre-commit resource atomicity, not a
-general rollback of arbitrary Flask commit failures.
+field values, automatic Registry completeness and route/Blueprint/CLI conflicts
+are rejected before log handlers, files or Flask state are created. Private
+prepare then starts an activation-gated daemon Thread, which makes no Admin
+call, and creates only a detachable finalizer handle; neither resource publishes
+`app.extensions`, the application registry, CLI, routes or hooks. Flask commit
+publishes the reversible state before registering the Blueprint/hooks, and only
+the Prepared creator may then commit the generation/Worker and wake the Thread.
+A preparation failure detaches the finalizer, cancels a started Prepared Thread,
+removes only state still owned by that initialization, closes its managed log
+handlers and preserves the original error. A committed Worker still runs its
+lifecycle `finally`, even if stopped before its first Registry RPC. This is
+targeted private-resource atomicity, not a general rollback of arbitrary Flask
+route or hook mutations.
 
 ## CLI
 

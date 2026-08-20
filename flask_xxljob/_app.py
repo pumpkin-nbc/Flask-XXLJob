@@ -57,6 +57,11 @@ class ApplicationRegistry:
         with self._lock:
             self._apps.add(app)
 
+    def discard(self, app: Flask) -> None:
+        """Forget an application if it is currently tracked."""
+        with self._lock:
+            self._apps.discard(app)
+
     def snapshot(self) -> Iterable[Flask]:
         with self._lock:
             return tuple(self._apps)

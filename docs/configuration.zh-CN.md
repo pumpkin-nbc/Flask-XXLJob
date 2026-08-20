@@ -66,9 +66,9 @@ app.config.update(
 ## Registry 生命周期
 
 唯一自动启动条件是 `XXL_JOB_ENABLED and XXL_JOB_AUTO_REGISTER`。条件成立时，
-`init_app()` 会先完成 Runtime、五个 HTTP 路由和 finalizer 初始化，再调用公开
-`start_registry(app)`。`AUTO_REGISTER=False` 时只初始化执行器协议能力，业务可稍后
-显式启动 Registry。
+`init_app()` 会私有创建 Runtime，启动带激活门的 Prepared Thread，准备可 detach 的
+finalizer handle，提交 Flask 协议资源，最后由 Prepared 创建者激活 Worker。
+`AUTO_REGISTER=False` 时只初始化执行器协议能力，业务可稍后显式启动 Registry。
 
 `stop_registry()` 默认只做本地停止：唤醒并分离当前续约 Worker，不 join、不访问
 Admin，也不修改 `registered`。`stop_registry(remove=True)` 会同步校验 Registry
@@ -92,10 +92,11 @@ register 并重新建立远端身份时，可以产生一份新的必要清理�
 地址。错误配置绝不会被静默忽略。
 
 `init_app()` 将这些确定性检查作为无副作用 Preflight。请求自动启动 Registry 时，
-完整 Registry 配置以及执行器路由/Blueprint 冲突也会在创建托管日志 Handler 或文件、
-注册 Blueprint、CLI、请求 Hook、扩展状态、应用记录、finalizer 或 Worker 前完成。
-只有 Preflight 成功才进入 Commit，因此修正确定性配置错误后可以在同一个 Flask app
-上重试。这不是针对 Commit 阶段操作系统资源异常的通用 rollback 机制。
+完整 Registry 配置以及执行器路由、Blueprint、CLI 名称冲突也会在创建托管资源或
+Flask 状态前完成。Private Prepare 可以创建日志、带激活门的 Thread 与可 detach 的
+finalizer handle，但不会通过 Flask 或 ApplicationRegistry 发布它们。失败时只撤销本次
+仍持有 identity 的可逆状态；项目不会修改 Flask 私有路由/Hook 结构来提供通用 Commit
+rollback。
 
 所有布尔配置只接受真正的布尔值。等级、编码、轮转值与日志格式均在初始化
 阶段校验；格式会使用模拟 `LogRecord` 实际格式化一次，因此未知字段会在应用启动前

@@ -16,8 +16,10 @@ flowchart TD
     P --> Q{"ENABLED and AUTO_REGISTER?"}
     Q -->|"Yes"| R["Thread.start(): Prepared waits; zero Admin RPCs"]
     R -->|"Failure"| S["Close private handlers/resources; preserve error"]
-    R -->|"Success"| D["Commit Runtime, logging, CLI, hooks and finalizer"]
-    Q -->|"No"| D
+    R -->|"Success"| T["Prepare detachable finalizer handle; publish nothing"]
+    Q -->|"No"| T
+    T -->|"Failure"| S
+    T -->|"Success"| D["Commit CLI, Runtime, app record, Blueprint and hooks"]
     D --> E{"ENABLED?"}
     E -->|"Yes"| F["Register beat / idleBeat / run / kill / log"]
     F --> G["HTTP executor protocol is available"]
@@ -63,9 +65,12 @@ finishes its stopping/Pending/Scheduler ownership normally.
 Prepared creation and `Thread.start()` share one short state-lock interval. A
 start failure therefore remains before Flask commit and closes the
 initialization's private managed handlers without joining an unstarted Thread.
-An unknown error during Flask commit gets bounded cancellation of an already
-started Prepared Thread and best-effort closure of Flask-XXLJob-owned private
-resources; it is not a general rollback of Flask routes or CLI state.
+The finalizer created next is only a detachable callback handle: it does not
+publish Flask or application-registry state, and detaching it never calls
+Runtime shutdown or Admin. An unknown commit failure gets bounded cancellation
+of an owned Prepared Thread plus identity-safe cleanup of the finalizer, CLI,
+extension and application record. Blueprint routes and hooks are not removed
+through Flask private structures, so this is not a general Flask rollback.
 
 ## Lifecycle shutdown
 

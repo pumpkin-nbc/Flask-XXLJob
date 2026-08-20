@@ -70,10 +70,11 @@ app.config.update(
 ## Registry lifecycle
 
 The only automatic-start condition is `XXL_JOB_ENABLED and
-XXL_JOB_AUTO_REGISTER`. When true, `init_app()` installs the Runtime, five HTTP
-routes and finalizer, then calls the public `start_registry(app)`. With
-`AUTO_REGISTER=False`, initialization still provides the executor protocol and
-the application may call `start_registry(app)` later.
+XXL_JOB_AUTO_REGISTER`. When true, `init_app()` privately creates the Runtime,
+starts an activation-gated Prepared Thread, prepares a detachable finalizer
+handle, commits the Flask protocol resources, and then lets the Prepared creator
+activate the Worker. With `AUTO_REGISTER=False`, initialization still provides
+the executor protocol and the application may call `start_registry(app)` later.
 
 `stop_registry()` is local-only by default: it wakes and detaches the current
 renewal Worker without joining, accessing Admin, or changing `registered`.
@@ -109,13 +110,13 @@ name the offending key, its received type and the expected format. Bad
 configuration is never silently ignored.
 
 `init_app()` treats these deterministic checks as a side-effect-free preflight.
-When automatic Registry startup is requested, full Registry completeness and
-executor route/Blueprint conflicts are also checked before any managed log
-handler or file, Blueprint, CLI command, request hook, extension state,
-application registration, finalizer or Worker is created. Commit starts only
-after preflight succeeds, so the same Flask application can be retried after a
-deterministic configuration error is corrected. This is not a general rollback
-mechanism for operating-system resource failures during commit.
+When automatic Registry startup is requested, full Registry completeness plus
+executor route, Blueprint and CLI-name conflicts are checked before any managed
+resource or Flask state is created. Private prepare may then create logging, an
+activation-gated Thread and a detachable finalizer handle, but publishes none of
+them through Flask or the application registry. A failure removes only
+reversible state still owned by that initialization. The project does not edit
+Flask's private route/hook structures to provide a general commit rollback.
 
 All boolean settings accept real booleans only. Levels, encodings, rotation
 values and log formats are validated during initialization; the format is

@@ -148,14 +148,14 @@ completion 只按 strict sequence 与 ProcessState identity 接受，generation 
 ownership 仅决定 accepted success 是否改变 lifecycle 清理责任。
 
 初始化会先执行无副作用 Preflight。已删除配置、字段值、自动 Registry 完整配置以及
-路由/Blueprint 冲突会在创建日志 Handler、打开文件、注册路由/CLI、写入扩展状态、
-安装 finalizer 或提交 Worker 前失败。自动 Registry 随后会启动一个只等待本地激活门、
-不会访问 Admin 的 Prepared daemon Thread；只有创建它的调用者能在 Flask Commit 后
-提交 generation 与 Worker，此后才开始原有的立即 registry。`Thread.start()` 失败会
-关闭本次初始化创建的托管日志 Handler，Flask app 仍未提交，因此同一个 app 与扩展
-实例可以重试。并发 Registry `stop()`/shutdown 可以正常取消 Prepared 候选；已经正式
-提交的 Worker 即使在首次 Registry RPC 前被停止，也仍会执行 lifecycle `finally`
-完成收尾。这是针对提交前资源的原子性保证，不是任意 Flask Commit 异常的通用回滚。
+路由/Blueprint/CLI 冲突会在创建日志 Handler、文件或 Flask 状态前失败。Private
+Prepare 随后启动一个只等待本地激活门、不会访问 Admin 的 Prepared daemon Thread，
+并只创建一个可 detach 的 finalizer handle；两者都不会提前写入 `app.extensions`、应用
+记录、CLI、路由或 Hook。Flask Commit 会先发布可逆状态，再注册 Blueprint/Hook，最后
+才由 Prepared 创建者提交 generation/Worker 并唤醒线程。准备或 Commit 失败时会
+detach finalizer、取消已启动的 Prepared、只撤销本次仍持有 identity 的状态、关闭托管
+Handler，并保留原始异常。已正式提交的 Worker 即使在首次 Registry RPC 前被停止，也
+仍会执行 lifecycle `finally`。这是私有资源原子性，不是 Flask 路由/Hook 的通用回滚。
 
 ## 命令行
 

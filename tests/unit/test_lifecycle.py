@@ -8,7 +8,7 @@ from flask import Flask
 from flask_xxljob import FlaskXXLJob
 from flask_xxljob._app import ApplicationRegistry
 from flask_xxljob._lifecycle import install_runtime_finalizer, safe_close_runtime
-from flask_xxljob.exceptions import XXLJobConfigError
+from flask_xxljob.exceptions import XXLJobConfigError, XXLJobError
 from flask_xxljob.extension import EXTENSION_KEY
 from flask_xxljob.registry.registry_service import RegistryService
 
@@ -29,6 +29,21 @@ def test_application_registry_explicit_app_wins():
     registry = ApplicationRegistry()
     explicit = Flask("explicit")
     assert registry.resolve(explicit) is explicit
+
+
+def test_application_registry_discard_is_idempotent():
+    registry = ApplicationRegistry()
+    app = Flask("discard")
+
+    registry.add(app)
+    assert tuple(registry.snapshot()) == (app,)
+
+    registry.discard(app)
+    registry.discard(app)
+
+    assert registry.is_empty
+    with pytest.raises(XXLJobError, match="No Flask application"):
+        registry.resolve()
 
 
 @pytest.mark.parametrize(
@@ -228,6 +243,23 @@ def test_install_runtime_finalizer_uses_app_lifetime(mocker):
 
     finalize.assert_called_once_with(app, safe_close_runtime, runtime)
     assert result is finalize.return_value
+
+
+def test_runtime_finalizer_detach_is_idempotent_and_has_no_lifecycle_effect(
+    mocker,
+):
+    app = Flask("detached-finalizer")
+    runtime = mocker.Mock()
+    result = install_runtime_finalizer(app, runtime)
+
+    assert result.detach() is not None
+    assert result.detach() is None
+    assert result() is None
+
+    runtime.close.assert_not_called()
+    runtime.registry_service.shutdown.assert_not_called()
+    runtime.admin_client.registry.assert_not_called()
+    runtime.admin_client.remove.assert_not_called()
 
 
 def test_safe_close_runtime_swallows_shutdown_errors(mocker):
