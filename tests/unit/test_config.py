@@ -116,16 +116,31 @@ def test_non_positive_int_raises():
 
 def test_disabled_skips_required_validation():
     config = XXLJobConfig.from_mapping(
-        {"XXL_JOB_ENABLED": False, "XXL_JOB_ADMIN_ADDRESSES": []}
+        {
+            "XXL_JOB_ENABLED": False,
+            "XXL_JOB_ADMIN_ADDRESSES": ["not a URL"],
+            "XXL_JOB_EXECUTOR_ADDRESS": "also not a URL?x=1",
+            "XXL_JOB_ROUTE_PREFIX": "/<invalid path>",
+        }
     )
     assert config.enabled is False
+    assert config.route_prefix == "/<invalid path>"
 
 
 def test_comma_separated_admin_addresses():
     config = XXLJobConfig.from_mapping(
-        base_mapping(XXL_JOB_ADMIN_ADDRESSES="http://a:8080, http://b:8080")
+        base_mapping(XXL_JOB_ADMIN_ADDRESSES="http://a:8080,http://b:8080")
     )
     assert config.admin_addresses == ["http://a:8080", "http://b:8080"]
+
+
+def test_comma_separated_admin_address_whitespace_is_rejected():
+    with pytest.raises(XXLJobConfigError, match="whitespace"):
+        XXLJobConfig.from_mapping(
+            base_mapping(
+                XXL_JOB_ADMIN_ADDRESSES="http://a:8080, http://b:8080"
+            )
+        )
 
 
 def test_route_prefix_normalized():
@@ -183,7 +198,7 @@ def test_admin_address_trailing_slash_normalized():
         base_mapping(
             XXL_JOB_ADMIN_ADDRESSES=[
                 "http://admin-1:8080/xxl-job-admin/",
-                "  http://admin-2:8080/  ",
+                "http://admin-2:8080/",
             ]
         )
     )
@@ -191,6 +206,15 @@ def test_admin_address_trailing_slash_normalized():
         "http://admin-1:8080/xxl-job-admin",
         "http://admin-2:8080",
     ]
+
+
+def test_admin_address_surrounding_whitespace_is_rejected():
+    with pytest.raises(XXLJobConfigError, match="whitespace"):
+        XXLJobConfig.from_mapping(
+            base_mapping(
+                XXL_JOB_ADMIN_ADDRESSES=["  http://admin:8080/  "]
+            )
+        )
 
 
 def test_executor_address_trailing_slash_normalized():
@@ -248,13 +272,79 @@ def test_https_admin_address_supported():
     assert config.admin_addresses == ["https://admin:8443/xxl-job-admin"]
 
 
+def test_ipv6_admin_address_supported():
+    config = XXLJobConfig.from_mapping(
+        base_mapping(
+            XXL_JOB_ADMIN_ADDRESSES=["http://[::1]:8080/xxl-job-admin"]
+        )
+    )
+    assert config.admin_addresses == ["http://[::1]:8080/xxl-job-admin"]
+
+
+def test_ipv6_executor_address_with_path_supported():
+    config = XXLJobConfig.from_mapping(
+        base_mapping(
+            XXL_JOB_EXECUTOR_ADDRESS="https://[2001:db8::1]:8443/context",
+            XXL_JOB_ROUTE_PREFIX="/xxl-job",
+        )
+    )
+    assert config.executor_address == (
+        "https://[2001:db8::1]:8443/context/xxl-job"
+    )
+
+
 @pytest.mark.parametrize(
     "address",
-    ["http://", "https:///missing-host", "http://admin:not-a-port", "http://admin:70000"],
+    [
+        "http://",
+        "https:///missing-host",
+        "http://admin:not-a-port",
+        "http://admin:0",
+        "http://admin:70000",
+        "http://bad_host:8080",
+        "http://-admin:8080",
+        "http://admin..internal:8080",
+        "http://999.999.999.999:8080",
+        "http://%41dmin:8080",
+    ],
 )
 def test_invalid_admin_url_components_raise(address):
     with pytest.raises(XXLJobConfigError):
         XXLJobConfig.from_mapping(base_mapping(XXL_JOB_ADMIN_ADDRESSES=[address]))
+
+
+@pytest.mark.parametrize(
+    "address",
+    [
+        "http://user:pass@admin:8080",
+        "http://admin:8080/root?tenant=a",
+        "http://admin:8080/root#fragment",
+        "http://admin:8080/with space",
+        "http://admin:8080/\tcontrol",
+        "http://admin:8080/\x7fcontrol",
+    ],
+)
+def test_unsafe_admin_url_components_raise(address):
+    with pytest.raises(XXLJobConfigError, match="XXL_JOB_ADMIN_ADDRESSES"):
+        XXLJobConfig.from_mapping(
+            base_mapping(XXL_JOB_ADMIN_ADDRESSES=[address])
+        )
+
+
+@pytest.mark.parametrize(
+    "address",
+    [
+        "http://user:pass@executor:5001",
+        "http://executor:5001/root?tenant=a",
+        "http://executor:5001/root#fragment",
+        " http://executor:5001",
+    ],
+)
+def test_unsafe_executor_url_components_raise(address):
+    with pytest.raises(XXLJobConfigError, match="XXL_JOB_EXECUTOR_ADDRESS"):
+        XXLJobConfig.from_mapping(
+            base_mapping(XXL_JOB_EXECUTOR_ADDRESS=address)
+        )
 
 
 def test_access_token_whitespace_only_normalized_to_empty():
@@ -280,15 +370,53 @@ def test_admin_address_order_preserved():
     "prefix,expected",
     [
         ("", ""),
-        ("   ", ""),
         ("/", ""),
-        ("///", ""),
         ("/xxl-job", "/xxl-job"),
         ("/xxl-job/", "/xxl-job"),
         ("xxl-job", "/xxl-job"),
-        ("//xxl-job//", "/xxl-job"),
+        ("internal/xxl", "/internal/xxl"),
     ],
 )
 def test_route_prefix_normalization_variants(prefix, expected):
     config = XXLJobConfig.from_mapping(base_mapping(XXL_JOB_ROUTE_PREFIX=prefix))
     assert config.route_prefix == expected
+
+
+@pytest.mark.parametrize(
+    "prefix",
+    [
+        "   ",
+        "///",
+        "//xxl-job//",
+        "/xxl?tenant=a",
+        "/xxl#fragment",
+        "/a\\b",
+        "/<path:anything>",
+        "/a//b",
+        "/a/../b",
+        "/a/./b",
+        "/a b",
+        "/a\x7fb",
+    ],
+)
+def test_invalid_static_route_prefix_rejected(prefix):
+    with pytest.raises(XXLJobConfigError, match="XXL_JOB_ROUTE_PREFIX"):
+        XXLJobConfig.from_mapping(
+            base_mapping(XXL_JOB_ROUTE_PREFIX=prefix)
+        )
+
+
+@pytest.mark.parametrize("value", [None, 1, [], {}])
+def test_disabled_route_prefix_still_requires_string_type(value):
+    with pytest.raises(XXLJobConfigError, match="XXL_JOB_ROUTE_PREFIX"):
+        XXLJobConfig.from_mapping(
+            {"XXL_JOB_ENABLED": False, "XXL_JOB_ROUTE_PREFIX": value}
+        )
+
+
+@pytest.mark.parametrize("value", [None, 1, [], {}])
+def test_disabled_executor_address_still_requires_string_type(value):
+    with pytest.raises(XXLJobConfigError, match="XXL_JOB_EXECUTOR_ADDRESS"):
+        XXLJobConfig.from_mapping(
+            {"XXL_JOB_ENABLED": False, "XXL_JOB_EXECUTOR_ADDRESS": value}
+        )

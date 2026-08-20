@@ -5,8 +5,9 @@
 ## Two independent paths
 
 When the extension is enabled, initializing the HTTP executor protocol does not
-require a running Registry lifecycle. Disabling the extension also disables its
-five HTTP routes.
+require a running Registry lifecycle. Disabling the extension is a total feature
+switch: it disables the five routes and all Registry, Remove and Callback Admin
+traffic. A Callback-only process uses `ENABLED=True`, `AUTO_REGISTER=False`.
 
 ```mermaid
 flowchart TD
@@ -19,7 +20,7 @@ flowchart TD
     R -->|"Success"| T["Prepare detachable finalizer handle; publish nothing"]
     Q -->|"No"| T
     T -->|"Failure"| S
-    T -->|"Success"| D["Commit CLI, Runtime, app record, Blueprint and hooks"]
+    T -->|"Success"| D["Commit reversible state; Blueprint and hooks last"]
     D --> E{"ENABLED?"}
     E -->|"Yes"| F["Register beat / idleBeat / run / kill / log"]
     F --> G["HTTP executor protocol is available"]
@@ -105,7 +106,7 @@ flowchart TD
     H --> I["Pending performs the necessary newer Remove"]
 ```
 
-An explicit one-shot Register enters the current non-zero generation's open
+An explicit one-shot Register enters the current generation's open
 coordination window before waiting for the network lock. Cleanup closes that
 window under the state lock, remains non-blocking, and does not schedule its
 Remove until every Register that entered earlier has completed local
@@ -212,12 +213,14 @@ cleanup actor, or Admin RPC; immediate interpreter exit, `SIGKILL`, and forced
 container shutdown can prevent completion.
 
 The exit path obeys the same lifecycle eligibility as explicit automatic
-Remove: generation zero is not removed and one cleanup responsibility is
-requested at most once. A later accepted register is a new remote state change,
-not a failed-Remove retry, and may create a new responsibility in that same
-generation. A one-shot `register_executor()` at generation zero does not create
-a lifecycle and therefore is not automatically paired at exit; call
-`remove_executor()` explicitly.
+Remove: one cleanup responsibility is requested at most once. An accepted
+one-shot `register_executor()` at generation zero creates a manual cleanup
+responsibility without creating a Worker, advancing Worker generation or
+starting renewal. With exit deregistration enabled, shutdown can pair it with
+one Remove. A later accepted register is a new remote state change—not a
+failed-Remove retry—and may create a new responsibility in the same scope.
+Generation-zero success/cache never satisfies generation one; starting a real
+Worker always creates its normal generation-one lifecycle and exit cleanup.
 
 ## Job timeout and logging
 

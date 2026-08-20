@@ -44,17 +44,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Worker state are checked separately when recording cleanup satisfaction, so
   a new generation still waits for and correctly orders behind an older Active
   Remove.
-- Explicit one-shot Register calls now join the current non-zero generation's
+- Explicit one-shot Register calls now join the current generation's
   open coordination window before waiting for the Registry network lock.
   Lifecycle cleanup closes that window without blocking and defers Remove until
   all earlier participants finish. Register RPC completion remains ordered only
   by strict sequence and ProcessState identity; generation and Coordination
   ownership separately guard cleanup-responsibility changes.
+- Generation zero is now a manual cleanup scope. An accepted explicit Register
+  creates exit-cleanup responsibility without creating a Worker, advancing the
+  Worker generation or starting renewal. Successful/failed explicit Remove and
+  shutdown reuse the existing Active/Pending ownership, while generation-zero
+  cache never satisfies generation one.
 - `init_app()` now completes a side-effect-free deterministic preflight,
   including route, Blueprint and CLI-name conflicts, before creating managed
   resources. Commit failures remove only CLI, extension and application records
   still owned by that initialization; Flask private route/hook structures are
   not treated as a general rollback surface.
+- Protocol routes and the routing-error hook are constructed on an unregistered
+  Blueprint. Reversible CLI, extension, application-registry and finalizer
+  ownership is published first; Blueprint registration is the final irreversible
+  commit before Prepared creator activation.
 - A Prepared `Thread.start()` failure now leaves Flask uncommitted, closes the
   initialization's private managed handlers/resources, preserves the original
   error and permits retry on the same app/extension instance. Creator-only
@@ -70,6 +79,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `CallResult` events and protocol responses remain generic.
 - The build backend remains capped below Hatchling 1.32 so current Twine can
   validate Core Metadata 2.4 artifacts.
+- Admin/executor URLs now reject raw C0/DEL/whitespace, userinfo, query,
+  fragment and invalid host/port input; static Route Prefix validation rejects
+  converters, dot segments and ambiguous URL syntax. Admin POST never follows
+  redirects. Invalid JSON structure is classified separately as
+  `invalid_response` (exported from `flask_xxljob.client`) and reuses the
+  invalid-JSON failover option.
 
 ### Configuration
 
@@ -80,13 +95,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Split initialization field validation from full Registry completeness.
   `AUTO_REGISTER=False` can initialize the HTTP protocol without Admin Registry
   settings; enabled Registry operations validate before threads or RPCs.
-- `XXL_JOB_ENABLED=False` short-circuits Registry behavior. Synchronous one-shot
-  APIs return a safe local disabled `CallResult` without allocating an RPC
-  sequence or changing lifecycle state.
+- `XXL_JOB_ENABLED=False` is the complete feature switch: no executor Blueprint
+  is registered and Registry, Remove and Callback paths perform no Admin HTTP.
+  Local Runtime/status/CLI and basic type/log validation remain; unused network
+  URL and Route Prefix strings are not semantically interpreted. Callback-only
+  processes use `ENABLED=True`, `AUTO_REGISTER=False`.
 
 ### Compatibility
 
-- The task protocol, Handler and Callback APIs, five executor endpoints, Admin
+- When enabled, the task protocol, Handler and Callback APIs, five executor endpoints, Admin
   Registry protocol, renewal interval, `XXLJobStatus` fields, public imports,
   Python 3.8-3.14 and Flask 1.x-3.x support remain unchanged.
 - Multi-worker topology remains process-per-Registry-Worker. No leader election,
@@ -98,12 +115,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   new wheel and sdist (including file-only RECORD mappings and authoritative
   top-level PKG-INFO), reject development/signature files, and run a
   source-isolated installed-wheel smoke test with `pip check`.
-- The final local suite completed with 536 passed, 2 optional official-Admin
-  tests skipped, and 91.99% line coverage. It covers PID/disabled ordering,
-  generation ownership, Remove races, cleanup failures, strict completion
-  sequences, Prepared activation/cancellation ownership, finalizer preparation,
-  identity-safe pre-commit cleanup, non-blocking finalization and one-time log
-  closure.
+- The final local suite completed with 602 passed, 2 optional official-Admin
+  tests skipped, and 92.32% line coverage. It covers the total disabled switch,
+  strict URLs/Admin responses, generation-zero cleanup and transitions,
+  PID/generation ownership, Remove races, strict completion sequences, Prepared
+  ownership, identity-safe pre-commit cleanup and one-time log closure.
 
 ## [0.3.4] - 2026-07-25
 

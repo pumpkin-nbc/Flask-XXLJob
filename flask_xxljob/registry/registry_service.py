@@ -246,11 +246,12 @@ class RegistryService:
                 # point that closes this coordination window.
                 if coordination.cleanup_requested:
                     coordination = None
-            elif generation > 0:
+            else:
                 # Every explicit one-shot register that reaches a live
                 # generation before lifecycle cleanup is linearized must be
-                # visible to that cleanup.  Worker renewals do not call this
-                # helper and remain governed by Worker ownership.
+                # visible to that cleanup.  Generation zero is a cleanup scope
+                # for manual registration, not a fabricated Worker lifecycle.
+                # Worker renewals do not call this helper.
                 coordination = _RegisterCoordination(generation=generation)
                 state.register_coordination = coordination
 
@@ -269,7 +270,7 @@ class RegistryService:
         coordination: Optional[_RegisterCoordination],
     ) -> bool:
         """Reopen cleanup responsibility after an accepted register."""
-        if generation <= 0 or state.generation != generation:
+        if generation < 0 or state.generation != generation:
             return False
 
         invalidates_cached_success = (
@@ -281,9 +282,16 @@ class RegistryService:
             and coordination.generation == generation
             and coordination.cleanup_requested
         )
+        opens_manual_responsibility = bool(
+            generation == 0
+            and coordination is not None
+            and state.register_coordination is coordination
+            and coordination.generation == generation
+        )
         if not (
             invalidates_cached_success
             or restores_coordinated_responsibility
+            or opens_manual_responsibility
         ):
             return False
 
@@ -315,7 +323,7 @@ class RegistryService:
         generation: int,
     ) -> Optional[_RemoveOperation]:
         """Represent one lifecycle cleanup responsibility as Pending."""
-        if generation == 0:
+        if generation == 0 and not state.registered:
             return None
         if state.last_successfully_removed_generation == generation:
             return None
@@ -352,9 +360,11 @@ class RegistryService:
             return None
 
         operation: Optional[_RemoveOperation] = None
+        cleanup_required = generation > 0 or state.registered
         if (
             coordination.cleanup_requested
             and coordination.inflight_count == 0
+            and cleanup_required
             and state.last_successfully_removed_generation != generation
         ):
             operation = self._ensure_pending_remove_locked(
@@ -368,6 +378,9 @@ class RegistryService:
             cleanup_satisfied = (
                 state.last_successfully_removed_generation == generation
             )
+            no_cleanup_responsibility = bool(
+                generation == 0 and not state.registered
+            )
             cleanup_attempt_finished = bool(
                 coordination.cleanup_requested
                 and not cleanup_present
@@ -376,6 +389,7 @@ class RegistryService:
             if (
                 not coordination.cleanup_requested
                 or cleanup_satisfied
+                or no_cleanup_responsibility
                 or cleanup_attempt_finished
             ):
                 state.register_coordination = None
@@ -429,7 +443,10 @@ class RegistryService:
         state = self._get_process_state()
         with state.state_lock:
             generation = state.generation
-            terminal_candidate = generation > 0 and state.worker is None
+            # With no Worker, generation zero is the terminal cleanup scope for
+            # an explicit registration. It uses the same Active/Pending owner
+            # model without becoming a Worker generation.
+            terminal_candidate = state.worker is None
 
         if terminal_candidate:
             return self._terminal_remove_result(state, generation)
@@ -981,8 +998,6 @@ class RegistryService:
         state: _RegistryProcessState,
     ) -> Optional[_RemoveOperation]:
         generation = state.generation
-        if generation == 0:
-            return None
 
         coordination = state.register_coordination
         if (
@@ -1002,6 +1017,8 @@ class RegistryService:
                 return None
 
         if state.last_successfully_removed_generation == generation:
+            return None
+        if generation == 0 and not state.registered:
             return None
         return self._ensure_pending_remove_locked(state, generation)
 
@@ -1232,7 +1249,7 @@ class RegistryService:
 
                     cleanup_satisfied = bool(
                         safe_result.success
-                        and operation.generation > 0
+                        and operation.generation >= 0
                         and state.generation == operation.generation
                         and state.worker is None
                     )
@@ -1313,24 +1330,40 @@ class RegistryService:
             state.close_logs_when_idle = True
             target_generation = state.generation
             coordination = state.register_coordination
-            open_coordination = bool(
+            matching_coordination = bool(
                 coordination is not None
                 and coordination.generation == target_generation
-                and not coordination.cleanup_requested
+            )
+            # shutdown's state-lock mutation is the non-blocking linearization
+            # point that closes this register window, including generation 0.
+            if (
+                self._config.enabled
+                and deregister_on_exit
+                and matching_coordination
+            ):
+                assert coordination is not None
+                coordination.cleanup_requested = True
+            inflight_register = bool(
+                matching_coordination
+                and coordination is not None
                 and coordination.inflight_count > 0
             )
             cleanup_satisfied = (
                 state.last_successfully_removed_generation
                 == target_generation
             )
+            cleanup_required = bool(
+                target_generation > 0
+                or (target_generation == 0 and state.registered)
+            )
             should_validate_remove = bool(
                 self._config.enabled
                 and deregister_on_exit
-                and target_generation > 0
                 and (
-                    open_coordination
+                    inflight_register
                     or (
-                        not cleanup_satisfied
+                        cleanup_required
+                        and not cleanup_satisfied
                         and state.last_remove_requested_generation
                         != target_generation
                     )
@@ -1359,10 +1392,7 @@ class RegistryService:
             else:
                 operation: Optional[_RemoveOperation] = None
                 with state.state_lock:
-                    if (
-                        state.generation == target_generation
-                        and target_generation > 0
-                    ):
+                    if state.generation == target_generation:
                         operation = self._request_remove_locked(state)
                 if operation is not None:
                     try:

@@ -39,6 +39,7 @@ def test_callback_success_maps_official_fields(mocker):
     payload = kwargs["json"]
     assert isinstance(payload, list) and len(payload) == 1
     assert payload[0] == {"logId": 1, "logDateTim": 2, "handleCode": 200, "handleMsg": "ok"}
+    assert kwargs["allow_redirects"] is False
 
 
 def test_callback_includes_token_header(mocker):
@@ -117,3 +118,39 @@ def test_callback_uses_configured_timeout(mocker):
     )
     client.callback(log_id=1, log_date_time=2, handle_code=200)
     assert post.call_args.kwargs["timeout"] == (2, 7)
+
+
+def test_disabled_callback_client_returns_without_validation_or_http(mocker):
+    post = mocker.patch("flask_xxljob.client.requests.post")
+    client = CallbackClient(
+        make_config(
+            XXL_JOB_ENABLED=False,
+            XXL_JOB_ADMIN_ADDRESSES=["not a URL"],
+            XXL_JOB_EXECUTOR_ADDRESS="not a URL",
+        )
+    )
+
+    one = client.callback(1, 2, 200, "ok")
+    many = client.callback_many([{"not": "validated while disabled"}])
+
+    assert one.error_type == many.error_type == "config"
+    assert one.attempt_count == many.attempt_count == 0
+    post.assert_not_called()
+
+
+def test_callback_redirect_is_not_followed(mocker):
+    post = mocker.patch(
+        "flask_xxljob.client.requests.post",
+        return_value=FakeResponse(status_code=307),
+    )
+    client = CallbackClient(
+        make_config(XXL_JOB_ADMIN_ADDRESSES=["http://a:8080"])
+    )
+
+    result = client.callback(1, 2, 200)
+
+    assert result.success is False
+    assert result.error_type == "http"
+    assert result.http_status == 307
+    assert post.call_count == 1
+    assert post.call_args.kwargs["allow_redirects"] is False

@@ -5,11 +5,13 @@ from __future__ import annotations
 import pytest
 import requests
 
+import flask_xxljob
 from flask_xxljob.client import (
     ERROR_BUSINESS,
     ERROR_CONFIG,
     ERROR_HTTP,
     ERROR_INVALID_JSON,
+    ERROR_INVALID_RESPONSE,
     ERROR_NETWORK,
     ERROR_TIMEOUT,
     post_to_admins,
@@ -80,14 +82,59 @@ def test_invalid_json_is_invalid_json(mocker):
 
 
 @pytest.mark.parametrize("body", [[], [1], None, "ok", 200])
-def test_non_object_json_is_invalid_json(mocker, body):
+def test_non_object_json_is_invalid_response(mocker, body):
     response = FakeResponse()
     response.json = lambda: body
     mocker.patch("flask_xxljob.client.requests.post", return_value=response)
     result = call()
     assert result.success is False
-    assert result.error_type == ERROR_INVALID_JSON
+    assert result.error_type == ERROR_INVALID_RESPONSE
     assert result.error == "JSON response body must be an object"
+
+
+def test_invalid_response_constant_is_client_only_public_api():
+    assert ERROR_INVALID_RESPONSE == "invalid_response"
+    assert not hasattr(flask_xxljob, "ERROR_INVALID_RESPONSE")
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {},
+        {"msg": "missing code"},
+        {"code": True, "msg": "bad"},
+        {"code": False, "msg": "bad"},
+        {"code": "200", "msg": "bad"},
+        {"code": 200.0, "msg": "bad"},
+        {"code": 200, "msg": {}},
+        {"code": 200, "msg": []},
+        {"code": 200, "msg": 1},
+        {"code": 200, "msg": False},
+    ],
+)
+def test_invalid_response_field_types_are_rejected(mocker, body):
+    response = FakeResponse()
+    response.json = lambda: body
+    mocker.patch("flask_xxljob.client.requests.post", return_value=response)
+
+    result = call()
+
+    assert result.success is False
+    assert result.code is None
+    assert result.msg is None
+    assert result.error_type == ERROR_INVALID_RESPONSE
+
+
+def test_missing_msg_is_compatible_with_none(mocker):
+    response = FakeResponse()
+    response.json = lambda: {"code": 200}
+    mocker.patch("flask_xxljob.client.requests.post", return_value=response)
+
+    result = call()
+
+    assert result.success is True
+    assert result.code == 200
+    assert result.msg is None
 
 
 def test_business_failure_is_business(mocker):

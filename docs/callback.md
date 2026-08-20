@@ -81,15 +81,24 @@ retry indefinitely in the background, or create background threads.
 When several admin addresses are configured, the callback stops at the first
 address that returns a valid business response (success or failure) to avoid
 delivering the same callback twice; it only fails over to the next address on a
-network error, a non-200 status, or invalid JSON. The returned `CallResult`
+network error, a non-200 status, invalid JSON, or an invalid response object.
+Admin POST never follows redirects. Parsed bodies must be objects whose `code`
+is a non-boolean integer and whose `msg` is a string or `None`; only `code=200`
+is successful. The returned `CallResult`
 (also exported as `AdminCallResult`) exposes `success`, `code`, `msg`/`message`,
 `address`/`admin_address` and `error_type`. `error_type` classifies failures as
-one of `network`, `timeout`, `http`, `invalid_json`, `business` or `config`
+one of `network`, `timeout`, `http`, `invalid_json`, `invalid_response`,
+`business` or `config`
 (and is `None` on success), so you can react without inspecting `requests`. The
 result also carries `attempt_count`, `elapsed_ms` and `http_status` for
 troubleshooting. Failover and bounded synchronous retry are controlled by the
 `XXL_JOB_ADMIN_*` configuration keys; by default business failures are not
 re-sent to another admin.
+
+`XXL_JOB_ENABLED=False` is the complete feature switch. All four public
+callback forms return the local disabled `CallResult` and send no Admin HTTP.
+Use `XXL_JOB_ENABLED=True` with `XXL_JOB_AUTO_REGISTER=False` for a process that
+needs callbacks but should not maintain Registry renewal.
 
 ## Long-running tasks (Celery and similar)
 

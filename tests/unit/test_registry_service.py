@@ -2195,16 +2195,203 @@ def test_finalizer_generation_zero_skips_validation_and_remove(mocker):
     closed.assert_called_once_with()
 
 
-def test_sync_registration_does_not_create_finalizer_remove_eligibility(mocker):
+def test_sync_registration_creates_generation_zero_exit_cleanup(mocker):
     config = make_config()
     admin = FakeAdmin()
     service = RegistryService(config, admin, close_logs=mocker.Mock())
-    service.register_once_result()
+    result = service.register_once_result()
 
     service.shutdown(deregister_on_exit=True)
 
-    assert service._get_process_state().generation == 0
+    state = service._get_process_state()
+    assert result.success is True
+    assert state.generation == 0
+    wait_for(lambda: admin.remove_calls == 1)
+    wait_for(
+        lambda: state.active_remove is None
+        and state.pending_remove is None
+        and state.register_coordination is None
+    )
+    assert state.worker is None
+    assert state.registered is False
+    assert state.last_successfully_removed_generation == 0
+
+
+def test_failed_generation_zero_register_creates_no_exit_cleanup(mocker):
+    admin = FakeAdmin(registry_success=False)
+    service = RegistryService(make_config(), admin, close_logs=mocker.Mock())
+
+    result = service.register_once_result()
+    service.shutdown(deregister_on_exit=True)
+
+    state = service._get_process_state()
+    assert result.success is False
+    assert state.generation == 0
+    assert state.registered is False
+    assert state.register_coordination is None
+    assert state.pending_remove is None
+    assert state.active_remove is None
     assert admin.remove_calls == 0
+
+
+def test_failed_generation_zero_register_preserves_existing_cleanup(mocker):
+    admin = FakeAdmin()
+    service = RegistryService(make_config(), admin, close_logs=mocker.Mock())
+    assert service.register_once_result().success is True
+    admin.registry_success = False
+
+    assert service.register_once_result().success is False
+    service.shutdown(deregister_on_exit=True)
+
+    state = service._get_process_state()
+    wait_for(lambda: admin.remove_calls == 1)
+    wait_for(lambda: state.active_remove is None)
+    assert state.generation == 0
+    assert state.registered is False
+    assert state.last_successfully_removed_generation == 0
+
+
+def test_generation_zero_explicit_remove_success_prevents_close_duplicate(mocker):
+    admin = FakeAdmin()
+    service = RegistryService(make_config(), admin, close_logs=mocker.Mock())
+    assert service.register_once_result().success is True
+
+    result = service.remove_once_result()
+    service.shutdown(deregister_on_exit=True)
+
+    state = service._get_process_state()
+    assert result.success is True
+    assert admin.remove_calls == 1
+    assert state.generation == 0
+    assert state.registered is False
+    assert state.last_successfully_removed_generation == 0
+    assert state.pending_remove is None
+    assert state.active_remove is None
+
+
+def test_generation_zero_explicit_remove_failure_keeps_one_close_fallback(mocker):
+    admin = FakeAdmin(remove_success=False)
+    service = RegistryService(make_config(), admin, close_logs=mocker.Mock())
+    assert service.register_once_result().success is True
+
+    result = service.remove_once_result()
+    assert result.success is False
+    assert admin.remove_calls == 1
+
+    service.shutdown(deregister_on_exit=True)
+
+    state = service._get_process_state()
+    wait_for(lambda: admin.remove_calls == 2)
+    wait_for(
+        lambda: state.active_remove is None
+        and state.pending_remove is None
+        and not state.cleanup_actors
+    )
+    time.sleep(0.02)
+    assert admin.remove_calls == 2
+    assert state.generation == 0
+    assert state.registered is True
+    assert state.last_successfully_removed_generation is None
+
+
+def test_generation_zero_inflight_register_close_is_non_blocking_and_unique(mocker):
+    admin = BlockingRegistryAdmin()
+    service = RegistryService(make_config(), admin, close_logs=mocker.Mock())
+    results = []
+    register_thread = threading.Thread(
+        target=lambda: results.append(service.register_once_result())
+    )
+    register_thread.start()
+    assert admin.started.wait(timeout=1)
+    state = service._get_process_state()
+    wait_for(
+        lambda: state.register_coordination is not None
+        and state.register_coordination.generation == 0
+        and state.register_coordination.inflight_count == 1
+    )
+
+    started = time.monotonic()
+    service.shutdown(deregister_on_exit=True)
+    elapsed = time.monotonic() - started
+
+    coordination = state.register_coordination
+    assert elapsed < 0.5
+    assert coordination is not None
+    assert coordination.cleanup_requested is True
+    assert state.pending_remove is None
+    assert state.active_remove is None
+    assert admin.remove_calls == 0
+
+    admin.release.set()
+    register_thread.join(timeout=1)
+    assert register_thread.is_alive() is False
+    assert results and results[0].success is True
+    wait_for(lambda: admin.remove_calls == 1)
+    wait_for(
+        lambda: state.register_coordination is None
+        and state.pending_remove is None
+        and state.active_remove is None
+        and not state.cleanup_actors
+    )
+    assert state.generation == 0
+    assert state.worker is None
+    assert state.registered is False
+    assert state.last_successfully_removed_generation == 0
+
+    # Generation zero is only a manual cleanup scope. A later real lifecycle
+    # must create generation one and carry its own exact cleanup responsibility.
+    service.start()
+    wait_for(lambda: admin.registry_calls == 2)
+    assert state.generation == 1
+    assert state.worker is not None
+    service.shutdown(deregister_on_exit=True)
+    wait_for(lambda: admin.remove_calls == 2)
+    wait_for(lambda: state.active_remove is None and not state.stopping_workers)
+    assert state.last_successfully_removed_generation == 1
+
+
+def test_generation_zero_cleanup_cache_does_not_satisfy_generation_one(mocker):
+    admin = FakeAdmin()
+    service = RegistryService(make_config(), admin, close_logs=mocker.Mock())
+    assert service.register_once_result().success is True
+    assert service.remove_once_result().success is True
+    state = service._get_process_state()
+    assert state.last_successfully_removed_generation == 0
+
+    service.start()
+    wait_for(lambda: admin.registry_calls == 2)
+    assert state.generation == 1
+    assert state.worker is not None
+
+    service.shutdown(deregister_on_exit=True)
+
+    wait_for(lambda: admin.remove_calls == 2)
+    wait_for(lambda: state.active_remove is None and not state.stopping_workers)
+    assert state.last_successfully_removed_generation == 1
+
+
+def test_generation_zero_registration_transfers_to_one_worker_cleanup(mocker):
+    admin = FakeAdmin()
+    service = RegistryService(make_config(), admin, close_logs=mocker.Mock())
+    assert service.register_once_result().success is True
+    state = service._get_process_state()
+    assert state.generation == 0
+    assert state.worker is None
+
+    service.start()
+    wait_for(lambda: admin.registry_calls == 2)
+    assert state.generation == 1
+    assert state.worker is not None
+
+    service.shutdown(deregister_on_exit=True)
+
+    wait_for(lambda: admin.remove_calls == 1)
+    wait_for(
+        lambda: state.active_remove is None
+        and state.pending_remove is None
+        and not state.stopping_workers
+    )
+    assert state.last_successfully_removed_generation == 1
 
 
 def test_finalizer_does_not_validate_or_repeat_used_generation(mocker):

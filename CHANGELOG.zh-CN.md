@@ -35,13 +35,20 @@
 - Active Remove completion 是否接受仍只依赖 strict sequence、ProcessState identity 与
   Active identity；精确 generation 和当前 Worker 状态仅用于记录清理责任是否满足，
   因而新 generation 仍会等待并正确排序在旧 Active Remove 之后。
-- 显式 one-shot Register 现在会在等待 Registry 网络锁前加入当前非零 generation 的
+- 显式 one-shot Register 现在会在等待 Registry 网络锁前加入当前 generation 的
   开放协调窗口。lifecycle cleanup 非阻塞关闭该窗口，并等此前参与者全部完成后再安排
   Remove。Register RPC completion 仍只按 strict sequence 与 ProcessState identity
   提交，generation 和 Coordination ownership 仅另行保护清理责任变更。
+- generation 0 现在是手动清理 scope。accepted 显式 Register 会产生退出清理责任，
+  但不创建 Worker、不推进 Worker generation、也不启动续约。显式 Remove 的成功/
+  失败与 shutdown 继续复用 Active/Pending ownership，且 generation 0 缓存不能满足
+  generation 1。
 - `init_app()` 会先完成无副作用的确定性 Preflight，包括路由、Blueprint 与 CLI 名称
   冲突，再创建托管资源。Commit 失败只撤销本次仍持有 identity 的 CLI、extension 与
   应用记录，不把 Flask 私有路由/Hook 结构作为通用 rollback 表面。
+- 协议路由与路由错误 Hook 会先绑定到尚未注册的 Blueprint。可撤销的 CLI、extension、
+  应用记录与 finalizer ownership 先发布；Blueprint 注册是 Prepared 创建者 activation
+  前最后一个不可逆 Commit。
 - Prepared `Thread.start()` 失败现在会保持 Flask 未提交，关闭本次初始化私有的托管
   Handler/资源，保留原始异常，并允许同一 app/扩展实例重试。创建者独占 activation
   与 identity-safe cancellation 会阻止并发 start 接管或 stale cancel 误停正式 Worker；
@@ -52,6 +59,10 @@
 - 用户回调与包内未预期异常会保留完整本地 traceback；预期网络/HTTP/远端失败仍是
   简洁 `CallResult` 事件，协议响应继续使用通用错误。
 - 构建后端继续限制在 Hatchling 1.32 以下，使当前 Twine 可以校验 Core Metadata 2.4。
+- Admin/执行器 URL 现在拒绝原始 C0/DEL/空白、userinfo、query、fragment 与非法
+  主机/端口；静态 Route Prefix 拒绝 converter、点段和有歧义的 URL 语法。Admin POST
+  不跟随重定向。非法 JSON 结构会单独归类为 `invalid_response`（从
+  `flask_xxljob.client` 导出），并复用非法 JSON 故障转移开关。
 
 ### 配置
 
@@ -61,12 +72,14 @@
   执行器身份。
 - 将初始化字段校验与完整 Registry 配置校验分离。`AUTO_REGISTER=False` 可以在没有
   Admin Registry 配置时初始化 HTTP 协议；enabled Registry 操作在线程/RPC 前校验。
-- `XXL_JOB_ENABLED=False` 会短路 Registry 行为；同步单次 API 返回安全的本地
-  disabled `CallResult`，不分配 RPC sequence，也不改变 lifecycle 状态。
+- `XXL_JOB_ENABLED=False` 是完整功能总开关：不注册执行器 Blueprint，Registry、Remove
+  与 Callback 均不发送 Admin HTTP。本地 Runtime/状态/CLI 及基础类型/日志校验继续
+  保留；不会语义解析未使用的网络 URL 与 Route Prefix 字符串。Callback-only 进程使用
+  `ENABLED=True`、`AUTO_REGISTER=False`。
 
 ### 兼容性
 
-- 任务协议、Handler 与 Callback API、五个执行器端点、Admin Registry 协议、续约
+- enabled 时，任务协议、Handler 与 Callback API、五个执行器端点、Admin Registry 协议、续约
   间隔、`XXLJobStatus` 字段、公开导入、Python 3.8-3.14 与 Flask 1.x-3.x 不变。
 - 多 Worker 拓扑仍是每进程一个 Registry Worker；未增加 Leader 选举、跨进程锁、
   信号处理或部署检测。
@@ -76,10 +89,10 @@
 - 发布检查改为在干净临时目录构建，只验证本轮新 wheel/sdist（包括仅针对文件成员的
   RECORD 映射与标准顶层 PKG-INFO），拒绝开发/签名文件，并在 `pip check` 后执行与
   源码隔离的安装后冒烟。
-- 最终本地测试为 536 项通过、2 项可选官方 Admin 测试跳过，行覆盖率 91.99%。覆盖
-  PID/disabled 顺序、generation ownership、Remove 竞态、cleanup 启动失败、严格
-  completion sequence、Prepared activation/cancellation ownership、finalizer 准备、
-  identity-safe 提交前资源收尾、非阻塞 finalizer 与日志恰好关闭一次。
+- 最终本地测试为 602 项通过、2 项可选官方 Admin 测试跳过，行覆盖率 92.32%。覆盖
+  disabled 总开关、严格 URL/Admin 响应、generation 0 清理与转换、PID/generation
+  ownership、Remove 竞态、严格 completion sequence、Prepared ownership、
+  identity-safe 提交前资源收尾与日志恰好关闭一次。
 
 ## [0.3.4] - 2026-07-25
 

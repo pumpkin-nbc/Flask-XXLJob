@@ -60,15 +60,18 @@ result = xxl_job.remove_executor(app)     # CallResult
 
 二者都是同步单次 Admin 操作，共用当前进程的 Registry 网络锁，但不会启动或停止
 lifecycle，也不会推进 generation。当前仍有续约 Worker 时，`remove_executor()` 保持
-普通单次 RPC，不消耗 lifecycle 清理状态。非零 generation 已停止后，同一个 API 会
+普通单次 RPC，不消耗 lifecycle 清理状态。当前没有 Worker 时，同一个 API 会
 参与终止型 Active/Pending ownership，使成功的同步 Remove 可被 shutdown 复用而不会
 重复发送。调用失败时保留原有 `registered` 快照；扩展 disabled 时返回本地配置失败
 `CallResult`，不执行 Admin RPC。
 
-对于有效的非零 generation，显式 `register_executor()` 会在等待网络锁前加入该代仍
+显式 `register_executor()` 会在等待网络锁前加入当前 generation 仍
 开放的 Register Coordination。此后 lifecycle cleanup 若完成线性化，shutdown 仍然
 非阻塞，只把 Remove 延后到这些已参与调用全部结束。协调窗口关闭后才开始的调用保持
 原有 one-shot API 语义。
+该规则也覆盖 generation 0：accepted 手动注册会产生清理责任，但不创建 Worker、不推进
+generation、也不启动续约。退出清理可以配对一次 Remove，且该缓存不会满足后续
+generation 1 的 Worker lifecycle。
 
 真实 one-shot Register completion 是否接受，只取决于 strict sequence 与调用捕获的
 ProcessState identity。generation 或 Coordination 变化不能抹掉已经发生的 Admin RPC：
@@ -87,6 +90,8 @@ xxl_job.callback_many(callbacks, app=None)   # CallbackRequest 或 dict 的列�
 
 `callback_many` 发送前会校验每一条，绝不自动拆分；任一条目非法或数量超过
 `XXL_JOB_CALLBACK_BATCH_MAX_SIZE` 时整体拒绝且不发送任何数据。
+`XXL_JOB_ENABLED=False` 时四种 Callback 都返回既有本地 disabled 结果，不发送 Admin
+HTTP。只需要 Callback 的进程使用 `ENABLED=True`、`AUTO_REGISTER=False`。
 
 ### 状态与生命周期
 
@@ -157,11 +162,16 @@ result.address        # 产生该结果的 Admin 地址
 result.admin_address  # address 的别名
 result.error          # 本地错误字符串（绝不含 Token）
 result.error_type     # None | 'network' | 'timeout' | 'http'
-                      #      | 'invalid_json' | 'business' | 'config'
+                      #      | 'invalid_json' | 'invalid_response'
+                      #      | 'business' | 'config'
 result.attempt_count  # 总 HTTP 请求次数
 result.elapsed_ms     # 总耗时（毫秒）
 result.http_status    # 最近一次 HTTP 状态码（若有）
 ```
+
+`invalid_json` 表示解析失败；`invalid_response` 表示解析结果不是对象或 `code`/`msg`
+类型非法。常量可从 `flask_xxljob.client.ERROR_INVALID_RESPONSE` 导入，但不会新增为
+`flask_xxljob` 顶层导出。Admin POST 不跟随重定向。
 
 ## `XXLJobStatus`
 

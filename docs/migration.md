@@ -259,7 +259,7 @@ No. All 0.1.1 public APIs, imports and configuration keys are unchanged. The
 only additive change is an optional `error_type` category on the call result
 returned by `register_executor`, `remove_executor` and the `callback*` methods,
 which lets you distinguish failures (`network`, `timeout`, `http`,
-`invalid_json`, `business`, `config`) without inspecting the underlying
+`invalid_json`, `invalid_response`, `business`, `config`) without inspecting the underlying
 `requests` objects. Reading it is optional.
 
 ### Upgrade

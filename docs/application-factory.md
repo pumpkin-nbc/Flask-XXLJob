@@ -36,6 +36,13 @@ def create_app(config=None):
 The Admin JobHandler must be exactly `demoJobHandler`. Module-level named
 handlers are copied into each application when `init_app` runs.
 
+With automatic Registry, defining module-level handlers before `init_app()` is
+recommended so Admin does not briefly see an executor whose business handlers
+are still being assembled. This is guidance, not a handler-ready state or
+runtime restriction. If handlers must be registered per application after
+initialization, set `XXL_JOB_AUTO_REGISTER=False`, call `init_app()`, register
+the handlers, and finally call `start_registry(app)`.
+
 ## Per-application isolation
 
 Each initialized application gets its own runtime stored in

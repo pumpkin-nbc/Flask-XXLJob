@@ -34,6 +34,12 @@ def create_app(config=None):
 Admin 中的 JobHandler 必须完全等于 `demoJobHandler`。模块级命名 Handler 会在
 `init_app` 时复制到每个 Flask 应用。
 
+自动 Registry 模式推荐在 `init_app()` 前定义模块级 Handler，避免 Admin 短暂看到
+执行器已经注册但业务 Handler 仍在组装。它只是使用建议，不会新增 handler-ready 状态
+或运行时强制限制。必须在初始化后按应用注册 Handler 时，可先设置
+`XXL_JOB_AUTO_REGISTER=False`，依次调用 `init_app()`、注册 Handler，最后调用
+`start_registry(app)`。
+
 ## 应用间隔离
 
 每个已初始化的应用都拥有独立的 Runtime，保存在 `app.extensions["xxljob"]`，包含各自独立的配置、处理函数注册表、客户端与注册服务。为某个应用注册的处理函数不会与另一个应用共享。

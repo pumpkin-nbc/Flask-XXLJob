@@ -97,6 +97,7 @@ def test_auto_start_prepares_before_flask_commit_and_activates_after(
     )
     token = object()
     events = []
+    real_register_blueprint = app.register_blueprint
 
     def prepare(service):
         assert EXTENSION_KEY not in app.extensions
@@ -115,6 +116,19 @@ def test_auto_start_prepares_before_flask_commit_and_activates_after(
         events.append("activate")
         return True
 
+    def register_blueprint(blueprint, *args, **kwargs):
+        runtime = app.extensions[EXTENSION_KEY]
+        assert "xxljob" in app.cli.commands
+        assert runtime._finalizer is not None  # noqa: SLF001 - commit order
+        # The app-level routing hook is already bound to the still-unregistered
+        # Blueprint, so this one call publishes routes and hook together.
+        assert any(
+            "before_app_request" in function.__qualname__
+            for function in blueprint.deferred_functions
+        )
+        events.append("blueprint")
+        return real_register_blueprint(blueprint, *args, **kwargs)
+
     mocker.patch.object(
         RegistryService, "_prepare_start", autospec=True, side_effect=prepare
     )
@@ -124,10 +138,15 @@ def test_auto_start_prepares_before_flask_commit_and_activates_after(
         autospec=True,
         side_effect=activate,
     )
+    mocker.patch.object(
+        app,
+        "register_blueprint",
+        side_effect=register_blueprint,
+    )
 
     FlaskXXLJob(app)
 
-    assert events == ["prepare", "activate"]
+    assert events == ["prepare", "blueprint", "activate"]
     app.extensions["xxljob"].close()
 
 
@@ -174,23 +193,52 @@ def test_registry_stop_between_commit_and_activation_is_normal(mocker):
     app.extensions["xxljob"].close()
 
 
-def test_disabled_init_without_registry_configuration_has_no_side_effects(mocker):
-    start = mocker.patch.object(FlaskXXLJob, "start_registry")
+def test_disabled_is_total_switch_without_network_or_protocol_routes(mocker):
+    post = mocker.patch("flask_xxljob.client.requests.post")
     app = Flask("disabled-protocol-only")
     app.config.update(
         XXL_JOB_ENABLED=False,
         XXL_JOB_AUTO_REGISTER=True,
-        XXL_JOB_ADMIN_ADDRESSES=[],
+        XXL_JOB_ADMIN_ADDRESSES=["not a URL"],
+        XXL_JOB_EXECUTOR_ADDRESS="also not a URL",
+        XXL_JOB_ROUTE_PREFIX="//unused/<path:value>? ",
     )
 
     extension = FlaskXXLJob(app)
 
-    start.assert_not_called()
-    service = app.extensions["xxljob"].registry_service
+    runtime = app.extensions["xxljob"]
+    service = runtime.registry_service
+    rules = {rule.rule for rule in app.url_map.iter_rules()}
+    assert not {"/beat", "/idleBeat", "/run", "/kill", "/log"} & rules
+    assert not any(name.startswith("xxljob_") for name in app.blueprints)
+    assert not any(
+        rule.endpoint.startswith("xxljob_") for rule in app.url_map.iter_rules()
+    )
+    assert "xxljob" in app.cli.commands
+    assert extension.get_status(app).enabled is False
     assert service.is_running is False
+
     extension.start_registry(app)
+    extension.stop_registry(app)
     assert service.is_running is False
-    app.extensions["xxljob"].close()
+
+    results = [
+        extension.register_executor(app),
+        extension.remove_executor(app),
+        extension.callback(1, 2, 200, app=app),
+        extension.callback_success(1, 2, app=app),
+        extension.callback_failure(1, 2, app=app),
+        extension.callback_many(
+            [{"log_id": 1, "log_date_time": 2, "handle_code": 200}],
+            app=app,
+        ),
+    ]
+    assert all(result.success is False for result in results)
+    assert all(result.error_type == "config" for result in results)
+    assert all(result.attempt_count == 0 for result in results)
+
+    runtime.close()
+    post.assert_not_called()
 
 
 def test_enabled_protocol_only_init_does_not_require_registry_configuration():

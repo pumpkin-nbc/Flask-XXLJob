@@ -87,7 +87,7 @@ with app.app_context():
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `XXL_JOB_ENABLED` | `True` | Enable the extension. |
+| `XXL_JOB_ENABLED` | `True` | Master switch for executor routes and all Registry, Remove and Callback Admin traffic. |
 | `XXL_JOB_ADMIN_ADDRESSES` | `[]` | List of XXL-JOB admin base URLs. |
 | `XXL_JOB_ACCESS_TOKEN` | `""` | Access token; empty means no-token mode. |
 | `XXL_JOB_EXECUTOR_APP_NAME` | `"flask-xxljob-executor"` | Executor application name. |
@@ -105,7 +105,7 @@ with app.app_context():
 | `XXL_JOB_ADMIN_RETRY_COUNT` | `0` | Same-address synchronous retries (capped). |
 | `XXL_JOB_ADMIN_RETRY_BACKOFF` | `0.0` | Seconds between retries (capped). |
 | `XXL_JOB_ADMIN_FAILOVER_ON_HTTP_ERROR` | `True` | Fail over on a non-200 status. |
-| `XXL_JOB_ADMIN_FAILOVER_ON_INVALID_JSON` | `False` | Fail over on invalid JSON. |
+| `XXL_JOB_ADMIN_FAILOVER_ON_INVALID_JSON` | `False` | Fail over on invalid JSON or an invalid response object. |
 | `XXL_JOB_ADMIN_FAILOVER_ON_BUSINESS_ERROR` | `False` | Fail over on a business failure. |
 | `XXL_JOB_LOG_ENABLED` | `False` | Enable plugin-managed diagnostic handlers. |
 | `XXL_JOB_LOG_FILE_ENABLED` | `True` | Write managed logs to a rotating file. |
@@ -127,6 +127,21 @@ appropriate for a single process; multiple processes must not share that file.
 For containers and multi-worker servers, prefer console or host-managed logs.
 See the [logging guide](docs/logging.md).
 
+`XXL_JOB_ENABLED=False` is a complete feature switch: the five executor routes
+are not registered and Registry, Remove and Callback calls perform no Admin
+HTTP. The local Runtime, status and CLI remain available, and synchronous APIs
+return the existing disabled `CallResult`. Use `XXL_JOB_ENABLED=True` with
+`XXL_JOB_AUTO_REGISTER=False` when a process needs Callback but not renewal.
+Disabled initialization still validates local field types and logging, but does
+not interpret unused Admin/executor URL strings or Route Prefix path syntax.
+
+When enabled, Admin and non-empty executor URLs reject whitespace and control
+characters, userinfo, query strings, fragments and invalid hosts/ports; only
+HTTP/HTTPS is accepted. Route Prefix accepts root, an optional leading slash
+and one trailing slash, but rejects dynamic converters, dot segments, repeated
+slashes and URL/control syntax. Admin POST requests never follow redirects, and
+malformed JSON objects are reported as `invalid_response`.
+
 `init_app()` starts Registry only when `XXL_JOB_ENABLED` and
 `XXL_JOB_AUTO_REGISTER` are both `True`. Set `XXL_JOB_AUTO_REGISTER=False` for
 Gunicorn preload or an Application Factory shared with Celery, then call
@@ -134,6 +149,12 @@ Gunicorn preload or an Application Factory shared with Celery, then call
 Gunicorn worker still owns an independent process-local Registry lifecycle;
 this release does not add leader election or cross-process locking. See
 [deployment](docs/deployment.md).
+
+With automatic Registry, register module-level handlers before `init_app()` to
+minimize the short window in which Admin can see the executor before all
+business handlers are ready. This is a recommendation, not a runtime readiness
+check. Alternatively set `XXL_JOB_AUTO_REGISTER=False`, initialize the app,
+register application handlers, and then call `start_registry(app)`.
 
 `stop_registry()` now stops local renewal immediately and preserves the latest
 `registered` snapshot. Use `stop_registry(remove=True)` for one best-effort
@@ -151,7 +172,7 @@ fallback ensure that the newer remote state is removed exactly when needed.
 Calling `remove_executor()` while renewal is still running remains an ordinary
 one-shot RPC and does not stop or consume the lifecycle.
 
-Every explicit `register_executor()` that enters a non-zero generation before
+Every explicit `register_executor()` that enters the current generation before
 lifecycle cleanup is linearized is counted before it waits for the Registry
 network lock. Shutdown closes that coordination window without blocking and
 defers its Remove until the already-counted calls finish. A later explicit
@@ -159,6 +180,10 @@ register is still a normal one-shot operation and is not permanently rejected.
 Its real RPC completion is accepted by strict sequence and ProcessState
 identity; generation and coordination ownership only decide whether that
 accepted success changes lifecycle cleanup responsibility.
+Generation zero is a manual cleanup scope only: an accepted explicit Register
+does not create a Worker or start renewal, but exit cleanup can pair it with one
+Remove when `XXL_JOB_DEREGISTER_ON_EXIT=True`. Its result cache never satisfies
+the later generation-one Worker lifecycle.
 
 Initialization first performs a side-effect-free preflight. Removed keys,
 field values, automatic Registry completeness and route/Blueprint/CLI conflicts

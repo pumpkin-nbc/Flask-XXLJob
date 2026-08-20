@@ -69,7 +69,20 @@ with app.app_context():
 
 `message` 默认为 `None`（按空信息处理）。`log_id` 与 `log_date_time` 必须是整数；传入布尔值或非整数会抛出 `XXLJobRequestError`。
 
-配置多个 Admin 地址时，回调会在第一个返回有效业务响应（成功或失败）的地址处停止，避免重复投递同一回调；仅在网络错误、非 200 状态或非法 JSON 时才切换到下一个地址。返回的 `CallResult`（同时导出为 `AdminCallResult`）提供 `success`、`code`、`msg`/`message`、`address`/`admin_address` 与 `error_type`。`error_type` 将失败归类为 `network`、`timeout`、`http`、`invalid_json`、`business` 或 `config` 之一（成功时为 `None`），因此无需检查 `requests` 即可作出响应。结果还包含 `attempt_count`、`elapsed_ms` 与 `http_status` 便于排查。故障转移与有限的同步重试由 `XXL_JOB_ADMIN_*` 配置项控制；默认情况下业务失败不会重复发送到其他 Admin。
+配置多个 Admin 地址时，回调会在第一个返回有效业务响应（成功或失败）的地址处停止，
+避免重复投递同一回调；仅在网络错误、非 200 状态、非法 JSON 或非法响应对象时才按
+配置切换地址。Admin POST 不跟随重定向。解析结果必须是对象，`code` 必须是非 bool
+整数，`msg` 必须是字符串或 `None`，且只有 `code=200` 成功。返回的 `CallResult`
+（同时导出为 `AdminCallResult`）提供 `success`、`code`、`msg`/`message`、`address`/
+`admin_address` 与 `error_type`。`error_type` 将失败归类为 `network`、`timeout`、`http`、
+`invalid_json`、`invalid_response`、`business` 或 `config` 之一（成功时为 `None`），
+因此无需检查 `requests` 即可作出响应。结果还包含 `attempt_count`、`elapsed_ms` 与
+`http_status` 便于排查。故障转移与有限的同步重试由 `XXL_JOB_ADMIN_*` 配置项控制；
+默认情况下业务失败不会重复发送到其他 Admin。
+
+`XXL_JOB_ENABLED=False` 是完整功能总开关，四种公共 Callback 都返回本地 disabled
+`CallResult` 且不发送 Admin HTTP。只需要 Callback、不维护 Registry 续约的进程应使用
+`XXL_JOB_ENABLED=True` 与 `XXL_JOB_AUTO_REGISTER=False`。
 
 ## 长任务（Celery 等）
 

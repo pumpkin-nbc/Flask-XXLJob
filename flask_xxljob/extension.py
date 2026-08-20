@@ -16,7 +16,6 @@ from ._app import (
     ApplicationRegistry,
     ensure_blueprint_name_available,
     ensure_executor_routes_available,
-    executor_paths,
 )
 from ._lifecycle import install_runtime_finalizer
 from ._logging import XXLJobLogManager
@@ -222,12 +221,15 @@ class FlaskXXLJob:
             application_added = True
             self._applications.add(app)
 
+            # Publishing the already-prepared finalizer handle is reversible
+            # local ownership and therefore precedes the final Flask commit.
+            runtime.attach_finalizer(finalizer)
+
             if config.enabled:
                 assert blueprint is not None
+                # Blueprint registration publishes both routes and the
+                # pre-bound routing hook. It is the last irreversible commit.
                 app.register_blueprint(blueprint)
-                self._register_protocol_error_handlers(app, config.route_prefix)
-
-            runtime.attach_finalizer(finalizer)
 
             activated = True
             if prepared is not None:
@@ -388,45 +390,6 @@ class FlaskXXLJob:
             return False
         app.cli.add_command(xxljob_cli)
         return True
-
-    @staticmethod
-    def _register_protocol_error_handlers(app: Flask, route_prefix: str) -> None:
-        # 路由级错误（404/405）在进入 Blueprint 视图前产生，Blueprint 的
-        # errorhandler 无法捕获。使用 before_request 检查 Flask 已保存的路由异常，
-        # 只处理执行器路径，避免覆盖宿主应用已有的 404/405 错误处理器。
-        # Routing errors (404/405) are produced before the blueprint view runs,
-        # so a blueprint errorhandler cannot catch them. Inspect Flask's stored
-        # routing exception in before_request and handle executor paths only,
-        # without replacing the host application's existing 404/405 handlers.
-        from flask import jsonify, request
-        from werkzeug.exceptions import HTTPException
-
-        from .response.executor import XXLJobResponse
-
-        paths = executor_paths(route_prefix)
-
-        def _handle_protocol_routing_error() -> Any:
-            exc = getattr(request, "routing_exception", None)
-            if (
-                isinstance(exc, HTTPException)
-                and exc.code in (404, 405)
-                and request.path in paths
-            ):
-                runtime = current_app.extensions.get(EXTENSION_KEY)
-                if runtime is not None:
-                    runtime.log_manager.get_logger("protocol").warning(
-                        "XXL-JOB routing error path=%s status=%s.",
-                        request.path,
-                        exc.code,
-                    )
-                return jsonify(
-                    XXLJobResponse.failure(
-                        "XXL-JOB request error: " + (exc.name or "error")
-                    ).to_dict()
-                )
-            return None
-
-        app.before_request(_handle_protocol_routing_error)
 
     # ------------------------------------------------------------------
     # 请求处理函数注册 / Request-callback registration

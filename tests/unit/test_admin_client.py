@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 import requests
 
 from flask_xxljob.client import ACCESS_TOKEN_HEADER
@@ -41,6 +42,7 @@ def test_registry_calls_official_path(mocker):
     assert result.success is True
     assert post.call_args.args[0].endswith(REGISTRY_PATH)
     assert post.call_args.kwargs["json"] == req.to_wire()
+    assert post.call_args.kwargs["allow_redirects"] is False
 
 
 def test_registry_remove_calls_official_path(mocker):
@@ -48,6 +50,28 @@ def test_registry_remove_calls_official_path(mocker):
     client = AdminClient(make_config())
     client.registry_remove(RegistryRequest.for_executor("app", "http://127.0.0.1:5001"))
     assert post.call_args.args[0].endswith(REGISTRY_REMOVE_PATH)
+    assert post.call_args.kwargs["allow_redirects"] is False
+
+
+@pytest.mark.parametrize("status", [301, 302, 307, 308])
+def test_registry_redirect_is_http_failure_without_following(mocker, status):
+    post = mocker.patch(
+        "flask_xxljob.client.requests.post",
+        return_value=FakeResponse(status_code=status),
+    )
+    client = AdminClient(
+        make_config(XXL_JOB_ADMIN_ADDRESSES=["http://a:8080"])
+    )
+
+    result = client.registry(
+        RegistryRequest.for_executor("app", "http://127.0.0.1:5001")
+    )
+
+    assert result.success is False
+    assert result.error_type == "http"
+    assert result.http_status == status
+    assert post.call_count == 1
+    assert post.call_args.kwargs["allow_redirects"] is False
 
 
 def test_registry_token_header(mocker):
@@ -78,3 +102,22 @@ def test_registry_business_failure(mocker):
     result = client.registry(RegistryRequest.for_executor("app", "addr"))
     assert result.success is False
     assert result.code == 500
+
+
+def test_disabled_admin_client_never_posts(mocker):
+    post = mocker.patch("flask_xxljob.client.requests.post")
+    client = AdminClient(
+        make_config(
+            XXL_JOB_ENABLED=False,
+            XXL_JOB_ADMIN_ADDRESSES=["not a URL"],
+            XXL_JOB_EXECUTOR_ADDRESS="not a URL",
+        )
+    )
+    request = RegistryRequest.for_executor("app", "addr")
+
+    register = client.registry(request)
+    remove = client.registry_remove(request)
+
+    assert register.error_type == remove.error_type == "config"
+    assert register.attempt_count == remove.attempt_count == 0
+    post.assert_not_called()

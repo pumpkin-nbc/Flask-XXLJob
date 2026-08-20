@@ -213,7 +213,7 @@ pip install flask-xxljob==0.1.2
 
 ### 我需要修改代码或配置吗？
 
-不需要。0.1.1 的全部公共 API、导入路径与配置项均保持不变。唯一的新增变化是 `register_executor`、`remove_executor` 与 `callback*` 方法返回的调用结果上新增了可选的 `error_type` 分类，用于在不检查底层 `requests` 对象的情况下区分失败原因（`network`、`timeout`、`http`、`invalid_json`、`business`、`config`）。是否读取它完全可选。
+不需要。0.1.1 的全部公共 API、导入路径与配置项均保持不变。唯一的新增变化是 `register_executor`、`remove_executor` 与 `callback*` 方法返回的调用结果上新增了可选的 `error_type` 分类，用于在不检查底层 `requests` 对象的情况下区分失败原因（`network`、`timeout`、`http`、`invalid_json`、`invalid_response`、`business`、`config`）。是否读取它完全可选。
 
 ### 升级
 

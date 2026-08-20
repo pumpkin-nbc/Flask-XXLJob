@@ -76,6 +76,12 @@ def create_app():
 Module-level callbacks become the defaults for every application initialized by
 the extension.
 
+With automatic Registry this ordering is recommended to reduce the brief window
+between executor registration and business-handler readiness; it is not a
+runtime completeness check. For application-level handlers that must be added
+later, configure `XXL_JOB_AUTO_REGISTER=False`, initialize and register them,
+then explicitly call `start_registry(app)`.
+
 ## Application-level registration
 
 In addition to the `on_*` decorators you can register handlers for a specific

@@ -85,7 +85,7 @@ with app.app_context():
 
 | 配置项 | 默认值 | 说明 |
 | --- | --- | --- |
-| `XXL_JOB_ENABLED` | `True` | 是否启用扩展。 |
+| `XXL_JOB_ENABLED` | `True` | 总开关：控制五个执行器端点以及全部 Registry、Remove 和 Callback Admin 流量。 |
 | `XXL_JOB_ADMIN_ADDRESSES` | `[]` | XXL-JOB Admin 基础地址列表。 |
 | `XXL_JOB_ACCESS_TOKEN` | `""` | Access Token，空表示无 Token 模式。 |
 | `XXL_JOB_EXECUTOR_APP_NAME` | `"flask-xxljob-executor"` | 执行器应用名称。 |
@@ -103,7 +103,7 @@ with app.app_context():
 | `XXL_JOB_ADMIN_RETRY_COUNT` | `0` | 同地址同步重试次数（有上限）。 |
 | `XXL_JOB_ADMIN_RETRY_BACKOFF` | `0.0` | 重试之间的等待秒数（有上限）。 |
 | `XXL_JOB_ADMIN_FAILOVER_ON_HTTP_ERROR` | `True` | 非 200 状态时故障转移。 |
-| `XXL_JOB_ADMIN_FAILOVER_ON_INVALID_JSON` | `False` | 非法 JSON 时故障转移。 |
+| `XXL_JOB_ADMIN_FAILOVER_ON_INVALID_JSON` | `False` | 非法 JSON 或非法响应对象时故障转移。 |
 | `XXL_JOB_ADMIN_FAILOVER_ON_BUSINESS_ERROR` | `False` | 业务失败时故障转移。 |
 | `XXL_JOB_LOG_ENABLED` | `False` | 是否启用插件托管的诊断日志 Handler。 |
 | `XXL_JOB_LOG_FILE_ENABLED` | `True` | 是否写入轮转日志文件。 |
@@ -123,11 +123,27 @@ with app.app_context():
 文件目标适合单进程，多个进程不得共享该文件；容器与多 Worker 服务建议使用控制台
 或宿主管理的日志。详见[日志指南](docs/logging.zh-CN.md)。
 
+`XXL_JOB_ENABLED=False` 是完整功能总开关：不注册五个执行器端点，Registry、Remove
+与 Callback 均不发送 Admin HTTP。仍保留本地 Runtime、状态与 CLI，同步 API 返回
+既有 disabled `CallResult`。只需要 Callback 而不需要续约的进程应使用
+`XXL_JOB_ENABLED=True` 与 `XXL_JOB_AUTO_REGISTER=False`。disabled 初始化仍校验本地
+字段类型和日志，但不会解释不会使用的 Admin/执行器 URL 字符串或 Route Prefix 路径语义。
+
+enabled 时，Admin 与非空执行器 URL 会拒绝空白、控制字符、userinfo、query、fragment
+及非法主机/端口，只允许 HTTP/HTTPS。Route Prefix 兼容根路径、可选前导斜杠和单个
+尾斜杠，但拒绝动态 converter、点段、连续斜杠以及 URL/控制语法。Admin POST 从不
+跟随重定向；JSON 对象结构非法时归类为 `invalid_response`。
+
 只有 `XXL_JOB_ENABLED` 与 `XXL_JOB_AUTO_REGISTER` 同时为 `True` 时，`init_app()`
 才会启动 Registry。Gunicorn preload 或 Flask Application Factory 与 Celery 共用时，
 设置 `XXL_JOB_AUTO_REGISTER=False`，再只在需要续约的业务进程中显式调用
 `start_registry(app)`。每个 Gunicorn Worker 仍拥有独立的进程级 Registry lifecycle；
 本版本不提供 Leader 选举或跨进程锁。详见[部署](docs/deployment.zh-CN.md)。
+
+自动 Registry 模式建议在 `init_app()` 前完成模块级 Handler 注册，以缩短 Admin 已看到
+执行器但业务 Handler 尚未全部准备完成的窗口。这只是建议，不是运行时 readiness 检测。
+另一种方式是设置 `XXL_JOB_AUTO_REGISTER=False`，先初始化应用并注册应用级 Handler，
+最后再调用 `start_registry(app)`。
 
 `stop_registry()` 现在会立即停止本地续约，并保留最近的 `registered` 快照。
 `stop_registry(remove=True)` 为该生命周期申请一次 best-effort 后台注销；需要同步
@@ -140,12 +156,15 @@ register 重新建立远端身份，就会产生一份新的必要清理责任�
 Active 与最多一个 Pending fallback 会按真实远端顺序完成收敛。Worker 仍在续约时
 调用 `remove_executor()` 仍只是普通单次 RPC，不会停止或消耗 lifecycle。
 
-每个在 lifecycle cleanup 线性化前进入非零 generation 的显式
+每个在 lifecycle cleanup 线性化前进入当前 generation 的显式
 `register_executor()`，都会先登记到当前 Register Coordination，再等待 Registry
 网络锁。shutdown 会非阻塞地关闭该协调窗口，并等已登记调用全部完成后再安排 Remove；
 线性化后才进入的显式 register 仍是普通 one-shot 操作，不会被永久禁止。真实 RPC
 completion 只按 strict sequence 与 ProcessState identity 接受，generation 与协调
 ownership 仅决定 accepted success 是否改变 lifecycle 清理责任。
+generation 0 只是一份手动清理 scope：accepted 显式 Register 不创建 Worker、也不启动
+续约，但在 `XXL_JOB_DEREGISTER_ON_EXIT=True` 时可由退出清理配对一次 Remove；其缓存
+不能满足随后 generation 1 的 Worker lifecycle。
 
 初始化会先执行无副作用 Preflight。已删除配置、字段值、自动 Registry 完整配置以及
 路由/Blueprint/CLI 冲突会在创建日志 Handler、文件或 Flask 状态前失败。Private

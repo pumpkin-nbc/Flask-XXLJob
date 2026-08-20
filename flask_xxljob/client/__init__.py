@@ -66,6 +66,7 @@ ERROR_NETWORK = "network"
 ERROR_TIMEOUT = "timeout"
 ERROR_HTTP = "http"
 ERROR_INVALID_JSON = "invalid_json"
+ERROR_INVALID_RESPONSE = "invalid_response"
 ERROR_BUSINESS = "business"
 
 
@@ -97,7 +98,7 @@ def _should_failover(error_type: Optional[str], policy: AdminCallPolicy) -> bool
         return True
     if error_type == ERROR_HTTP:
         return policy.failover_on_http_error
-    if error_type == ERROR_INVALID_JSON:
+    if error_type in (ERROR_INVALID_JSON, ERROR_INVALID_RESPONSE):
         return policy.failover_on_invalid_json
     if error_type == ERROR_BUSINESS:
         return policy.failover_on_business_error
@@ -176,7 +177,13 @@ def post_to_admins(
             http_status: Optional[int] = None
             try:
                 response = requests.post(
-                    url, json=payload, headers=headers, timeout=timeout
+                    url,
+                    json=payload,
+                    headers=headers,
+                    timeout=timeout,
+                    # Registry credentials and payloads must never be replayed
+                    # automatically to a server-selected redirect target.
+                    allow_redirects=False,
                 )
             except requests.Timeout as exc:
                 last_result = CallResult(
@@ -229,7 +236,7 @@ def post_to_admins(
                                 success=False,
                                 address=address,
                                 error="JSON response body must be an object",
-                                error_type=ERROR_INVALID_JSON,
+                                error_type=ERROR_INVALID_RESPONSE,
                                 attempt_count=attempts,
                                 elapsed_ms=_elapsed_ms(),
                                 http_status=http_status,
@@ -237,7 +244,21 @@ def post_to_admins(
                         else:
                             code = body.get("code")
                             msg = body.get("msg")
-                            if code == SUCCESS_CODE:
+                            valid_code = isinstance(code, int) and not isinstance(
+                                code, bool
+                            )
+                            valid_msg = msg is None or isinstance(msg, str)
+                            if not valid_code or not valid_msg:
+                                last_result = CallResult(
+                                    success=False,
+                                    address=address,
+                                    error="JSON response fields have invalid types",
+                                    error_type=ERROR_INVALID_RESPONSE,
+                                    attempt_count=attempts,
+                                    elapsed_ms=_elapsed_ms(),
+                                    http_status=http_status,
+                                )
+                            elif code == SUCCESS_CODE:
                                 return CallResult(
                                     success=True,
                                     code=code,
@@ -247,16 +268,17 @@ def post_to_admins(
                                     elapsed_ms=_elapsed_ms(),
                                     http_status=http_status,
                                 )
-                            last_result = CallResult(
-                                success=False,
-                                code=code,
-                                msg=msg,
-                                address=address,
-                                error_type=ERROR_BUSINESS,
-                                attempt_count=attempts,
-                                elapsed_ms=_elapsed_ms(),
-                                http_status=http_status,
-                            )
+                            else:
+                                last_result = CallResult(
+                                    success=False,
+                                    code=code,
+                                    msg=msg,
+                                    address=address,
+                                    error_type=ERROR_BUSINESS,
+                                    attempt_count=attempts,
+                                    elapsed_ms=_elapsed_ms(),
+                                    http_status=http_status,
+                                )
 
             # 仅瞬时错误且仍有重试次数时，同步退避后重试同一地址。
             # Retry the same address (after synchronous backoff) only for a
@@ -304,5 +326,6 @@ __all__ = [
     "ERROR_TIMEOUT",
     "ERROR_HTTP",
     "ERROR_INVALID_JSON",
+    "ERROR_INVALID_RESPONSE",
     "ERROR_BUSINESS",
 ]

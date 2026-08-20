@@ -5,7 +5,8 @@
 ## 两条互不依赖的路径
 
 扩展启用时，初始化 HTTP 执行器协议并不要求 Registry lifecycle 正在运行。禁用扩展
-也会同时禁用它的五个 HTTP 路由。
+是完整功能总开关：同时禁用五个 HTTP 路由以及全部 Registry、Remove 与 Callback
+Admin 流量。只需要 Callback 的进程使用 `ENABLED=True`、`AUTO_REGISTER=False`。
 
 ```mermaid
 flowchart TD
@@ -18,7 +19,7 @@ flowchart TD
     R -->|"成功"| T["准备可 detach 的 finalizer handle；不发布 Flask 状态"]
     Q -->|"否"| T
     T -->|"失败"| S
-    T -->|"成功"| D["Commit CLI、Runtime、应用记录、Blueprint 与 Hook"]
+    T -->|"成功"| D["Commit 可逆状态；最后提交 Blueprint 与 Hook"]
     D --> E{"ENABLED？"}
     E -->|"是"| F["注册 beat / idleBeat / run / kill / log"]
     F --> G["HTTP 执行器协议可用"]
@@ -92,7 +93,7 @@ flowchart TD
     H --> I["Pending 执行新的必要 Remove"]
 ```
 
-显式 one-shot Register 会在等待网络锁前，先进入当前非零 generation 仍开放的协调窗口。
+显式 one-shot Register 会在等待网络锁前，先进入当前 generation 仍开放的协调窗口。
 cleanup 在 state lock 内关闭窗口，保持非阻塞，并将 Remove 延后到此前已经进入的所有
 Register 都完成本地协调收尾以后：
 
@@ -184,11 +185,12 @@ Flask-XXLJob 不检测 Celery，也不创建 Celery 任务。
 时才应开启。退出注销是 best-effort，finalizer 永不等待 Worker、Event、cleanup actor
 或 Admin RPC；解释器立即退出、`SIGKILL` 与容器强制终止都可能导致注销未完成。
 
-退出路径遵守同一套 lifecycle Remove 资格：generation 为零时不注销，同一份清理责任
-最多申请一次。后续 accepted register 是新的远端状态变化而不是失败重试，因此同一
-generation 可以产生一份新的必要责任。generation 为零时的同步
-`register_executor()` 不创建 lifecycle，因此退出时不会自动配对；需要时请显式调用
-`remove_executor()`。
+退出路径遵守同一套 lifecycle Remove 资格：同一份清理责任最多申请一次。generation 0
+的 accepted one-shot `register_executor()` 会产生手动清理责任，但不创建 Worker、
+不推进 Worker generation、也不启动续约。开启退出注销后，shutdown 可以为它配对一次
+Remove。后续 accepted register 是新的远端状态变化而不是失败重试，因此同一 scope
+可以产生新的必要责任。generation 0 的成功/缓存不能满足 generation 1；正式启动 Worker
+始终创建正常的 generation 1 lifecycle 及退出清理。
 
 ## 任务超时与日志
 

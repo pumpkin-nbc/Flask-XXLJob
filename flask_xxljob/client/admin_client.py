@@ -11,7 +11,7 @@ from typing import Optional
 
 from ..config import XXLJobConfig
 from ..model.registry import RegistryRequest
-from . import CallResult, post_to_admins
+from . import ERROR_CONFIG, CallResult, post_to_admins
 from .policy import AdminCallPolicy
 
 # 官方 Admin 注册接口路径 / Official admin registry API paths.
@@ -45,6 +45,8 @@ class AdminClient:
 
         Call ``/api/registry`` to register or renew the executor.
         """
+        if not self._config.enabled:
+            return self._disabled_result()
         return post_to_admins(
             self._config.admin_addresses,
             REGISTRY_PATH,
@@ -61,6 +63,8 @@ class AdminClient:
 
         Call ``/api/registryRemove`` to deregister the executor.
         """
+        if not self._config.enabled:
+            return self._disabled_result()
         return post_to_admins(
             self._config.admin_addresses,
             REGISTRY_REMOVE_PATH,
@@ -69,4 +73,13 @@ class AdminClient:
             self._config.timeout,
             policy=AdminCallPolicy.from_config(self._config),
             logger=self._logger,
+        )
+
+    @staticmethod
+    def _disabled_result() -> CallResult:
+        return CallResult(
+            success=False,
+            error="Flask-XXLJob is disabled.",
+            error_type=ERROR_CONFIG,
+            attempt_count=0,
         )

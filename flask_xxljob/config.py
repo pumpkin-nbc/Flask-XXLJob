@@ -12,6 +12,7 @@ accessed at import time.
 from __future__ import annotations
 
 import codecs
+import ipaddress
 import logging
 from dataclasses import dataclass, field
 from typing import Any, List, Mapping
@@ -119,16 +120,33 @@ class XXLJobConfig:
         raw_access_token = _as_str(merged, "XXL_JOB_ACCESS_TOKEN")
         access_token = raw_access_token if raw_access_token.strip() else ""
         executor_app_name = _as_str(merged, "XXL_JOB_EXECUTOR_APP_NAME")
-        route_prefix = _normalize_prefix(_as_str(merged, "XXL_JOB_ROUTE_PREFIX"))
-        executor_address = _apply_route_prefix(
-            _normalize_address(_as_str(merged, "XXL_JOB_EXECUTOR_ADDRESS")),
-            route_prefix,
+        raw_route_prefix = _as_str_strict(
+            merged, "XXL_JOB_ROUTE_PREFIX"
+        )
+        raw_executor_address = _as_str_strict(
+            merged, "XXL_JOB_EXECUTOR_ADDRESS"
+        )
+        raw_admin_addresses = _as_str_list(
+            merged, "XXL_JOB_ADMIN_ADDRESSES"
         )
 
-        admin_addresses = [
-            _normalize_address(item)
-            for item in _as_str_list(merged, "XXL_JOB_ADMIN_ADDRESSES")
-        ]
+        if enabled:
+            route_prefix = _normalize_prefix(raw_route_prefix)
+            executor_address = _apply_route_prefix(
+                _normalize_address(raw_executor_address),
+                route_prefix,
+            )
+            admin_addresses = [
+                _normalize_address(item) for item in raw_admin_addresses
+            ]
+        else:
+            # disabled 是总开关：这些字符串仍要满足基础配置类型，但不会被解释为
+            # URL/Flask path，也不会组合出一个实际不会使用的执行器地址。
+            # disabled is the master switch: retain the typed strings without
+            # interpreting them as URLs/Flask paths or composing an unused URL.
+            route_prefix = raw_route_prefix
+            executor_address = raw_executor_address
+            admin_addresses = raw_admin_addresses
 
         registry_interval = _as_positive_int(merged, "XXL_JOB_REGISTRY_INTERVAL")
         http_connect_timeout = _as_positive_int(merged, "XXL_JOB_HTTP_CONNECT_TIMEOUT")
@@ -372,7 +390,7 @@ def _as_choice(
 def _as_str_list(config: Mapping[str, Any], key: str) -> List[str]:
     value = config[key]
     if isinstance(value, str):
-        items = [item.strip() for item in value.split(",")]
+        items = value.split(",")
     elif isinstance(value, (list, tuple)):
         items = []
         for item in value:
@@ -381,13 +399,15 @@ def _as_str_list(config: Mapping[str, Any], key: str) -> List[str]:
                     f"{key} must be a list of non-empty strings; found a list "
                     f"item of type {type(item).__name__}."
                 )
-            items.append(item.strip())
+            items.append(item)
     else:
         raise XXLJobConfigError(
             f"{key} must be a list of strings or a comma-separated string; got "
             f"type {type(value).__name__}."
         )
-    return [item for item in items if item]
+    # Preserve each raw URL token so whitespace cannot disappear before the
+    # explicit URL character validation below.
+    return [item for item in items if item != ""]
 
 
 def _as_positive_int(config: Mapping[str, Any], key: str) -> int:
@@ -432,39 +452,126 @@ def _as_non_negative_float(config: Mapping[str, Any], key: str) -> float:
 
 
 def _normalize_address(value: str) -> str:
-    # 去除首尾空格与多余尾部斜杠，保留上下文路径（如 /xxl-job-admin）。
-    # Strip surrounding whitespace and redundant trailing slashes while
-    # preserving any context path (e.g. /xxl-job-admin).
-    stripped = value.strip()
-    if not stripped:
+    # 只规范尾斜杠；首尾空白必须留给原始 URL 校验明确拒绝，不能静默修复。
+    # Normalize trailing slashes only. Surrounding whitespace must remain
+    # visible to raw URL validation instead of being silently repaired.
+    if not value:
         return ""
-    return stripped.rstrip("/")
+    return value.rstrip("/")
 
 
 def _validate_http_url(key: str, value: str) -> None:
-    # Validate scheme, host and port while allowing an Admin context path.
+    # Python versions have differed in how urlsplit handles control characters,
+    # so reject the raw input before parsing for stable security semantics.
+    if any(
+        ord(character) < 0x20
+        or ord(character) == 0x7F
+        or character.isspace()
+        for character in value
+    ):
+        raise XXLJobConfigError(
+            f"{key} must be a valid http/https URL without whitespace or "
+            "control characters."
+        )
+
     try:
         parsed = urlsplit(value)
-        _validated_port = parsed.port  # Validates the port syntax and range.
+        port = parsed.port  # Validates the port syntax and range.
+        hostname = parsed.hostname
+        username = parsed.username
+        password = parsed.password
     except ValueError as exc:
         raise XXLJobConfigError(
-            f"{key} must be a valid http/https URL (e.g. 'http://host:port/path'); "
-            f"got '{value}'."
+            f"{key} must be a valid http/https URL with a valid host and port."
         ) from exc
-    if parsed.scheme.lower() not in ("http", "https") or not parsed.hostname:
+
+    invalid = bool(
+        parsed.scheme.lower() not in ("http", "https")
+        or not hostname
+        or not _is_valid_hostname(hostname)
+        or port == 0
+        or username is not None
+        or password is not None
+        or parsed.query
+        or parsed.fragment
+        or "?" in value
+        or "#" in value
+    )
+    if invalid:
         raise XXLJobConfigError(
-            f"{key} must be a valid http/https URL (e.g. 'http://host:port/path'); "
-            f"got '{value}'."
+            f"{key} must be a valid http/https URL with no userinfo, query, "
+            "fragment, whitespace, or control characters."
         )
 
 
+def _is_valid_hostname(hostname: str) -> bool:
+    """Accept IP literals and DNS/IDNA hostnames, rejecting parser-only hosts."""
+    try:
+        ipaddress.ip_address(hostname)
+        return True
+    except ValueError:
+        pass
+
+    # A dotted numeric host must be a real IPv4 literal rather than a DNS-like
+    # name that a downstream HTTP stack may interpret inconsistently.
+    if all(character.isdigit() or character == "." for character in hostname):
+        return False
+
+    try:
+        ascii_hostname = hostname.encode("idna").decode("ascii")
+    except UnicodeError:
+        return False
+    if ascii_hostname.endswith("."):
+        ascii_hostname = ascii_hostname[:-1]
+    if not ascii_hostname or len(ascii_hostname) > 253:
+        return False
+
+    for label in ascii_hostname.split("."):
+        if not label or len(label) > 63:
+            return False
+        if not label[0].isalnum() or not label[-1].isalnum():
+            return False
+        if any(not (character.isalnum() or character == "-") for character in label):
+            return False
+    return True
+
+
 def _normalize_prefix(prefix: str) -> str:
-    stripped = prefix.strip()
-    if not stripped:
+    if not prefix:
         return ""
-    normalized = stripped.strip("/")
-    if not normalized:
+    if prefix == "/":
         return ""
+
+    forbidden = {"?", "#", "\\", "<", ">"}
+    if any(
+        character in forbidden
+        or ord(character) < 0x20
+        or ord(character) == 0x7F
+        or character.isspace()
+        for character in prefix
+    ):
+        raise XXLJobConfigError(
+            "XXL_JOB_ROUTE_PREFIX must be a static Flask path without "
+            "whitespace, control characters, query syntax, fragments, "
+            "backslashes, or converters."
+        )
+    if "//" in prefix:
+        raise XXLJobConfigError(
+            "XXL_JOB_ROUTE_PREFIX must not contain consecutive slashes."
+        )
+
+    normalized = prefix
+    if normalized.startswith("/"):
+        normalized = normalized[1:]
+    if normalized.endswith("/"):
+        normalized = normalized[:-1]
+    if not normalized or any(
+        segment in {".", ".."} for segment in normalized.split("/")
+    ):
+        raise XXLJobConfigError(
+            "XXL_JOB_ROUTE_PREFIX must be a static path without '.' or '..' "
+            "segments."
+        )
     return "/" + normalized
 
 

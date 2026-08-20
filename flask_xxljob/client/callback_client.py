@@ -13,7 +13,7 @@ from ..config import XXLJobConfig
 from ..exceptions import XXLJobValidationError
 from ..model.callback import CallbackRequest
 from ..model.coerce import ModelParseError, coerce_str
-from . import CallResult, post_to_admins
+from . import ERROR_CONFIG, CallResult, post_to_admins
 from .policy import AdminCallPolicy
 
 # 官方 Admin 回调接口路径 / Official admin callback API path.
@@ -96,6 +96,16 @@ class CallbackClient:
         - If any item is invalid the whole batch is rejected (all-or-nothing);
           no partial data is sent.
         """
+        # enabled is the complete feature switch.  Short-circuit before payload
+        # normalization so disabled Callback APIs can never reach Admin HTTP.
+        if not self._config.enabled:
+            return CallResult(
+                success=False,
+                error="Flask-XXLJob is disabled.",
+                error_type=ERROR_CONFIG,
+                attempt_count=0,
+            )
+
         items = list(requests)
         if not items:
             raise XXLJobValidationError(

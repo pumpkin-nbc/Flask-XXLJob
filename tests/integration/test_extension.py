@@ -134,7 +134,7 @@ def test_route_prefix_applied():
     assert "/exec/run" in rules
 
 
-@pytest.mark.parametrize("prefix", ["/xxl-job", "/xxl-job/", "//xxl-job//"])
+@pytest.mark.parametrize("prefix", ["/xxl-job", "/xxl-job/", "xxl-job"])
 def test_route_prefix_variants_have_no_double_slash(prefix):
     ext = FlaskXXLJob()
     app, _ = make_app(ext, name="pfx_" + str(id(ext)), XXL_JOB_ROUTE_PREFIX=prefix)

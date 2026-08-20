@@ -10,7 +10,7 @@ the constructor.
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `XXL_JOB_ENABLED` | `True` | Enable the extension. |
+| `XXL_JOB_ENABLED` | `True` | Master switch for routes and all Registry, Remove and Callback Admin traffic. |
 | `XXL_JOB_ADMIN_ADDRESSES` | `[]` | List of XXL-JOB admin base URLs. |
 | `XXL_JOB_ACCESS_TOKEN` | `""` | Access token; empty means no-token mode. |
 | `XXL_JOB_EXECUTOR_APP_NAME` | `"flask-xxljob-executor"` | Executor application name. |
@@ -28,7 +28,7 @@ the constructor.
 | `XXL_JOB_ADMIN_RETRY_COUNT` | `0` | Same-address synchronous retries for transient errors (capped). |
 | `XXL_JOB_ADMIN_RETRY_BACKOFF` | `0.0` | Seconds to wait between retries (capped). |
 | `XXL_JOB_ADMIN_FAILOVER_ON_HTTP_ERROR` | `True` | Try the next admin on a non-200 status. |
-| `XXL_JOB_ADMIN_FAILOVER_ON_INVALID_JSON` | `False` | Try the next admin on an invalid JSON response. |
+| `XXL_JOB_ADMIN_FAILOVER_ON_INVALID_JSON` | `False` | Try the next admin on invalid JSON or an invalid response object. |
 | `XXL_JOB_ADMIN_FAILOVER_ON_BUSINESS_ERROR` | `False` | Try the next admin on a business-code failure. |
 | `XXL_JOB_LOG_ENABLED` | `False` | Enable plugin-managed logging. |
 | `XXL_JOB_LOG_FILE_ENABLED` | `True` | Add a rotating-file handler when managed logging is enabled. |
@@ -79,8 +79,9 @@ the executor protocol and the application may call `start_registry(app)` later.
 `stop_registry()` is local-only by default: it wakes and detaches the current
 renewal Worker without joining, accessing Admin, or changing `registered`.
 `stop_registry(remove=True)` validates Registry configuration synchronously,
-then requests one background `registryRemove` for the latest non-zero
-generation's current cleanup responsibility. Successful terminal cleanup is
+then requests one background `registryRemove` for the current cleanup scope.
+That scope can be generation zero after an accepted manual Register, without
+creating a Worker or advancing its generation. Successful terminal cleanup is
 reused by later lifecycle shutdown. A subsequent accepted register can recreate
 the remote identity and open a new cleanup responsibility in the same
 generation. For deterministic removal, use `stop_registry()` and then
@@ -98,13 +99,16 @@ Validation has three layers. Removed keys are detected first, even when
 enabled `start_registry()`, `register_executor()`, `remove_executor()`, or
 `stop_registry(remove=True)` operation. Consequently, an enabled protocol-only
 deployment with `AUTO_REGISTER=False` may omit Admin and executor Registry
-settings. When provided, admin and executor addresses must use
-the `http` or `https` scheme and contain a host and valid port; context paths are
-supported. Addresses are normalized on load (surrounding whitespace and
-redundant trailing slashes are removed while context paths and order are
-preserved). When set, `XXL_JOB_ROUTE_PREFIX` is always appended to
+settings. When enabled, admin and executor addresses must use the `http` or
+`https` scheme and contain a valid hostname/IPv4/IPv6 literal and port; context
+paths are supported. Raw C0/DEL/control and whitespace characters, userinfo,
+query strings and fragments are rejected before URL parsing. Only redundant
+trailing slashes are normalized; surrounding whitespace is never silently
+trimmed. When set, `XXL_JOB_ROUTE_PREFIX` is always appended to
 `XXL_JOB_EXECUTOR_ADDRESS`; do not embed the route prefix in the executor
-address. A whitespace-only access token is normalized to
+address. Root, an optional leading slash and one trailing slash are compatible;
+whitespace/control characters, `?`, `#`, backslash, angle brackets, consecutive
+slashes, Flask converters and `.`/`..` segments are rejected. A whitespace-only access token is normalized to
 empty (no-token mode), while a non-empty token is preserved. Validation messages
 name the offending key, its received type and the expected format. Bad
 configuration is never silently ignored.
@@ -126,8 +130,17 @@ are disabled—the extension does not override the runtime logger's level or
 propagation, allowing the host to configure the `flask_xxljob` logger. See
 [Logging](logging.md).
 
-When `XXL_JOB_ENABLED=False`, Registry lifecycle and one-shot APIs short-circuit
-before full validation, threads, Remove operations, network locks, RPCs, or RPC
-sequence allocation. The synchronous one-shot APIs return a config-failure
-`CallResult` with `error="Flask-XXLJob is disabled."`; they update only the
-current process's safe local failure snapshot and preserve `registered`.
+When `XXL_JOB_ENABLED=False`, no executor Blueprint is registered and Registry,
+Remove and Callback paths short-circuit before threads, network locks, RPCs or
+sequence allocation. The synchronous APIs return a config-failure `CallResult`
+with `error="Flask-XXLJob is disabled."`; lifecycle calls are no-ops. Removed
+keys, local field/container types and logging configuration are still checked,
+but unused URL strings and Route Prefix strings receive no network/Flask-path
+semantic validation. A Callback-only process must instead use
+`XXL_JOB_ENABLED=True` with `XXL_JOB_AUTO_REGISTER=False`.
+
+All Admin POSTs use redirect-disabled requests. HTTP 3xx is handled as an HTTP
+failure without replaying credentials or payloads to the target. A JSON parse
+failure is `invalid_json`; a non-object body, non-integer (or boolean) `code`,
+or non-string/non-`None` `msg` is `invalid_response`. The latter uses the same
+failover setting as invalid JSON, and only integer `code == 200` is successful.

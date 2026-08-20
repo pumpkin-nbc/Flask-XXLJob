@@ -67,17 +67,21 @@ Both are synchronous one-shot Admin operations. They share the current
 process's Registry network lock but do not start or stop a lifecycle or advance
 a lifecycle generation. While a renewal Worker is current, `remove_executor()`
 remains an ordinary one-shot RPC and does not consume lifecycle cleanup state.
-After a non-zero generation has been stopped, the same API participates in
+When no Worker is current, the same API participates in
 terminal Active/Pending ownership so a successful synchronous Remove can be
 reused by shutdown instead of being sent twice. A failed call preserves the
 existing `registered` snapshot. When the extension is disabled, both return a
 local config-failure `CallResult` without an Admin RPC.
 
-For a live non-zero generation, an explicit `register_executor()` joins the
+An explicit `register_executor()` joins the
 generation's still-open Register Coordination before waiting for the network
 lock. If lifecycle cleanup then linearizes, shutdown remains non-blocking and
 defers its Remove until those already-participating calls complete. Calls that
 begin after the window closes retain the existing one-shot API semantics.
+This also applies to generation zero: accepted manual registration creates a
+cleanup responsibility without creating a Worker, advancing generation or
+starting renewal. Exit cleanup can remove it once, and that cached result never
+satisfies a later generation-one Worker lifecycle.
 
 A real one-shot Register completion is accepted solely by strict sequence and
 the captured ProcessState identity. Generation or Coordination changes do not
@@ -99,6 +103,9 @@ xxl_job.callback_many(callbacks, app=None)   # list of CallbackRequest or dict
 `callback_many` validates every item before sending, never auto-splits, and
 rejects the whole batch (sending nothing) if any item is invalid or the count
 exceeds `XXL_JOB_CALLBACK_BATCH_MAX_SIZE`.
+When `XXL_JOB_ENABLED=False`, all four callback forms return the existing local
+disabled result without Admin HTTP. A Callback-only process uses
+`ENABLED=True`, `AUTO_REGISTER=False`.
 
 ### Status and lifecycle
 
@@ -181,11 +188,17 @@ result.address        # admin address that produced the result
 result.admin_address  # alias of address
 result.error          # local error string (never contains the token)
 result.error_type     # None | 'network' | 'timeout' | 'http'
-                      #      | 'invalid_json' | 'business' | 'config'
+                      #      | 'invalid_json' | 'invalid_response'
+                      #      | 'business' | 'config'
 result.attempt_count  # total HTTP attempts made
 result.elapsed_ms     # total elapsed milliseconds
 result.http_status    # last HTTP status code, if any
 ```
+
+`invalid_json` means parsing failed. `invalid_response` means the parsed body
+was not an object or had an invalid `code`/`msg` type. The constant is available
+as `flask_xxljob.client.ERROR_INVALID_RESPONSE`; it is intentionally not a
+top-level `flask_xxljob` export. Admin POST requests do not follow redirects.
 
 ## `XXLJobStatus`
 
