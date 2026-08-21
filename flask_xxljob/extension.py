@@ -591,19 +591,34 @@ class FlaskXXLJob:
         """
         向 XXL-JOB Admin 发送任务最终执行结果回调。
 
-        在 Flask 应用上下文中可省略 ``app`` 参数。``handle_msg`` 为 ``None`` 时
-        按空信息处理。``log_id`` 与 ``log_date_time`` 必须为整数（不接受布尔值）。
+        目标应用 Runtime 会先被解析；未初始化、无可解析应用及多应用歧义等错误
+        仍按现有规则抛出。仅当 Runtime 成功解析且 disabled 时，才会在 Callback
+        负载校验和规范化前返回本地 disabled 结果。
+
+        enabled 时沿用既有参数契约。在 Flask 应用上下文中可省略 ``app`` 参数；
+        ``handle_msg`` 为 ``None`` 时按空信息处理，字符串按配置截断；``log_id``、
+        ``log_date_time`` 与 ``handle_code`` 必须为整数（不接受布尔值）。
 
         Send the final task-execution result callback to the XXL-JOB admin.
 
-        The ``app`` argument may be omitted inside a Flask application context.
-        A ``None`` ``handle_msg`` is treated as an empty message. ``log_id`` and
-        ``log_date_time`` must be integers (booleans are rejected).
+        The target application Runtime is resolved first; uninitialized, missing,
+        and ambiguous application errors remain visible. Only a successfully
+        resolved disabled Runtime returns the local disabled result before Callback
+        payload validation and normalization.
+
+        Enabled runtimes retain the existing argument contract. The ``app`` argument
+        may be omitted inside a Flask application context. A ``None`` ``handle_msg``
+        is treated as an empty message, strings are truncated per configuration, and
+        ``log_id``, ``log_date_time`` and ``handle_code`` must be integers (booleans
+        are rejected).
         """
-        _require_int("log_id", log_id)
-        _require_int("log_date_time", log_date_time)
-        _require_int("handle_code", handle_code)
         runtime = self._get_runtime(app)
+        # 先解析目标 Runtime，确保 disabled 只跳过负载解释，不吞掉应用解析错误。
+        # Resolve Runtime first so disabled skips only payload work, not app errors.
+        if runtime.config.enabled:
+            _require_int("log_id", log_id)
+            _require_int("log_date_time", log_date_time)
+            _require_int("handle_code", handle_code)
         return runtime.callback_client.callback(
             log_id=log_id,
             log_date_time=log_date_time,
@@ -621,7 +636,14 @@ class FlaskXXLJob:
         """
         发送任务成功回调（``handle_code=200``）。
 
+        本方法直接委托 :meth:`callback`，因此沿用其 Runtime 优先解析、disabled
+        负载短路和 enabled 参数处理语义。
+
         Send a task-success callback (``handle_code=200``).
+
+        This method delegates directly to :meth:`callback`, inheriting its
+        Runtime-first resolution, disabled payload short-circuit, and enabled
+        argument behavior.
         """
         return self.callback(
             log_id=log_id,
@@ -641,7 +663,14 @@ class FlaskXXLJob:
         """
         发送任务失败回调（``handle_code=500``）。
 
+        本方法直接委托 :meth:`callback`，因此沿用其 Runtime 优先解析、disabled
+        负载短路和 enabled 参数处理语义。
+
         Send a task-failure callback (``handle_code=500``).
+
+        This method delegates directly to :meth:`callback`, inheriting its
+        Runtime-first resolution, disabled payload short-circuit, and enabled
+        argument behavior.
         """
         return self.callback(
             log_id=log_id,
@@ -659,14 +688,19 @@ class FlaskXXLJob:
         """
         在一次官方请求中批量发送多条任务结果回调。
 
-        发送前会完整校验所有条目，超过批量上限或存在非法条目时抛出异常且不发送任何
-        数据（全有或全无）。在 Flask 应用上下文中可省略 ``app`` 参数。
+        目标应用 Runtime 会先被解析，应用解析错误仍按现有规则抛出。Runtime
+        disabled 时会在复制、长度检查、遍历和规范化批量负载前返回本地结果；enabled
+        时才完整校验所有条目，超过批量上限或存在非法条目时抛出异常且不发送任何数据
+        （全有或全无）。在 Flask 应用上下文中可省略 ``app`` 参数。
 
         Send multiple task-result callbacks in a single official request.
 
-        All items are validated before sending; exceeding the batch limit or an
-        invalid item raises without sending any data (all-or-nothing). The
-        ``app`` argument may be omitted inside a Flask application context.
+        The target application Runtime is resolved first, so application-resolution
+        errors remain visible. A disabled Runtime returns locally before the batch is
+        copied, length-checked, iterated, or normalized. Enabled runtimes validate all
+        items before sending; exceeding the batch limit or an invalid item raises
+        without sending any data (all-or-nothing). The ``app`` argument may be omitted
+        inside a Flask application context.
         """
         return self._get_runtime(app).callback_client.callback_many(callbacks)
 

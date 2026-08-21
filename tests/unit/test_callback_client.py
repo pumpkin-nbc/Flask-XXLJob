@@ -120,7 +120,7 @@ def test_callback_uses_configured_timeout(mocker):
     assert post.call_args.kwargs["timeout"] == (2, 7)
 
 
-def test_disabled_callback_client_returns_without_validation_or_http(mocker):
+def test_disabled_callback_client_returns_without_payload_work_or_http(mocker):
     post = mocker.patch("flask_xxljob.client.requests.post")
     client = CallbackClient(
         make_config(
@@ -129,12 +129,28 @@ def test_disabled_callback_client_returns_without_validation_or_http(mocker):
             XXL_JOB_EXECUTOR_ADDRESS="not a URL",
         )
     )
+    request_model = mocker.patch(
+        "flask_xxljob.client.callback_client.CallbackRequest"
+    )
+    normalize = mocker.spy(client, "_normalize_item")
 
-    one = client.callback(1, 2, 200, "ok")
-    many = client.callback_many([{"not": "validated while disabled"}])
+    class ExplodingSequence:
+        def __iter__(self):
+            raise AssertionError("disabled callback_many must not iterate")
 
+        def __len__(self):
+            raise AssertionError("disabled callback_many must not inspect length")
+
+    one = client.callback(True, None, False, {"not": "normalized"})
+    many = client.callback_many(ExplodingSequence())
+
+    assert one == many
+    assert one.success is False
+    assert one.error == "Flask-XXLJob is disabled."
     assert one.error_type == many.error_type == "config"
     assert one.attempt_count == many.attempt_count == 0
+    request_model.assert_not_called()
+    normalize.assert_not_called()
     post.assert_not_called()
 
 

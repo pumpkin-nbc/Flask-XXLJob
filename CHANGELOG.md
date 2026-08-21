@@ -80,6 +80,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - User callback and unexpected internal exceptions retain full local
   tracebacks, while expected network/HTTP/remote failures remain concise
   `CallResult` events and protocol responses remain generic.
+- All four public Callback forms now resolve their target Runtime before the
+  disabled check, then return one shared disabled `CallResult` before payload
+  construction, validation or iteration. Application-resolution errors and all
+  enabled payload validation/conversion behavior remain unchanged.
 - The build backend remains capped below Hatchling 1.32 so current Twine can
   validate Core Metadata 2.4 artifacts.
 - Admin/executor URLs now reject raw C0/DEL/whitespace, userinfo, query,
@@ -118,8 +122,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   new wheel and sdist (including file-only RECORD mappings and authoritative
   top-level PKG-INFO), reject development/signature files, and run a
   source-isolated installed-wheel smoke test with `pip check`.
-- The final local suite completed with 616 passed, 2 optional official-Admin
-  tests skipped, and 92.04% line coverage. It covers the total disabled switch,
+- The final local suite completed with 632 passed, 2 optional official-Admin
+  tests skipped, and 92.22% line coverage. It covers the total disabled switch,
   strict URLs/Admin responses, generation-zero cleanup and transitions,
   PID/generation ownership, Remove races, strict completion sequences, Prepared
   ownership, identity-safe pre-commit cleanup and one-time log closure.

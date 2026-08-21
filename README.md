@@ -132,6 +132,10 @@ are not registered and Registry, Remove and Callback calls perform no Admin
 HTTP. The local Runtime, status and CLI remain available, and synchronous APIs
 return the existing disabled `CallResult`. Use `XXL_JOB_ENABLED=True` with
 `XXL_JOB_AUTO_REGISTER=False` when a process needs Callback but not renewal.
+Callback APIs still resolve the target application Runtime first; once that
+Runtime is disabled they return before validating, normalizing or iterating the
+business payload. Application-resolution and initialization errors remain
+visible, and enabled Callback validation is unchanged.
 Disabled initialization still validates local field types and logging, but does
 not interpret unused Admin/executor URL strings or Route Prefix path syntax.
 

@@ -104,8 +104,11 @@ xxl_job.callback_many(callbacks, app=None)   # list of CallbackRequest or dict
 rejects the whole batch (sending nothing) if any item is invalid or the count
 exceeds `XXL_JOB_CALLBACK_BATCH_MAX_SIZE`.
 When `XXL_JOB_ENABLED=False`, all four callback forms return the existing local
-disabled result without Admin HTTP. A Callback-only process uses
-`ENABLED=True`, `AUTO_REGISTER=False`.
+disabled result without Admin HTTP. The target Runtime is resolved first, so an
+uninitialized app or ambiguous multi-app call still raises its existing error.
+After a disabled Runtime is found, no callback payload is validated, normalized
+or iterated. Enabled validation, `handle_msg=None` conversion and truncation are
+unchanged. A Callback-only process uses `ENABLED=True`, `AUTO_REGISTER=False`.
 
 ### Status and lifecycle
 

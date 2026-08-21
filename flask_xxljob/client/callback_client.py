@@ -55,15 +55,22 @@ class CallbackClient:
         """
         发送一次任务结果回调。
 
-        官方 ``/api/callback`` 接收 ``HandleCallbackParam`` 数组，因此这里以
-        单元素数组发送。``handle_msg`` 会被截断到配置的最大长度。
+        disabled 时在构造或规范化 Callback 负载前返回统一的本地结果。enabled
+        时，官方 ``/api/callback`` 接收 ``HandleCallbackParam`` 数组，因此这里以
+        单元素数组发送；``handle_msg`` 会被截断到配置的最大长度。
 
         Send a single task-result callback.
 
-        The official ``/api/callback`` accepts an array of
-        ``HandleCallbackParam``, so a single-element array is sent here.
-        ``handle_msg`` is truncated to the configured maximum length.
+        When disabled, return the shared local result before constructing or
+        normalizing a Callback payload. When enabled, the official ``/api/callback``
+        accepts an array of ``HandleCallbackParam``, so a single-element array is
+        sent; ``handle_msg`` is truncated to the configured maximum length.
         """
+        # Client 直调也须与公开 API 一致：disabled 时不构造或规范化业务负载。
+        # Direct Client calls match the public API: disabled skips payload work.
+        if not self._config.enabled:
+            return self._disabled_result()
+
         request = CallbackRequest(
             log_id=log_id,
             log_date_time=log_date_time,
@@ -76,6 +83,9 @@ class CallbackClient:
         """
         在一次官方请求中批量发送多条任务结果回调。
 
+        disabled 时在复制序列、检查长度、遍历条目和规范化负载前返回统一的本地结果。
+        enabled 时沿用以下行为：
+
         - 发送前完整校验每一条：必须是 :class:`CallbackRequest` 或可转换的字典；
           ``log_id``/``log_date_time``/``handle_code`` 必须为整数（拒绝布尔值）；
           每条 ``handle_msg`` 按配置截断（Unicode 安全）。
@@ -84,6 +94,10 @@ class CallbackClient:
         - 任一条目非法即整体拒绝（全有或全无），不会发送部分数据。
 
         Send multiple task-result callbacks in a single official request.
+
+        When disabled, return the shared local result before copying the sequence,
+        checking its length, iterating its items, or normalizing the payload. When
+        enabled, retain the following behavior:
 
         - Every item is fully validated before sending: it must be a
           :class:`CallbackRequest` or a coercible mapping; ``log_id``,
@@ -96,15 +110,10 @@ class CallbackClient:
         - If any item is invalid the whole batch is rejected (all-or-nothing);
           no partial data is sent.
         """
-        # enabled is the complete feature switch.  Short-circuit before payload
-        # normalization so disabled Callback APIs can never reach Admin HTTP.
+        # disabled 是总开关：在检查批量负载前返回，确保不会触发 Admin HTTP。
+        # Disabled returns before batch inspection, so Admin HTTP cannot be reached.
         if not self._config.enabled:
-            return CallResult(
-                success=False,
-                error="Flask-XXLJob is disabled.",
-                error_type=ERROR_CONFIG,
-                attempt_count=0,
-            )
+            return self._disabled_result()
 
         items = list(requests)
         if not items:
@@ -152,6 +161,16 @@ class CallbackClient:
                     result.http_status,
                 )
         return result
+
+    @staticmethod
+    def _disabled_result() -> CallResult:
+        """返回禁用回调共用的本地结果。 / Return the shared disabled result."""
+        return CallResult(
+            success=False,
+            error="Flask-XXLJob is disabled.",
+            error_type=ERROR_CONFIG,
+            attempt_count=0,
+        )
 
     def _normalize_item(self, index: int, item: CallbackLike) -> CallbackRequest:
         if isinstance(item, CallbackRequest):

@@ -128,6 +128,9 @@ with app.app_context():
 既有 disabled `CallResult`。只需要 Callback 而不需要续约的进程应使用
 `XXL_JOB_ENABLED=True` 与 `XXL_JOB_AUTO_REGISTER=False`。disabled 初始化仍校验本地
 字段类型和日志，但不会解释不会使用的 Admin/执行器 URL 字符串或 Route Prefix 路径语义。
+Callback API 仍会先解析目标应用 Runtime；目标 Runtime disabled 后，才会在校验、
+规范化或遍历业务负载前直接返回。应用解析和未初始化错误不会被吞掉，enabled Callback
+的既有参数校验也不改变。
 
 enabled 时，Admin 与非空执行器 URL 会拒绝空白、控制字符、userinfo、query、fragment
 及非法主机/端口，只允许 HTTP/HTTPS。Route Prefix 兼容根路径、可选前导斜杠和单个

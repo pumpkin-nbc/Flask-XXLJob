@@ -91,7 +91,10 @@ xxl_job.callback_many(callbacks, app=None)   # CallbackRequest 或 dict 的列�
 `callback_many` 发送前会校验每一条，绝不自动拆分；任一条目非法或数量超过
 `XXL_JOB_CALLBACK_BATCH_MAX_SIZE` 时整体拒绝且不发送任何数据。
 `XXL_JOB_ENABLED=False` 时四种 Callback 都返回既有本地 disabled 结果，不发送 Admin
-HTTP。只需要 Callback 的进程使用 `ENABLED=True`、`AUTO_REGISTER=False`。
+HTTP。调用仍先解析目标 Runtime，所以未初始化 app 或多应用歧义继续抛既有错误；确认
+目标 Runtime disabled 后，不再校验、规范化或遍历 Callback 业务负载。enabled 下的
+既有校验、`handle_msg=None` 转换和截断规则不变。只需要 Callback 的进程使用
+`ENABLED=True`、`AUTO_REGISTER=False`。
 
 ### 状态与生命周期
 

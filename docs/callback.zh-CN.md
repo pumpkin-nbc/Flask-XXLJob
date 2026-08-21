@@ -81,8 +81,11 @@ with app.app_context():
 默认情况下业务失败不会重复发送到其他 Admin。
 
 `XXL_JOB_ENABLED=False` 是完整功能总开关，四种公共 Callback 都返回本地 disabled
-`CallResult` 且不发送 Admin HTTP。只需要 Callback、不维护 Registry 续约的进程应使用
-`XXL_JOB_ENABLED=True` 与 `XXL_JOB_AUTO_REGISTER=False`。
+`CallResult` 且不发送 Admin HTTP。调用仍先解析目标应用 Runtime，因此未初始化和多应用
+歧义继续报错；确认该 Runtime disabled 后，不再校验、规范化、复制或遍历 Callback
+负载。enabled 下的消息转换、校验与截断规则完全保持原样。只需要 Callback、不维护
+Registry 续约的进程应使用 `XXL_JOB_ENABLED=True` 与
+`XXL_JOB_AUTO_REGISTER=False`。
 
 ## 长任务（Celery 等）
 

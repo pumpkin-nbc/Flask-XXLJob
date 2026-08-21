@@ -97,6 +97,11 @@ re-sent to another admin.
 
 `XXL_JOB_ENABLED=False` is the complete feature switch. All four public
 callback forms return the local disabled `CallResult` and send no Admin HTTP.
+They still resolve the target application Runtime first; missing initialization
+and ambiguous multi-app selection therefore remain errors. Once that Runtime is
+known to be disabled, the callback body is not validated, normalized, copied or
+iterated. Enabled message conversion, validation and truncation remain exactly
+as before.
 Use `XXL_JOB_ENABLED=True` with `XXL_JOB_AUTO_REGISTER=False` for a process that
 needs callbacks but should not maintain Registry renewal.
 

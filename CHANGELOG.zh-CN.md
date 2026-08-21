@@ -60,6 +60,9 @@
   失败，Worker 仍保持停止。低层 `remove_executor()` 行为不变。
 - 用户回调与包内未预期异常会保留完整本地 traceback；预期网络/HTTP/远端失败仍是
   简洁 `CallResult` 事件，协议响应继续使用通用错误。
+- 四种公开 Callback 现在都会先解析目标 Runtime，再判断 disabled；确认 disabled 后，
+  会在业务负载构造、校验或遍历前返回同一来源的 `CallResult`。应用解析错误以及 enabled
+  下既有的负载校验、转换行为均保持不变。
 - 构建后端继续限制在 Hatchling 1.32 以下，使当前 Twine 可以校验 Core Metadata 2.4。
 - Admin/执行器 URL 现在拒绝原始 C0/DEL/空白、userinfo、query、fragment 与非法
   主机/端口；静态 Route Prefix 拒绝 converter、点段、百分号编码和有歧义的 URL
@@ -92,7 +95,7 @@
 - 发布检查改为在干净临时目录构建，只验证本轮新 wheel/sdist（包括仅针对文件成员的
   RECORD 映射与标准顶层 PKG-INFO），拒绝开发/签名文件，并在 `pip check` 后执行与
   源码隔离的安装后冒烟。
-- 最终本地测试为 616 项通过、2 项可选官方 Admin 测试跳过，行覆盖率 92.04%。覆盖
+- 最终本地测试为 632 项通过、2 项可选官方 Admin 测试跳过，行覆盖率 92.22%。覆盖
   disabled 总开关、严格 URL/Admin 响应、generation 0 清理与转换、PID/generation
   ownership、Remove 竞态、严格 completion sequence、Prepared ownership、
   identity-safe 提交前资源收尾与日志恰好关闭一次。
