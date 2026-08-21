@@ -25,8 +25,11 @@ Flask-XXLJob 是 Flask 与 XXL-JOB 2.4.1 之间的**协议适配插件**。它�
 .venv\Scripts\python.exe -m mypy flask_xxljob
 .venv\Scripts\python.exe -m pytest
 .venv\Scripts\python.exe scripts\check_docs.py
-.venv\Scripts\python.exe scripts\check_package.py
+.venv\Scripts\python.exe scripts\check_package.py --dist-dir <clean-build-dir>
 ```
+
+制品检查前请构建到新的空目录，不要复用 `dist/` 中的历史文件。安装后 Wheel 冒烟所需
+独立临时虚拟环境是上述开发环境规则的发布验证例外。详见[发布](docs/publishing.zh-CN.md)。
 
 ## 文档
 

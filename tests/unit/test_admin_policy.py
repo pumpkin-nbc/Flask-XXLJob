@@ -7,6 +7,7 @@ import requests
 from flask_xxljob.client import (
     ERROR_BUSINESS,
     ERROR_INVALID_JSON,
+    ERROR_INVALID_RESPONSE,
     ERROR_TIMEOUT,
     post_to_admins,
 )
@@ -133,6 +134,48 @@ def test_non_object_json_failover_when_enabled(mocker):
     )
     assert result.success is True
     assert result.address == "http://b:8080"
+    assert post.call_count == 2
+
+
+def test_invalid_response_no_failover_by_default(mocker):
+    invalid = FakeResponse()
+    invalid.json = lambda: {"code": "200", "msg": "bad"}
+    post = mocker.patch(
+        "flask_xxljob.client.requests.post",
+        side_effect=[invalid, FakeResponse(code=200)],
+    )
+
+    result = post_to_admins(
+        ["http://a:8080", "http://b:8080"],
+        "/api/registry",
+        {},
+        "",
+        (3, 5),
+        policy=AdminCallPolicy(),
+    )
+
+    assert result.error_type == ERROR_INVALID_RESPONSE
+    assert post.call_count == 1
+
+
+def test_invalid_response_reuses_invalid_json_failover(mocker):
+    invalid = FakeResponse()
+    invalid.json = lambda: {"code": 200, "msg": []}
+    post = mocker.patch(
+        "flask_xxljob.client.requests.post",
+        side_effect=[invalid, FakeResponse(code=200)],
+    )
+
+    result = post_to_admins(
+        ["http://a:8080", "http://b:8080"],
+        "/api/registry",
+        {},
+        "",
+        (3, 5),
+        policy=AdminCallPolicy(failover_on_invalid_json=True),
+    )
+
+    assert result.success is True
     assert post.call_count == 2
 
 

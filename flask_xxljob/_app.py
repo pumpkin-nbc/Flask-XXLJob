@@ -37,6 +37,15 @@ def ensure_executor_routes_available(app: Flask, route_prefix: str) -> None:
         )
 
 
+def ensure_blueprint_name_available(app: Flask, name: str) -> None:
+    """Fail before commit when the executor Blueprint name is already used."""
+    if name in app.blueprints:
+        raise XXLJobInitializationError(
+            "Flask-XXLJob blueprint name conflict: "
+            f"{name}. Remove the host blueprint with that name before init_app()."
+        )
+
+
 class ApplicationRegistry:
     """Track initialized applications without retaining them indefinitely."""
 
@@ -47,6 +56,11 @@ class ApplicationRegistry:
     def add(self, app: Flask) -> None:
         with self._lock:
             self._apps.add(app)
+
+    def discard(self, app: Flask) -> None:
+        """Forget an application if it is currently tracked."""
+        with self._lock:
+            self._apps.discard(app)
 
     def snapshot(self) -> Iterable[Flask]:
         with self._lock:

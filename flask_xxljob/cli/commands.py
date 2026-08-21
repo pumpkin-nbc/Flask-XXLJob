@@ -89,6 +89,13 @@ def _status_failed(status: XXLJobStatus) -> bool:
     return status.last_registry_success is False
 
 
+def _remove_runtime(runtime: Any) -> Any:
+    """Stop renewal before the CLI performs its synchronous Remove."""
+    service = runtime.registry_service
+    service.stop()
+    return service.remove_once_result()
+
+
 @click.group(name="xxljob")
 def xxljob_cli() -> None:
     """XXL-JOB 执行器管理命令。 / XXL-JOB executor management commands."""
@@ -112,7 +119,7 @@ def register_command() -> None:
 @with_appcontext
 def remove_command() -> None:
     """从 XXL-JOB Admin 注销执行器。 / Deregister the executor from the admin."""
-    result = _runtime().registry_service.remove_once_result()
+    result = _remove_runtime(_runtime())
     if result.success:
         click.echo(f"Executor removed successfully via {result.address}.")
     else:
@@ -163,7 +170,7 @@ def _run_standalone(ctx: click.Context, action: str) -> None:
             result = runtime.registry_service.register_once_result()
             verb = "registered"
         else:
-            result = runtime.registry_service.remove_once_result()
+            result = _remove_runtime(runtime)
             verb = "removed"
 
     if result.success:

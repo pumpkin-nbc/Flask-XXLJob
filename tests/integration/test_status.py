@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import fields
+
 import pytest
 
 from flask_xxljob import FlaskXXLJob, XXLJobStatus
@@ -33,6 +35,25 @@ def test_initial_status():
     assert status.log_file_enabled is False
     assert status.log_console_enabled is False
     assert status.log_file is None
+
+
+def test_public_status_fields_remain_unchanged():
+    assert [item.name for item in fields(XXLJobStatus)] == [
+        "enabled",
+        "auto_register",
+        "registered",
+        "last_registry_time",
+        "last_registry_success",
+        "last_registry_admin_address",
+        "last_registry_error_type",
+        "last_registry_message",
+        "registry_thread_running",
+        "log_enabled",
+        "log_level",
+        "log_file_enabled",
+        "log_console_enabled",
+        "log_file",
+    ]
 
 
 def test_logging_status_reports_effective_outputs(tmp_path):
@@ -145,4 +166,14 @@ def test_start_stop_registry(mocker):
     ext.start_registry(app)
     ext.stop_registry(app)
     start.assert_called_once()
-    stop.assert_called_once()
+    stop.assert_called_once_with(remove=False)
+
+
+def test_stop_registry_can_keep_shared_executor_registration(mocker):
+    ext = FlaskXXLJob()
+    app, _ = make_app(ext)
+    stop = mocker.patch.object(app.extensions["xxljob"].registry_service, "stop")
+
+    ext.stop_registry(app, remove=False)
+
+    stop.assert_called_once_with(remove=False)

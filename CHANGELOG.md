@@ -7,6 +7,127 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-08-16
+
+### Changed
+
+- Consolidated PID isolation, lifecycle generations, current/stopping Worker
+  ownership, Pending/Active Remove, cleanup scheduling, RPC ordering and final
+  log closure in `RegistryService`.
+- Automatic startup still has one condition (`XXL_JOB_ENABLED &&
+  XXL_JOB_AUTO_REGISTER`), but now starts an activation-gated Prepared Thread
+  before Flask commit. Only its creating call may commit the generation/Worker
+  and wake it after commit; the Prepared stage performs no Admin RPC.
+- Runtime finalizer creation is also prepared before Flask commit as a private,
+  detachable handle. It publishes no Flask/application-registry state, and a
+  failed initialization detaches it without invoking Runtime shutdown or Admin.
+- `stop_registry(remove=False)` is now the default: it detaches and wakes local
+  renewal immediately without joining, contacting Admin, or changing the
+  latest `registered` snapshot. `remove=True` schedules one background Remove
+  for the current cleanup responsibility.
+- All real Registry RPCs in one process share one network lock. Completions use
+  strictly increasing sequences so a late older success or failure cannot
+  overwrite newer accepted state.
+- PID changes replace only blank process-specific Registry state before any
+  inherited Lock, Thread, or Event is touched; application Runtime, handlers,
+  callbacks, routes, configuration and the resource-free AdminClient remain.
+- Runtime finalization is non-blocking. Exit removal is best-effort, uses the
+  same generation eligibility and scheduler, and managed logs close once after
+  all background cleanup is idle.
+- Terminal Remove is now idempotent by generation cleanup responsibility.
+  Successful synchronous, Worker or cleanup-actor removal is reused by later
+  lifecycle shutdown. An accepted same-generation register reopens a new
+  responsibility, with one Active and at most one Pending fallback resolving
+  the real RPC order without retrying failed removals.
+- Active Remove completion acceptance remains based only on strict sequence,
+  ProcessState identity and Active identity. Exact generation and current
+  Worker state are checked separately when recording cleanup satisfaction, so
+  a new generation still waits for and correctly orders behind an older Active
+  Remove.
+- Explicit one-shot Register calls now join the current generation's
+  open coordination window before waiting for the Registry network lock.
+  Lifecycle cleanup closes that window without blocking and defers Remove until
+  all earlier participants finish. Register RPC completion remains ordered only
+  by strict sequence and ProcessState identity; generation and Coordination
+  ownership separately guard cleanup-responsibility changes.
+- Generation zero is now a manual cleanup scope. An accepted explicit Register
+  creates exit-cleanup responsibility without creating a Worker, advancing the
+  Worker generation or starting renewal. Successful/failed explicit Remove and
+  shutdown reuse the existing Active/Pending ownership, while generation-zero
+  cache never satisfies generation one.
+- `init_app()` now completes a side-effect-free deterministic preflight,
+  including route, Blueprint and CLI-name conflicts, before creating managed
+  resources. Commit failures remove only CLI, extension and application records
+  still owned by that initialization; Flask private route/hook structures are
+  not treated as a general rollback surface.
+- Protocol routes and the routing-error hook are constructed on an unregistered
+  Blueprint. Reversible CLI, extension, application-registry and finalizer
+  ownership is published first; Blueprint registration is the final irreversible
+  commit before Prepared creator activation. Once the exact Blueprint object
+  from this initialization is accepted by the app, later activation failures
+  preserve its Runtime and lifecycle ownership instead of leaving live routes
+  without extension state.
+- A Prepared `Thread.start()` failure now leaves Flask uncommitted, closes the
+  initialization's private managed handlers/resources, preserves the original
+  error and permits retry on the same app/extension instance. Creator-only
+  activation and identity-safe cancellation prevent a concurrent start or
+  stale cancel from taking over or stopping a committed Worker. Any Worker
+  committed before a stop still crosses the formal `try/finally` cleanup
+  boundary even when it sends zero Registry RPCs.
+- Flask and standalone CLI `remove` commands now stop local renewal before the
+  synchronous Remove. The Worker stays stopped even when Admin removal fails;
+  the low-level `remove_executor()` behavior is unchanged.
+- User callback and unexpected internal exceptions retain full local
+  tracebacks, while expected network/HTTP/remote failures remain concise
+  `CallResult` events and protocol responses remain generic.
+- All four public Callback forms now resolve their target Runtime before the
+  disabled check, then return one shared disabled `CallResult` before payload
+  construction, validation or iteration. Application-resolution errors and all
+  enabled payload validation/conversion behavior remain unchanged.
+- The build backend remains capped below Hatchling 1.32 so current Twine can
+  validate Core Metadata 2.4 artifacts.
+- Admin/executor URLs now reject raw C0/DEL/whitespace, userinfo, query,
+  fragment and invalid host/port input; static Route Prefix validation rejects
+  converters, dot segments, percent encoding and ambiguous URL syntax. Admin
+  POST never follows redirects. Invalid JSON structure is classified separately as
+  `invalid_response` (exported from `flask_xxljob.client`) and reuses the
+  invalid-JSON failover option.
+
+### Configuration
+
+- Removed the unreleased `XXL_JOB_AUTO_REGISTER_ON_INIT` key. Its presence is a
+  synchronous migration error, including when the extension is disabled.
+- Changed `XXL_JOB_DEREGISTER_ON_EXIT` to default to `False` so one worker does
+  not automatically remove a shared executor identity.
+- Split initialization field validation from full Registry completeness.
+  `AUTO_REGISTER=False` can initialize the HTTP protocol without Admin Registry
+  settings; enabled Registry operations validate before threads or RPCs.
+- `XXL_JOB_ENABLED=False` is the complete feature switch: no executor Blueprint
+  is registered and Registry, Remove and Callback paths perform no Admin HTTP.
+  Local Runtime/status/CLI and basic type/log validation remain; unused network
+  URL and Route Prefix strings are not semantically interpreted. Callback-only
+  processes use `ENABLED=True`, `AUTO_REGISTER=False`.
+
+### Compatibility
+
+- When enabled, the task protocol, Handler and Callback APIs, five executor endpoints, Admin
+  Registry protocol, renewal interval, `XXLJobStatus` fields, public imports,
+  Python 3.8-3.14 and Flask 1.x-3.x support remain unchanged.
+- Multi-worker topology remains process-per-Registry-Worker. No leader election,
+  cross-process lock, signal handler, or deployment detection was added.
+
+### Testing
+
+- Release checks now build into a clean temporary directory, validate the one
+  new wheel and sdist (including file-only RECORD mappings and authoritative
+  top-level PKG-INFO), reject development/signature files, and run a
+  source-isolated installed-wheel smoke test with `pip check`.
+- The final local suite completed with 632 passed, 2 optional official-Admin
+  tests skipped, and 92.22% line coverage. It covers the total disabled switch,
+  strict URLs/Admin responses, generation-zero cleanup and transitions,
+  PID/generation ownership, Remove races, strict completion sequences, Prepared
+  ownership, identity-safe pre-commit cleanup and one-time log closure.
+
 ## [0.3.4] - 2026-07-25
 
 ### Changed

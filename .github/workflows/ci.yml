@@ -5,6 +5,9 @@ on:
     branches: [develop, master]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -20,6 +23,7 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    name: py${{ matrix.python-version }} / Flask ${{ matrix.flask-version }}.x
     strategy:
       fail-fast: false
       matrix:
@@ -79,12 +83,73 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: pip install build twine
       - run: python scripts/check_docs.py
-      - run: python -m build
-      - run: python -m twine check dist/*
-      - run: python scripts/check_package.py
-      - run: python -m pip install --force-reinstall dist/*.whl
-      - name: Smoke-test installed wheel
+      - name: Build fresh 0.4.0 artifacts
+        env:
+          BUILD_DIR: ${{ runner.temp }}/flask-xxljob-dist
         run: |
-          cd "${RUNNER_TEMP}"
-          python -c "import flask_xxljob; from importlib.metadata import version; assert flask_xxljob.__version__ == version('flask-xxljob') == '0.3.4'"
-          flask-xxljob --version
+          rm -rf "${BUILD_DIR}"
+          mkdir -p "${BUILD_DIR}"
+          python -m build --outdir "${BUILD_DIR}"
+      - name: Check fresh artifacts
+        env:
+          BUILD_DIR: ${{ runner.temp }}/flask-xxljob-dist
+        run: |
+          python -m twine check \
+            "${BUILD_DIR}/flask_xxljob-0.4.0-py3-none-any.whl" \
+            "${BUILD_DIR}/flask_xxljob-0.4.0.tar.gz"
+          python scripts/check_package.py --dist-dir "${BUILD_DIR}"
+      - name: Smoke-test isolated installed wheel
+        env:
+          BUILD_DIR: ${{ runner.temp }}/flask-xxljob-dist
+          SMOKE_VENV: ${{ runner.temp }}/flask-xxljob-smoke-venv
+          SMOKE_WORK: ${{ runner.temp }}/flask-xxljob-smoke-work
+        run: |
+          rm -rf "${SMOKE_VENV}" "${SMOKE_WORK}"
+          python -m venv "${SMOKE_VENV}"
+          "${SMOKE_VENV}/bin/python" -m pip install --upgrade pip
+          "${SMOKE_VENV}/bin/python" -m pip install \
+            "${BUILD_DIR}/flask_xxljob-0.4.0-py3-none-any.whl"
+          "${SMOKE_VENV}/bin/python" -m pip check
+          mkdir -p "${SMOKE_WORK}"
+          cp scripts/smoke_installed_wheel.py "${SMOKE_WORK}/smoke_installed_wheel.py"
+          cd "${SMOKE_WORK}"
+          unset PYTHONPATH
+          export PYTHONNOUSERSITE=1
+          "${SMOKE_VENV}/bin/python" smoke_installed_wheel.py \
+            --source-root "${GITHUB_WORKSPACE}"
+
+  required-ci:
+    name: Required CI
+    if: always()
+    needs:
+      - lint
+      - test
+      - coverage
+      - package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every CI job to pass
+        env:
+          LINT_RESULT: ${{ needs.lint.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+          COVERAGE_RESULT: ${{ needs.coverage.result }}
+          PACKAGE_RESULT: ${{ needs.package.result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          results=(
+            "lint=${LINT_RESULT}"
+            "test=${TEST_RESULT}"
+            "coverage=${COVERAGE_RESULT}"
+            "package=${PACKAGE_RESULT}"
+          )
+
+          for entry in "${results[@]}"; do
+            job="${entry%%=*}"
+            result="${entry#*=}"
+            if [[ "${result}" != "success" ]]; then
+              echo "::error title=Required CI failed::${job} finished with result '${result}'."
+              exit 1
+            fi
+          done

@@ -7,6 +7,99 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 并遵循 [语义化版本](https://semver.org/lang/zh-CN/spec/v2.0.0.html)。
 
+## [0.4.0] - 2026-08-16
+
+### 变更
+
+- 将 PID 隔离、lifecycle generation、当前/停止中 Worker ownership、Pending/Active
+  Remove、cleanup 调度、RPC 顺序及日志最终关闭统一收口到 `RegistryService`。
+- 自动启动仍只保留 `XXL_JOB_ENABLED && XXL_JOB_AUTO_REGISTER` 一个条件，但会在
+  Flask Commit 前启动带激活门的 Prepared Thread。只有创建它的调用才能在 Commit 后
+  提交 generation/Worker 并唤醒线程；Prepared 阶段不访问 Admin。
+- Runtime finalizer 也会在 Flask Commit 前准备为本次初始化私有、可 detach 的 handle；
+  它不发布 Flask/应用记录状态，初始化失败时 detach 也不会调用 Runtime shutdown 或
+  访问 Admin。
+- `stop_registry(remove=False)` 变成默认：立即分离并唤醒本地续约，不 join、不访问
+  Admin，也不修改最近 `registered` 快照。`remove=True` 为该 generation 排队一次
+  当前清理责任的后台 Remove。
+- 当前进程全部真实 Registry RPC 共用一个网络锁；completion 通过严格递增 sequence
+  提交，旧成功或失败都不能晚写覆盖更新状态。
+- PID 变化会在接触继承的 Lock、Thread 或 Event 前只替换空白 Registry 进程状态；
+  应用 Runtime、Handler、Callback、路由、配置与无进程资源的 AdminClient 保持不变。
+- Runtime finalizer 始终非阻塞；退出注销复用 generation 资格和统一 Scheduler，托管
+  日志在全部后台收尾空闲后恰好关闭一次。
+- 终止 Remove 改为按 generation 清理责任幂等。同步、Worker 或 cleanup actor 的成功
+  注销都会被后续 lifecycle shutdown 复用；同 generation 的 accepted register 会重新
+  产生一份新责任，由一个 Active 与最多一个 Pending fallback 按真实 RPC 顺序收敛，
+  Remove 失败本身不会触发重试。
+- Active Remove completion 是否接受仍只依赖 strict sequence、ProcessState identity 与
+  Active identity；精确 generation 和当前 Worker 状态仅用于记录清理责任是否满足，
+  因而新 generation 仍会等待并正确排序在旧 Active Remove 之后。
+- 显式 one-shot Register 现在会在等待 Registry 网络锁前加入当前 generation 的
+  开放协调窗口。lifecycle cleanup 非阻塞关闭该窗口，并等此前参与者全部完成后再安排
+  Remove。Register RPC completion 仍只按 strict sequence 与 ProcessState identity
+  提交，generation 和 Coordination ownership 仅另行保护清理责任变更。
+- generation 0 现在是手动清理 scope。accepted 显式 Register 会产生退出清理责任，
+  但不创建 Worker、不推进 Worker generation、也不启动续约。显式 Remove 的成功/
+  失败与 shutdown 继续复用 Active/Pending ownership，且 generation 0 缓存不能满足
+  generation 1。
+- `init_app()` 会先完成无副作用的确定性 Preflight，包括路由、Blueprint 与 CLI 名称
+  冲突，再创建托管资源。Commit 失败只撤销本次仍持有 identity 的 CLI、extension 与
+  应用记录，不把 Flask 私有路由/Hook 结构作为通用 rollback 表面。
+- 协议路由与路由错误 Hook 会先绑定到尚未注册的 Blueprint。可撤销的 CLI、extension、
+  应用记录与 finalizer ownership 先发布；Blueprint 注册是 Prepared 创建者 activation
+  前最后一个不可逆 Commit。当前 app 接受本次初始化的 exact Blueprint 对象后，
+  后续 activation 失败会保留 Runtime 与 lifecycle ownership，不会留下只有路由而
+  没有 extension 状态的应用。
+- Prepared `Thread.start()` 失败现在会保持 Flask 未提交，关闭本次初始化私有的托管
+  Handler/资源，保留原始异常，并允许同一 app/扩展实例重试。创建者独占 activation
+  与 identity-safe cancellation 会阻止并发 start 接管或 stale cancel 误停正式 Worker；
+  任何已在 stop 前提交的 Worker 即使 Registry RPC 为零，也会经过正式 `try/finally`
+  收尾边界。
+- Flask 与独立 CLI 的 `remove` 现在先停止本地续约，再同步 Remove；即使 Admin 注销
+  失败，Worker 仍保持停止。低层 `remove_executor()` 行为不变。
+- 用户回调与包内未预期异常会保留完整本地 traceback；预期网络/HTTP/远端失败仍是
+  简洁 `CallResult` 事件，协议响应继续使用通用错误。
+- 四种公开 Callback 现在都会先解析目标 Runtime，再判断 disabled；确认 disabled 后，
+  会在业务负载构造、校验或遍历前返回同一来源的 `CallResult`。应用解析错误以及 enabled
+  下既有的负载校验、转换行为均保持不变。
+- 构建后端继续限制在 Hatchling 1.32 以下，使当前 Twine 可以校验 Core Metadata 2.4。
+- Admin/执行器 URL 现在拒绝原始 C0/DEL/空白、userinfo、query、fragment 与非法
+  主机/端口；静态 Route Prefix 拒绝 converter、点段、百分号编码和有歧义的 URL
+  语法。Admin POST
+  不跟随重定向。非法 JSON 结构会单独归类为 `invalid_response`（从
+  `flask_xxljob.client` 导出），并复用非法 JSON 故障转移开关。
+
+### 配置
+
+- 删除尚未发布的 `XXL_JOB_AUTO_REGISTER_ON_INIT`。只要该键存在就同步抛迁移错误，
+  即使扩展 disabled 也不会静默忽略。
+- `XXL_JOB_DEREGISTER_ON_EXIT` 默认值改为 `False`，避免单个 Worker 自动删除共享
+  执行器身份。
+- 将初始化字段校验与完整 Registry 配置校验分离。`AUTO_REGISTER=False` 可以在没有
+  Admin Registry 配置时初始化 HTTP 协议；enabled Registry 操作在线程/RPC 前校验。
+- `XXL_JOB_ENABLED=False` 是完整功能总开关：不注册执行器 Blueprint，Registry、Remove
+  与 Callback 均不发送 Admin HTTP。本地 Runtime/状态/CLI 及基础类型/日志校验继续
+  保留；不会语义解析未使用的网络 URL 与 Route Prefix 字符串。Callback-only 进程使用
+  `ENABLED=True`、`AUTO_REGISTER=False`。
+
+### 兼容性
+
+- enabled 时，任务协议、Handler 与 Callback API、五个执行器端点、Admin Registry 协议、续约
+  间隔、`XXLJobStatus` 字段、公开导入、Python 3.8-3.14 与 Flask 1.x-3.x 不变。
+- 多 Worker 拓扑仍是每进程一个 Registry Worker；未增加 Leader 选举、跨进程锁、
+  信号处理或部署检测。
+
+### 测试
+
+- 发布检查改为在干净临时目录构建，只验证本轮新 wheel/sdist（包括仅针对文件成员的
+  RECORD 映射与标准顶层 PKG-INFO），拒绝开发/签名文件，并在 `pip check` 后执行与
+  源码隔离的安装后冒烟。
+- 最终本地测试为 632 项通过、2 项可选官方 Admin 测试跳过，行覆盖率 92.22%。覆盖
+  disabled 总开关、严格 URL/Admin 响应、generation 0 清理与转换、PID/generation
+  ownership、Remove 竞态、严格 completion sequence、Prepared ownership、
+  identity-safe 提交前资源收尾与日志恰好关闭一次。
+
 ## [0.3.4] - 2026-07-25
 
 ### 变更

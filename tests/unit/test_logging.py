@@ -13,6 +13,7 @@ import requests
 from flask import Flask
 
 from flask_xxljob import FlaskXXLJob
+from flask_xxljob.client import CallResult
 from flask_xxljob.exceptions import XXLJobConfigError, XXLJobInitializationError
 from tests.conftest import BASE_CONFIG, make_app
 
@@ -334,15 +335,18 @@ def test_managed_outputs_redact_sensitive_values(
 
     _log(app, sensitive, logging.DEBUG)
     runtime = _runtime(app)
-    runtime.registry_service._record(  # noqa: SLF001 - verify status redaction
-        type("Result", (), {
-            "success": False,
-            "address": None,
-            "error_type": "business",
-            "message": sensitive,
-        })(),
-        is_remove=False,
-    )
+    service = runtime.registry_service
+    state = service._get_process_state()  # noqa: SLF001 - status redaction
+    with state.state_lock:
+        service._record_result_locked(  # noqa: SLF001
+            state,
+            CallResult(
+                success=False,
+                error_type="business",
+                error=sensitive,
+            ),
+            operation="local",
+        )
 
     outputs = Path(runtime.log_manager.log_file).read_text(encoding="utf-8")
     if console_enabled:
@@ -402,14 +406,46 @@ def test_protocol_logs_safe_failure_categories(tmp_path, capsys):
     assert "request parsing failed" in output
     assert "unsupported_handler=unknown" in output
     assert "exception_type=RuntimeError" in output
+    assert "Traceback (most recent call last):" in output
+    assert "RuntimeError: user-secret-message" in output
     for secret in (
         token,
         "wrong-secret",
         "not-json-business-secret",
         "business-secret",
-        "user-secret-message",
     ):
         assert secret not in output
+
+
+def test_callback_exception_traceback_is_formatted_but_not_returned(
+    tmp_path, capsys
+):
+    app, ext = make_app(
+        XXL_JOB_LOG_ENABLED=True,
+        XXL_JOB_LOG_FILE_ENABLED=False,
+        XXL_JOB_LOG_CONSOLE_ENABLED=True,
+        XXL_JOB_LOG_FORMAT="%(levelname)s|%(message)s",
+    )
+
+    @ext.on_run("diagnostic")
+    def _run(_request):
+        raise RuntimeError("diagnostic-detail")
+
+    response = app.test_client().post(
+        "/run",
+        json={"executorHandler": "diagnostic", "executorParams": "safe"},
+    )
+
+    rendered = capsys.readouterr().err
+    assert "Traceback (most recent call last):" in rendered
+    assert "RuntimeError: diagnostic-detail" in rendered
+    assert response.status_code == 200
+    assert response.json["code"] == 500
+    response_text = response.get_data(as_text=True)
+    assert "RuntimeError" not in response_text
+    assert "diagnostic-detail" not in response_text
+    assert "Traceback" not in response_text
+    assert __file__ not in response_text
 
 
 @pytest.mark.parametrize(
@@ -524,6 +560,7 @@ def test_admin_failover_registry_renewal_removal_and_callback_events(
     assert "executor renewal succeeded" in output
     assert "callback failed" in output
     assert "executor removal succeeded" in output
+    assert "Traceback (most recent call last):" not in output
     assert post.call_count == 5
     for secret in (
         "network-message-secret",

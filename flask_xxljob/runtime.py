@@ -15,6 +15,7 @@ Celery connections).
 
 from __future__ import annotations
 
+import os
 import threading
 from typing import TYPE_CHECKING
 from weakref import finalize
@@ -52,6 +53,7 @@ class XXLJobRuntime:
         self.callback_client = callback_client
         self.registry_service = registry_service
         self.log_manager = log_manager
+        self._pid = os.getpid()
         self._close_lock = threading.Lock()
         self._closed = False
         self._finalizer: "finalize | None" = None
@@ -59,8 +61,18 @@ class XXLJobRuntime:
     def attach_finalizer(self, finalizer: "finalize") -> None:
         self._finalizer = finalizer
 
+    def _ensure_process_state(self) -> None:
+        """Reset process-local cleanup state after a fork."""
+        current_pid = os.getpid()
+        if self._pid == current_pid:
+            return
+        self._pid = current_pid
+        self._close_lock = threading.Lock()
+        self._closed = False
+
     def close(self) -> None:
         """Best-effort, idempotent internal runtime cleanup."""
+        self._ensure_process_state()
         with self._close_lock:
             if self._closed:
                 return
@@ -69,27 +81,9 @@ class XXLJobRuntime:
         self.log_manager.prepare_shutdown()
         logger = self.log_manager.get_logger("runtime")
         logger.info("Flask-XXLJob runtime shutdown started.")
-        snapshot = self.registry_service.status_snapshot()
-        remove = bool(
-            self.config.enabled
-            and (
-                snapshot["registered"]
-                or snapshot["registry_thread_running"]
-            )
-        )
         try:
-            self.registry_service.stop(
-                remove=remove,
-                on_stopped=self._finish_close,
+            self.registry_service.shutdown(
+                deregister_on_exit=self.config.deregister_on_exit,
             )
-        except Exception as exc:  # noqa: BLE001 - shutdown remains best effort
-            logger.error(
-                "Flask-XXLJob runtime shutdown failed exception_type=%s.",
-                type(exc).__name__,
-            )
-            self._finish_close()
-
-    def _finish_close(self) -> None:
-        logger = self.log_manager.get_logger("runtime")
-        logger.info("Flask-XXLJob runtime shutdown completed.")
-        self.log_manager.close()
+        except Exception:  # noqa: BLE001 - shutdown remains best effort
+            logger.exception("Flask-XXLJob runtime shutdown failed.")

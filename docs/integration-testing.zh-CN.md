@@ -33,7 +33,9 @@ $env:XXLJOB_EXECUTOR_ADDRESS = "http://127.0.0.1:5001"  # 可选
 针对真实 XXL-JOB 2.4.1 Admin 执行以下步骤以完整验证协议兼容性：
 
 1. **注册 / 续约 / 注销**：以 `XXL_JOB_AUTO_REGISTER=True` 启动应用；确认执行器在
-   Admin 中在线、持续续约，并在关闭后消失。
+   Admin 中在线并持续续约。需要确定性注销时，依次调用
+   `stop_registry(remove=False)` 与 `remove_executor()`，再确认执行器消失。普通关闭不会
+   注销，因为 `XXL_JOB_DEREGISTER_ON_EXIT=False` 是默认值。
 2. **五个接口**：触发 `/run`、`/idleBeat`、`/kill`、`/log`，并通过 Admin 确认
    `/beat` 健康。
 3. **单条与批量回调**：使用 `callback` / `callback_success` / `callback_failure`
@@ -46,10 +48,10 @@ $env:XXLJOB_EXECUTOR_ADDRESS = "http://127.0.0.1:5001"  # 可选
 
 ## 本地已验证矩阵（如实报告）
 
-本环境在 2026-07-23 实际执行的仅有：
+本环境在 2026-08-19 实际执行的仅有：
 
-- 在干净项目 `.venv` 中使用 Python 3.12.13 与 Flask 3.1.3：371 项离线测试通过，
-  2 项真实 Admin 测试按环境跳过，覆盖率 93.46%。
+- 在项目 `.venv` 中使用 Python 3.12.13 与 Flask 3.1.3：509 项离线测试通过，
+  2 项真实 Admin 测试按环境跳过，覆盖率 93.33%。
 - `pip check`、Ruff、mypy、双语文档检查、wheel/sdist 检查与干净环境 wheel
   安装冒烟测试通过。
 

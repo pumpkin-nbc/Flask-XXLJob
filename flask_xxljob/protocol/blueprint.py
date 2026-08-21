@@ -20,6 +20,7 @@ from typing import Any, Callable
 from flask import Blueprint, Response, current_app, jsonify, request
 from werkzeug.exceptions import HTTPException
 
+from .._app import executor_paths
 from ..model.coerce import ModelParseError
 from ..model.idle_beat import IdleBeatRequest
 from ..model.kill import KillRequest
@@ -94,6 +95,33 @@ def build_blueprint(name: str, url_prefix: str) -> Blueprint:
     duplicate-registration conflicts.
     """
     blueprint = Blueprint(name, __name__, url_prefix=url_prefix or None)
+    paths = executor_paths(url_prefix)
+
+    @blueprint.before_app_request
+    def _handle_protocol_routing_error() -> Any:
+        # 404/405 在视图匹配前产生；把 app-level hook 预先绑定到尚未注册的
+        # Blueprint，使路由与 hook 由同一个最终 Flask commit 发布。
+        # 404/405 arise before view dispatch. Bind this app-level hook to the
+        # unregistered Blueprint so routes and hook share one final commit.
+        exc = getattr(request, "routing_exception", None)
+        if (
+            isinstance(exc, HTTPException)
+            and exc.code in (404, 405)
+            and request.path in paths
+        ):
+            runtime = current_app.extensions.get("xxljob")
+            if runtime is not None:
+                runtime.log_manager.get_logger("protocol").warning(
+                    "XXL-JOB routing error path=%s status=%s.",
+                    request.path,
+                    exc.code,
+                )
+            return _json(
+                XXLJobResponse.failure(
+                    "XXL-JOB request error: " + (exc.name or "error")
+                )
+            )
+        return None
 
     @blueprint.route("/beat", methods=["POST"])
     def beat() -> Response:
@@ -197,7 +225,7 @@ def build_blueprint(name: str, url_prefix: str) -> Blueprint:
         except Exception as exc:  # noqa: BLE001 - isolate user callback
             # traceback 仅写入本地日志，不返回给 XXL-JOB。
             # The traceback is logged locally only and never returned to XXL-JOB.
-            runtime.log_manager.get_logger("protocol").error(
+            runtime.log_manager.get_logger("protocol").exception(
                 "XXL-JOB /log callback failed log_id=%s exception_type=%s.",
                 model.log_id,
                 type(exc).__name__,
@@ -230,6 +258,7 @@ def build_blueprint(name: str, url_prefix: str) -> Blueprint:
         runtime.log_manager.get_logger("protocol").error(
             "Unexpected error in XXL-JOB executor endpoint exception_type=%s.",
             type(exc).__name__,
+            exc_info=(type(exc), exc, exc.__traceback__),
         )
         return _json(XXLJobResponse.failure("XXL-JOB internal protocol error"))
 
@@ -262,7 +291,7 @@ def build_blueprint(name: str, url_prefix: str) -> Blueprint:
         except Exception as exc:  # noqa: BLE001 - isolate user callback
             # traceback 仅写入本地日志，不返回给 XXL-JOB。
             # The traceback is logged locally only and never returned to XXL-JOB.
-            _runtime().log_manager.get_logger("protocol").error(
+            _runtime().log_manager.get_logger("protocol").exception(
                 "XXL-JOB /%s callback failed exception_type=%s.",
                 endpoint,
                 type(exc).__name__,

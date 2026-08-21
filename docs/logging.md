@@ -88,14 +88,21 @@ handlers should receive each record.
 
 ## Sensitive data
 
-Plugin events contain safe context, result categories, HTTP status and
-exception types. They do not include request bodies or headers, Access Tokens,
-`executorParams`, `glueSource`, `handleMsg`, or user exception messages. A
-final filter on every managed handler redacts recognized credentials and
-private-key text even at `DEBUG`.
+Plugin-authored events contain safe context, result categories and HTTP status.
+They do not deliberately include request bodies or headers, Access Tokens,
+`executorParams`, `glueSource`, or `handleMsg`. A final filter on every managed
+handler redacts recognized credentials and private-key text even at `DEBUG`.
+
+Exceptions raised by user callbacks or unexpected package defects retain their
+type, message and full traceback in local logs. Expected network, HTTP and
+remote business failures remain concise `CallResult` events and do not emit a
+traceback on every Registry interval. Traceback details never enter executor
+HTTP responses.
 
 This is defense in depth, not permission to send arbitrary business data to
-the plugin logger. Configure application business logs separately.
+the plugin logger. Application code must not put passwords, tokens, private
+keys or other credentials into exception messages. Configure application
+business logs separately.
 
 ## Containers and multiple processes
 
@@ -111,7 +118,8 @@ app.config.update(
 
 Let the platform collect, retain, search and rotate that stream. Python's
 standard `RotatingFileHandler` does not guarantee safe shared-file rotation
-across multiple worker processes. Use console aggregation, a host-managed
+across multiple worker processes. The built-in file target is intended for a
+single process. Use console aggregation, a host-managed multi-process-safe
 handler, or a separate file per process when running multiple workers.
 
 The complete list of options is in [Configuration](configuration.md).

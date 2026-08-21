@@ -70,6 +70,11 @@ def create_app():
 
 模块级注册的处理函数会成为该扩展初始化的每个应用的默认处理函数。
 
+自动 Registry 时推荐这一顺序，以缩短执行器已注册但业务 Handler 尚未准备完成的窗口；
+它不是运行时完整性检测。必须稍后注册应用级 Handler 时，设置
+`XXL_JOB_AUTO_REGISTER=False`，完成初始化和 Handler 注册后再显式调用
+`start_registry(app)`。
+
 ## 应用级注册
 
 除 `on_*` 装饰器外，你还可以为指定应用注册处理函数。这在应用工厂或多应用场景中很有用：

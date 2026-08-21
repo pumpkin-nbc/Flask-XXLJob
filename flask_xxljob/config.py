@@ -12,6 +12,7 @@ accessed at import time.
 from __future__ import annotations
 
 import codecs
+import ipaddress
 import logging
 from dataclasses import dataclass, field
 from typing import Any, List, Mapping
@@ -29,6 +30,7 @@ DEFAULTS: dict = {
     "XXL_JOB_EXECUTOR_ADDRESS": "",
     "XXL_JOB_ROUTE_PREFIX": "",
     "XXL_JOB_AUTO_REGISTER": True,
+    "XXL_JOB_DEREGISTER_ON_EXIT": False,
     "XXL_JOB_REGISTRY_INTERVAL": 30,
     "XXL_JOB_HTTP_CONNECT_TIMEOUT": 3,
     "XXL_JOB_HTTP_READ_TIMEOUT": 5,
@@ -75,6 +77,7 @@ class XXLJobConfig:
     executor_address: str = ""
     route_prefix: str = ""
     auto_register: bool = True
+    deregister_on_exit: bool = False
     registry_interval: int = 30
     http_connect_timeout: int = 3
     http_read_timeout: int = 5
@@ -107,24 +110,43 @@ class XXLJobConfig:
 
         Build and validate the configuration from a Flask ``app.config``.
         """
+        _validate_removed_configs(config)
         merged = {key: config.get(key, default) for key, default in DEFAULTS.items()}
 
         enabled = _as_bool(merged, "XXL_JOB_ENABLED")
         auto_register = _as_bool(merged, "XXL_JOB_AUTO_REGISTER")
+        deregister_on_exit = _as_bool(merged, "XXL_JOB_DEREGISTER_ON_EXIT")
 
         raw_access_token = _as_str(merged, "XXL_JOB_ACCESS_TOKEN")
         access_token = raw_access_token if raw_access_token.strip() else ""
         executor_app_name = _as_str(merged, "XXL_JOB_EXECUTOR_APP_NAME")
-        route_prefix = _normalize_prefix(_as_str(merged, "XXL_JOB_ROUTE_PREFIX"))
-        executor_address = _apply_route_prefix(
-            _normalize_address(_as_str(merged, "XXL_JOB_EXECUTOR_ADDRESS")),
-            route_prefix,
+        raw_route_prefix = _as_str_strict(
+            merged, "XXL_JOB_ROUTE_PREFIX"
+        )
+        raw_executor_address = _as_str_strict(
+            merged, "XXL_JOB_EXECUTOR_ADDRESS"
+        )
+        raw_admin_addresses = _as_str_list(
+            merged, "XXL_JOB_ADMIN_ADDRESSES"
         )
 
-        admin_addresses = [
-            _normalize_address(item)
-            for item in _as_str_list(merged, "XXL_JOB_ADMIN_ADDRESSES")
-        ]
+        if enabled:
+            route_prefix = _normalize_prefix(raw_route_prefix)
+            executor_address = _apply_route_prefix(
+                _normalize_address(raw_executor_address),
+                route_prefix,
+            )
+            admin_addresses = [
+                _normalize_address(item) for item in raw_admin_addresses
+            ]
+        else:
+            # disabled 是总开关：这些字符串仍要满足基础配置类型，但不会被解释为
+            # URL/Flask path，也不会组合出一个实际不会使用的执行器地址。
+            # disabled is the master switch: retain the typed strings without
+            # interpreting them as URLs/Flask paths or composing an unused URL.
+            route_prefix = raw_route_prefix
+            executor_address = raw_executor_address
+            admin_addresses = raw_admin_addresses
 
         registry_interval = _as_positive_int(merged, "XXL_JOB_REGISTRY_INTERVAL")
         http_connect_timeout = _as_positive_int(merged, "XXL_JOB_HTTP_CONNECT_TIMEOUT")
@@ -177,6 +199,7 @@ class XXLJobConfig:
             executor_address=executor_address,
             route_prefix=route_prefix,
             auto_register=auto_register,
+            deregister_on_exit=deregister_on_exit,
             registry_interval=registry_interval,
             http_connect_timeout=http_connect_timeout,
             http_read_timeout=http_read_timeout,
@@ -207,19 +230,13 @@ class XXLJobConfig:
 
     def validate(self) -> None:
         """
-        校验配置。
+        校验初始化阶段已经提供的配置字段。
 
-        - 扩展禁用时不做任何校验。
-        - 仅当开启自动注册（``auto_register``）时，才要求 Admin 地址、执行器名称
-          与执行器地址；这样仅提供协议接入而不注册的场景也能正常工作。
-        - 提供了 Admin 地址或执行器地址时，必须为 ``http``/``https`` 方案。
+        Validate fields supplied during initialization.
 
-        Validate the configuration.
-
-        - No validation is performed when the extension is disabled.
-        - The admin addresses, executor name and executor address are required
-          only when auto-registration is enabled, so scenarios that provide the
-          protocol endpoints without registering still work.
+        - Registry completeness is validated separately, immediately before a
+          Registry lifecycle or one-shot Registry RPC starts. This allows an
+          application to initialize protocol endpoints without Admin settings.
         - When provided, admin/executor addresses must use the ``http``/``https``
           scheme. ``XXL_JOB_ROUTE_PREFIX`` is always appended to the executor
           address when the configuration is loaded.
@@ -227,27 +244,57 @@ class XXLJobConfig:
         if not self.enabled:
             return
 
-        if self.auto_register:
-            if not self.executor_app_name:
-                raise XXLJobConfigError(
-                    "XXL_JOB_EXECUTOR_APP_NAME must not be empty when "
-                    "XXL_JOB_AUTO_REGISTER is enabled."
-                )
-            if not self.admin_addresses:
-                raise XXLJobConfigError(
-                    "XXL_JOB_ADMIN_ADDRESSES must contain at least one admin "
-                    "address when XXL_JOB_AUTO_REGISTER is enabled."
-                )
-            if not self.executor_address:
-                raise XXLJobConfigError(
-                    "XXL_JOB_EXECUTOR_ADDRESS must not be empty when "
-                    "XXL_JOB_AUTO_REGISTER is enabled."
-                )
-
         for address in self.admin_addresses:
             _validate_http_url("XXL_JOB_ADMIN_ADDRESSES", address)
         if self.executor_address:
             _validate_http_url("XXL_JOB_EXECUTOR_ADDRESS", self.executor_address)
+
+    def validate_registry(self) -> None:
+        """Validate configuration required by an enabled Registry operation."""
+        if not isinstance(self.executor_app_name, str) or not self.executor_app_name:
+            raise XXLJobConfigError(
+                "XXL_JOB_EXECUTOR_APP_NAME must not be empty for Registry operations."
+            )
+        if not isinstance(self.admin_addresses, list) or not self.admin_addresses:
+            raise XXLJobConfigError(
+                "XXL_JOB_ADMIN_ADDRESSES must contain at least one admin address "
+                "for Registry operations."
+            )
+        if not isinstance(self.executor_address, str) or not self.executor_address:
+            raise XXLJobConfigError(
+                "XXL_JOB_EXECUTOR_ADDRESS must not be empty for Registry operations."
+            )
+        for address in self.admin_addresses:
+            if not isinstance(address, str):
+                raise XXLJobConfigError(
+                    "XXL_JOB_ADMIN_ADDRESSES must contain only strings."
+                )
+            _validate_http_url("XXL_JOB_ADMIN_ADDRESSES", address)
+        _validate_http_url("XXL_JOB_EXECUTOR_ADDRESS", self.executor_address)
+        values = {
+            "XXL_JOB_REGISTRY_INTERVAL": self.registry_interval,
+            "XXL_JOB_HTTP_CONNECT_TIMEOUT": self.http_connect_timeout,
+            "XXL_JOB_HTTP_READ_TIMEOUT": self.http_read_timeout,
+            "XXL_JOB_ADMIN_RETRY_COUNT": self.admin_retry_count,
+            "XXL_JOB_ADMIN_RETRY_BACKOFF": self.admin_retry_backoff,
+            "XXL_JOB_ADMIN_FAILOVER_ON_HTTP_ERROR": (
+                self.admin_failover_on_http_error
+            ),
+            "XXL_JOB_ADMIN_FAILOVER_ON_INVALID_JSON": (
+                self.admin_failover_on_invalid_json
+            ),
+            "XXL_JOB_ADMIN_FAILOVER_ON_BUSINESS_ERROR": (
+                self.admin_failover_on_business_error
+            ),
+        }
+        _as_positive_int(values, "XXL_JOB_REGISTRY_INTERVAL")
+        _as_positive_int(values, "XXL_JOB_HTTP_CONNECT_TIMEOUT")
+        _as_positive_int(values, "XXL_JOB_HTTP_READ_TIMEOUT")
+        _as_non_negative_int(values, "XXL_JOB_ADMIN_RETRY_COUNT")
+        _as_non_negative_float(values, "XXL_JOB_ADMIN_RETRY_BACKOFF")
+        _as_bool(values, "XXL_JOB_ADMIN_FAILOVER_ON_HTTP_ERROR")
+        _as_bool(values, "XXL_JOB_ADMIN_FAILOVER_ON_INVALID_JSON")
+        _as_bool(values, "XXL_JOB_ADMIN_FAILOVER_ON_BUSINESS_ERROR")
 
     @property
     def timeout(self) -> tuple:
@@ -257,6 +304,33 @@ class XXLJobConfig:
         Return the ``(connect, read)`` timeout tuple used by requests.
         """
         return (self.http_connect_timeout, self.http_read_timeout)
+
+
+def _validate_removed_configs(config: Mapping[str, Any]) -> None:
+    key = "XXL_JOB_AUTO_REGISTER_ON_INIT"
+    if key not in config:
+        return
+    value = config[key]
+    if value is False:
+        message = (
+            "XXL_JOB_AUTO_REGISTER_ON_INIT 已删除。\n\n"
+            "如需保持手动 Registry 启动，请设置：\n\n"
+            "XXL_JOB_AUTO_REGISTER=False\n\n"
+            "然后在需要的生命周期显式调用：\n\n"
+            "start_registry()"
+        )
+    elif value is True:
+        message = (
+            "XXL_JOB_AUTO_REGISTER_ON_INIT 已删除。\n\n"
+            "请删除该配置，并保留：\n\n"
+            "XXL_JOB_AUTO_REGISTER=True"
+        )
+    else:
+        message = (
+            "XXL_JOB_AUTO_REGISTER_ON_INIT 已删除，请删除该配置并使用 "
+            "XXL_JOB_AUTO_REGISTER 控制 Registry 自动启动。"
+        )
+    raise XXLJobConfigError(message)
 
 
 def _as_bool(config: Mapping[str, Any], key: str) -> bool:
@@ -316,7 +390,7 @@ def _as_choice(
 def _as_str_list(config: Mapping[str, Any], key: str) -> List[str]:
     value = config[key]
     if isinstance(value, str):
-        items = [item.strip() for item in value.split(",")]
+        items = value.split(",")
     elif isinstance(value, (list, tuple)):
         items = []
         for item in value:
@@ -325,13 +399,15 @@ def _as_str_list(config: Mapping[str, Any], key: str) -> List[str]:
                     f"{key} must be a list of non-empty strings; found a list "
                     f"item of type {type(item).__name__}."
                 )
-            items.append(item.strip())
+            items.append(item)
     else:
         raise XXLJobConfigError(
             f"{key} must be a list of strings or a comma-separated string; got "
             f"type {type(value).__name__}."
         )
-    return [item for item in items if item]
+    # Preserve each raw URL token so whitespace cannot disappear before the
+    # explicit URL character validation below.
+    return [item for item in items if item != ""]
 
 
 def _as_positive_int(config: Mapping[str, Any], key: str) -> int:
@@ -376,39 +452,126 @@ def _as_non_negative_float(config: Mapping[str, Any], key: str) -> float:
 
 
 def _normalize_address(value: str) -> str:
-    # 去除首尾空格与多余尾部斜杠，保留上下文路径（如 /xxl-job-admin）。
-    # Strip surrounding whitespace and redundant trailing slashes while
-    # preserving any context path (e.g. /xxl-job-admin).
-    stripped = value.strip()
-    if not stripped:
+    # 只规范尾斜杠；首尾空白必须留给原始 URL 校验明确拒绝，不能静默修复。
+    # Normalize trailing slashes only. Surrounding whitespace must remain
+    # visible to raw URL validation instead of being silently repaired.
+    if not value:
         return ""
-    return stripped.rstrip("/")
+    return value.rstrip("/")
 
 
 def _validate_http_url(key: str, value: str) -> None:
-    # Validate scheme, host and port while allowing an Admin context path.
+    # Python versions have differed in how urlsplit handles control characters,
+    # so reject the raw input before parsing for stable security semantics.
+    if any(
+        ord(character) < 0x20
+        or ord(character) == 0x7F
+        or character.isspace()
+        for character in value
+    ):
+        raise XXLJobConfigError(
+            f"{key} must be a valid http/https URL without whitespace or "
+            "control characters."
+        )
+
     try:
         parsed = urlsplit(value)
-        _validated_port = parsed.port  # Validates the port syntax and range.
+        port = parsed.port  # Validates the port syntax and range.
+        hostname = parsed.hostname
+        username = parsed.username
+        password = parsed.password
     except ValueError as exc:
         raise XXLJobConfigError(
-            f"{key} must be a valid http/https URL (e.g. 'http://host:port/path'); "
-            f"got '{value}'."
+            f"{key} must be a valid http/https URL with a valid host and port."
         ) from exc
-    if parsed.scheme.lower() not in ("http", "https") or not parsed.hostname:
+
+    invalid = bool(
+        parsed.scheme.lower() not in ("http", "https")
+        or not hostname
+        or not _is_valid_hostname(hostname)
+        or port == 0
+        or username is not None
+        or password is not None
+        or parsed.query
+        or parsed.fragment
+        or "?" in value
+        or "#" in value
+    )
+    if invalid:
         raise XXLJobConfigError(
-            f"{key} must be a valid http/https URL (e.g. 'http://host:port/path'); "
-            f"got '{value}'."
+            f"{key} must be a valid http/https URL with no userinfo, query, "
+            "fragment, whitespace, or control characters."
         )
 
 
+def _is_valid_hostname(hostname: str) -> bool:
+    """Accept IP literals and DNS/IDNA hostnames, rejecting parser-only hosts."""
+    try:
+        ipaddress.ip_address(hostname)
+        return True
+    except ValueError:
+        pass
+
+    # A dotted numeric host must be a real IPv4 literal rather than a DNS-like
+    # name that a downstream HTTP stack may interpret inconsistently.
+    if all(character.isdigit() or character == "." for character in hostname):
+        return False
+
+    try:
+        ascii_hostname = hostname.encode("idna").decode("ascii")
+    except UnicodeError:
+        return False
+    if ascii_hostname.endswith("."):
+        ascii_hostname = ascii_hostname[:-1]
+    if not ascii_hostname or len(ascii_hostname) > 253:
+        return False
+
+    for label in ascii_hostname.split("."):
+        if not label or len(label) > 63:
+            return False
+        if not label[0].isalnum() or not label[-1].isalnum():
+            return False
+        if any(not (character.isalnum() or character == "-") for character in label):
+            return False
+    return True
+
+
 def _normalize_prefix(prefix: str) -> str:
-    stripped = prefix.strip()
-    if not stripped:
+    if not prefix:
         return ""
-    normalized = stripped.strip("/")
-    if not normalized:
+    if prefix == "/":
         return ""
+
+    forbidden = {"?", "#", "%", "\\", "<", ">"}
+    if any(
+        character in forbidden
+        or ord(character) < 0x20
+        or ord(character) == 0x7F
+        or character.isspace()
+        for character in prefix
+    ):
+        raise XXLJobConfigError(
+            "XXL_JOB_ROUTE_PREFIX must be a static Flask path without "
+            "whitespace, control characters, query syntax, fragments, "
+            "percent encoding, backslashes, or converters."
+        )
+    if "//" in prefix:
+        raise XXLJobConfigError(
+            "XXL_JOB_ROUTE_PREFIX must not contain consecutive slashes."
+        )
+
+    normalized = prefix
+    if normalized.startswith("/"):
+        normalized = normalized[1:]
+    if normalized.endswith("/"):
+        normalized = normalized[:-1]
+    if not normalized or any(
+        segment in {".", ".."} for segment in normalized.split("/")
+    ):
+        raise XXLJobConfigError(
+            "XXL_JOB_ROUTE_PREFIX must be a static path without '.' or '..' "
+            "segments."
+        )
     return "/" + normalized
 
 

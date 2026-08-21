@@ -7,25 +7,44 @@
 
 ## 构建
 
-```bash
-.venv\Scripts\python.exe -m build
+使用新的空目录构建，避免历史 `dist/` 文件被误认为本轮制品。PowerShell 示例：
+
+```powershell
+$buildDir = Join-Path $env:TEMP "flask-xxljob-0.4.0-dist"
+Remove-Item -LiteralPath $buildDir -Recurse -Force -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Path $buildDir | Out-Null
+.venv\Scripts\python.exe -m build --outdir $buildDir
 ```
 
-该命令会在 `dist/` 生成 wheel 与源码分发包：
+干净目录中必须恰好包含：
 
 ```text
-dist/
-  flask_xxljob-0.3.4-py3-none-any.whl
-  flask_xxljob-0.3.4.tar.gz
+flask_xxljob-0.4.0-py3-none-any.whl
+flask_xxljob-0.4.0.tar.gz
 ```
 
 ## 检查
 
-```bash
+```powershell
 .venv\Scripts\python.exe scripts\check_docs.py
-.venv\Scripts\python.exe scripts\check_package.py
-.venv\Scripts\python.exe -m twine check dist\flask_xxljob-0.3.4-py3-none-any.whl dist\flask_xxljob-0.3.4.tar.gz
+.venv\Scripts\python.exe scripts\check_package.py --dist-dir $buildDir
+.venv\Scripts\python.exe -m twine check `
+  (Join-Path $buildDir "flask_xxljob-0.4.0-py3-none-any.whl") `
+  (Join-Path $buildDir "flask_xxljob-0.4.0.tar.gz")
 ```
+
+项目专用 Validator 会检查 wheel RECORD 的文件/hash/size 双向关系、拒绝 Wheel 签名
+文件、读取 sdist 标准顶层 `PKG-INFO`、比较两种制品的名称和版本、检查源码、类型与
+法律文件，并拒绝缓存和开发目录。它只验证本轮 Flask-XXLJob 制品，不是
+通用 Wheel/sdist 验证器。
+
+## 隔离安装后冒烟
+
+在源码 checkout 外创建独立虚拟环境与工作目录，只安装新 wheel 及其依赖，执行
+`pip check`，把 `scripts/smoke_installed_wheel.py` 复制到临时工作目录，清除
+`PYTHONPATH` 后从那里运行。冒烟会确认 `flask_xxljob.__file__` 来自该环境的
+`site-packages`，且现有包版本与制品元数据均为0.4.0；随后覆盖五个执行器端点、
+Callback Client、两套CLI以及成功/失败的终止型Remove生命周期。
 
 ## 配置 Trusted Publishing
 
@@ -50,8 +69,8 @@ dist/
 
 ```bash
 python -m pip install --index-url https://pypi.org/simple Flask requests
-python -m pip install --index-url https://test.pypi.org/simple --no-deps flask-xxljob==0.3.4
-python -c "import flask_xxljob; assert flask_xxljob.__version__ == '0.3.4'"
+python -m pip install --index-url https://test.pypi.org/simple --no-deps flask-xxljob==0.4.0
+python -c "import flask_xxljob; assert flask_xxljob.__version__ == '0.4.0'"
 flask-xxljob --version
 ```
 
@@ -60,11 +79,11 @@ flask-xxljob --version
 等待 `develop` 与 `master` 的完整 CI 矩阵通过后，从属于 `master` 的提交创建发布 Tag：
 
 ```bash
-git tag -a v0.3.4 -m "Release 0.3.4"
-git push origin v0.3.4
+git tag -a v0.4.0 -m "Release 0.4.0"
+git push origin v0.4.0
 ```
 
-Tag 会触发同一个 `Release` 工作流。工作流会校验 `v0.3.4`、
+Tag 会触发同一个 `Release` 工作流。工作流会校验 `v0.4.0`、
 `flask_xxljob/_version.py` 和两份 Changelog 一致，并确认 Tag 提交属于 `master`；
 随后由 `pypi` Environment 的人工审批控制最终 Trusted Publishing 步骤。
 
@@ -73,8 +92,5 @@ Tag 会触发同一个 `Release` 工作流。工作流会校验 `v0.3.4`、
 运行上述全部检查，确认 wheel 与源码分发包包含 `LICENSE` 和 `NOTICE`、声明
 `Apache-2.0`、使用真实项目链接，并且不包含任何密钥、内部域名或 Token：
 
-```bash
-.venv\Scripts\python.exe scripts\check_docs.py
-.venv\Scripts\python.exe scripts\check_package.py
-.venv\Scripts\python.exe -m twine check dist\flask_xxljob-0.3.4-py3-none-any.whl dist\flask_xxljob-0.3.4.tar.gz
-```
+使用上面的干净 `$buildDir` 命令；不要检查混有历史文件的 `dist/`，也不要直接在源码
+checkout 中运行安装后冒烟。

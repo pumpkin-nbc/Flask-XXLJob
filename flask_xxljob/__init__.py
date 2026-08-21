@@ -16,6 +16,10 @@ execute the actual tasks.
 
     xxl_job = FlaskXXLJob()
 
+    @xxl_job.on_run("demoJobHandler")
+    def handle_run(request):
+        return XXLJobResponse.success()
+
     def create_app():
         app = Flask(__name__)
         app.config.update(
@@ -24,11 +28,6 @@ execute the actual tasks.
             XXL_JOB_EXECUTOR_ADDRESS="http://127.0.0.1:5001",
         )
         xxl_job.init_app(app)
-
-        @xxl_job.on_run("demoJobHandler")
-        def handle_run(request):
-            return XXLJobResponse.success()
-
         return app
 """
 

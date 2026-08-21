@@ -2,7 +2,7 @@
 
 # API 参考
 
-本页记录 Flask-XXLJob 0.3.4 的公共 API。该扩展只负责适配 XXL-JOB 2.4.1 协议，
+本页记录 Flask-XXLJob 0.4.0 的公共 API。该扩展只负责适配 XXL-JOB 2.4.1 协议，
 绝不执行业务任务。
 
 ## `FlaskXXLJob`
@@ -58,6 +58,27 @@ result = xxl_job.register_executor(app)   # CallResult
 result = xxl_job.remove_executor(app)     # CallResult
 ```
 
+二者都是同步单次 Admin 操作，共用当前进程的 Registry 网络锁，但不会启动或停止
+lifecycle，也不会推进 generation。当前仍有续约 Worker 时，`remove_executor()` 保持
+普通单次 RPC，不消耗 lifecycle 清理状态。当前没有 Worker 时，同一个 API 会
+参与终止型 Active/Pending ownership，使成功的同步 Remove 可被 shutdown 复用而不会
+重复发送。调用失败时保留原有 `registered` 快照；扩展 disabled 时返回本地配置失败
+`CallResult`，不执行 Admin RPC。
+
+显式 `register_executor()` 会在等待网络锁前加入当前 generation 仍
+开放的 Register Coordination。此后 lifecycle cleanup 若完成线性化，shutdown 仍然
+非阻塞，只把 Remove 延后到这些已参与调用全部结束。协调窗口关闭后才开始的调用保持
+原有 one-shot API 语义。
+该规则也覆盖 generation 0：accepted 手动注册会产生清理责任，但不创建 Worker、不推进
+generation、也不启动续约。退出清理可以配对一次 Remove，且该缓存不会满足后续
+generation 1 的 Worker lifecycle。
+
+真实 one-shot Register completion 是否接受，只取决于 strict sequence 与调用捕获的
+ProcessState identity。generation 或 Coordination 变化不能抹掉已经发生的 Admin RPC：
+accepted success 仍会设置 `registered=True` 并推进 applied sequence。生命周期 identity
+另行决定该成功能否重新产生清理责任，因此旧 generation completion 不会修改新代的
+cleanup cache、Coordination、Pending 或 Active ownership。
+
 ### 任务结果回调
 
 ```python
@@ -69,14 +90,47 @@ xxl_job.callback_many(callbacks, app=None)   # CallbackRequest 或 dict 的列�
 
 `callback_many` 发送前会校验每一条，绝不自动拆分；任一条目非法或数量超过
 `XXL_JOB_CALLBACK_BATCH_MAX_SIZE` 时整体拒绝且不发送任何数据。
+`XXL_JOB_ENABLED=False` 时四种 Callback 都返回既有本地 disabled 结果，不发送 Admin
+HTTP。调用仍先解析目标 Runtime，所以未初始化 app 或多应用歧义继续抛既有错误；确认
+目标 Runtime disabled 后，不再校验、规范化或遍历 Callback 业务负载。enabled 下的
+既有校验、`handle_msg=None` 转换和截断规则不变。只需要 Callback 的进程使用
+`ENABLED=True`、`AUTO_REGISTER=False`。
 
 ### 状态与生命周期
 
 ```python
 status = xxl_job.get_status(app)   # XXLJobStatus
 xxl_job.start_registry(app)
-xxl_job.stop_registry(app)
+xxl_job.stop_registry(app)                  # 本地停止，立即返回
+xxl_job.stop_registry(app, remove=True)     # 增加一次后台注销
 ```
+
+`start_registry()` 会同步校验完整 Registry 配置，为当前进程至多建立一个有效的
+daemon 续约 Worker，并在首次 Admin 调用完成前返回。`stop_registry()` 的 `remove`
+是仅限关键字参数，默认 `False`：它立即分离并唤醒 Worker，不 join、不访问 Admin，
+并保留最近的 `registered` 快照。因此 `registry_thread_running=False` 与
+`registered=True` 可以同时成立。
+
+`init_app()` 自动启动 Registry 时，会把同一私有 Worker lifecycle 拆成两段：Flask
+Commit 前先创建 OS Thread，但它只等待激活门且 Admin RPC 为零；Commit 后只有创建
+该 Prepared token 的调用者才能提交 generation/Worker 并唤醒线程。Prepared ownership
+不会被状态接口报告为 Registry Thread 正在运行。并发 Registry stop 或 shutdown 可以
+正常取消候选；一旦正式提交，所有 Worker early return（包括首次 RPC 前已经 stop）都
+仍位于正常 Worker `try/finally` 收尾边界内。
+
+`stop_registry(remove=True)` 先校验配置，再完成同样的本地停止，并为当前清理责任
+排队一次后台 `registryRemove`。终止 Remove 成功后该责任即满足；如果同 generation
+后来又有 accepted register 重新建立远端身份，则会产生一份新的必要清理责任，这不
+是 Remove 失败后的自动重试。需要确定性同步结果时使用：
+
+```python
+xxl_job.stop_registry(app)
+result = xxl_job.remove_executor(app)
+```
+
+全部 Registry 状态都属于当前进程。所有本地读取先检查 PID；fork 子进程会获得空白
+锁、Worker/Remove ownership、sequence 和快照，且不获取父进程锁。状态查询不访问
+Admin，也不创建线程。正常续约仍是立即注册，再按 `REGISTRY_INTERVAL` 等待。
 
 ## 请求模型
 
@@ -111,11 +165,16 @@ result.address        # 产生该结果的 Admin 地址
 result.admin_address  # address 的别名
 result.error          # 本地错误字符串（绝不含 Token）
 result.error_type     # None | 'network' | 'timeout' | 'http'
-                      #      | 'invalid_json' | 'business' | 'config'
+                      #      | 'invalid_json' | 'invalid_response'
+                      #      | 'business' | 'config'
 result.attempt_count  # 总 HTTP 请求次数
 result.elapsed_ms     # 总耗时（毫秒）
 result.http_status    # 最近一次 HTTP 状态码（若有）
 ```
+
+`invalid_json` 表示解析失败；`invalid_response` 表示解析结果不是对象或 `code`/`msg`
+类型非法。常量可从 `flask_xxljob.client.ERROR_INVALID_RESPONSE` 导入，但不会新增为
+`flask_xxljob` 顶层导出。Admin POST 不跟随重定向。
 
 ## `XXLJobStatus`
 
@@ -168,5 +227,9 @@ flask xxljob register
 flask xxljob remove
 flask xxljob status
 ```
+
+`xxljob remove` 会先停止当前本地 Registry 续约生命周期，再执行一次同步 Remove。
+Admin 注销失败时命令返回非零退出码，但不会重新启动续约。这一终止型 CLI 语义与公开
+低层 `remove_executor()` 有意区分；后者只执行一次同步 RPC，不停止 Worker。
 
 配置项完整列表见 [配置](configuration.zh-CN.md)。

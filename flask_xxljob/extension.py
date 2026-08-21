@@ -8,14 +8,16 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional, cast
+from weakref import finalize
 
 from flask import Flask, current_app, has_app_context
 
-from ._app import ApplicationRegistry, ensure_executor_routes_available, executor_paths
-from ._lifecycle import (
-    install_runtime_finalizer,
-    start_registry_with_shutdown,
+from ._app import (
+    ApplicationRegistry,
+    ensure_blueprint_name_available,
+    ensure_executor_routes_available,
 )
+from ._lifecycle import install_runtime_finalizer
 from ._logging import XXLJobLogManager
 from .callback.registry import (
     CallbackRegistry,
@@ -28,9 +30,18 @@ from .callback.registry import (
 from .client.admin_client import AdminClient
 from .client.callback_client import CallbackClient
 from .config import XXLJobConfig
-from .exceptions import XXLJobAlreadyInitializedError, XXLJobError, XXLJobRequestError
+from .exceptions import (
+    XXLJobAlreadyInitializedError,
+    XXLJobConfigError,
+    XXLJobError,
+    XXLJobInitializationError,
+    XXLJobRequestError,
+)
 from .protocol.blueprint import build_blueprint
-from .registry.registry_service import RegistryService
+from .registry.registry_service import (
+    RegistryService,
+    _PreparedRegistryStart,
+)
 from .response.executor import FAIL_CODE, SUCCESS_CODE
 from .runtime import XXLJobRuntime
 
@@ -100,134 +111,315 @@ class FlaskXXLJob:
         ``app.extensions["xxljob"]``, and starts auto-registration when
         configured.
         """
-        if not hasattr(app, "extensions"):
-            app.extensions = {}
-
-        if EXTENSION_KEY in app.extensions:
+        extensions = getattr(app, "extensions", None)
+        if extensions is not None and EXTENSION_KEY in extensions:
             raise XXLJobAlreadyInitializedError(
                 "Flask-XXLJob has already been initialized on this application. "
                 "Call init_app(app) only once per application."
             )
 
+        # Preflight: deterministic validation only.  No Flask registration,
+        # logger handler, file, runtime or background worker is created here.
         try:
             config = XXLJobConfig.from_mapping(app.config)
-        except Exception as exc:
+            if config.enabled and config.auto_register:
+                config.validate_registry()
+        except XXLJobConfigError as exc:
             logger.error(
                 "Flask-XXLJob configuration validation failed "
                 "exception_type=%s.",
                 type(exc).__name__,
             )
             raise
-        if config.enabled:
-            ensure_executor_routes_available(app, config.route_prefix)
-
-        try:
-            log_manager = XXLJobLogManager(app, config)
-        except Exception as exc:
-            logger.error(
-                "Flask-XXLJob logging initialization failed "
-                "exception_type=%s.",
-                type(exc).__name__,
+        except Exception:
+            logger.exception(
+                "Unexpected error while validating Flask-XXLJob configuration."
             )
             raise
-        callback_registry = CallbackRegistry()
-        # 将模块级默认处理函数注入到本应用的注册表，支持在 init_app 之前注册。
-        # Seed this application's registry with module-level default callbacks,
-        # enabling registration before init_app.
-        callback_registry.seed_from(self._deferred_callbacks)
-        admin_client = AdminClient(
-            config, logger=log_manager.get_logger("admin")
-        )
-        callback_client = CallbackClient(
-            config, logger=log_manager.get_logger("callback")
-        )
-        registry_service = RegistryService(
-            config,
-            admin_client,
-            logger=log_manager.get_logger("registry"),
-        )
 
-        runtime = XXLJobRuntime(
-            config=config,
-            callback_registry=callback_registry,
-            admin_client=admin_client,
-            callback_client=callback_client,
-            registry_service=registry_service,
-            log_manager=log_manager,
-        )
+        blueprint = None
+        if config.enabled:
+            ensure_executor_routes_available(app, config.route_prefix)
+            blueprint_name = _blueprint_name(app)
+            ensure_blueprint_name_available(app, blueprint_name)
+            blueprint = build_blueprint(blueprint_name, config.route_prefix)
+        self._ensure_cli_available(app)
+
+        # These resources remain private to this init_app() call until Flask
+        # commit and Prepared activation have completed.
+        log_manager: Optional[XXLJobLogManager] = None
+        registry_service: Optional[RegistryService] = None
+        runtime: Optional[XXLJobRuntime] = None
+        prepared: Optional[_PreparedRegistryStart] = None
+        finalizer: Optional[finalize] = None
+        cli_added = False
+        application_added = False
+        blueprint_published = False
         try:
-            if config.enabled:
-                blueprint = build_blueprint(
-                    _blueprint_name(app), config.route_prefix
-                )
-                app.register_blueprint(blueprint)
-                self._register_protocol_error_handlers(app, config.route_prefix)
+            log_manager = XXLJobLogManager(app, config)
+            callback_registry = CallbackRegistry()
+            # 将模块级默认处理函数注入到本应用的注册表，支持在 init_app 之前注册。
+            # Seed this application's registry with module-level default
+            # callbacks, enabling registration before init_app.
+            callback_registry.seed_from(self._deferred_callbacks)
+            admin_client = AdminClient(
+                config, logger=log_manager.get_logger("admin")
+            )
+            callback_client = CallbackClient(
+                config, logger=log_manager.get_logger("callback")
+            )
+            registry_service = RegistryService(
+                config,
+                admin_client,
+                logger=log_manager.get_logger("registry"),
+                close_logs=log_manager.close,
+            )
 
-            self._register_cli(app)
+            runtime = XXLJobRuntime(
+                config=config,
+                callback_registry=callback_registry,
+                admin_client=admin_client,
+                callback_client=callback_client,
+                registry_service=registry_service,
+                log_manager=log_manager,
+            )
+            if config.enabled and config.auto_register:
+                prepared = registry_service._prepare_start()
+
+            # finalizer 这里只是本次初始化私有的可撤销 handle；不能提前发布
+            # Flask/ApplicationRegistry 状态。
+            # The finalizer is only a private, detachable handle here; preparing
+            # it must not publish Flask or ApplicationRegistry state.
+            finalizer = install_runtime_finalizer(app, runtime)
+        except Exception:
+            logger.exception(
+                "Flask-XXLJob private runtime preparation failed."
+            )
+            self._close_uncommitted_runtime_resources(
+                app=app,
+                runtime=runtime,
+                registry_service=registry_service,
+                prepared=prepared,
+                finalizer=finalizer,
+                cli_added=cli_added,
+                application_added=application_added,
+                log_manager=log_manager,
+            )
+            raise
+
+        assert log_manager is not None
+        assert registry_service is not None
+        assert runtime is not None
+        assert finalizer is not None
+
+        # Flask commit starts only after the activation-gated OS Thread has
+        # been created successfully.  The Prepared Thread has issued no RPC.
+        try:
+            cli_added = self._register_cli(app)
+            if not hasattr(app, "extensions"):
+                app.extensions = {}
             app.extensions[EXTENSION_KEY] = runtime
+            application_added = True
             self._applications.add(app)
-            runtime.attach_finalizer(install_runtime_finalizer(app, runtime))
+
+            # Publishing the already-prepared finalizer handle is reversible
+            # local ownership and therefore precedes the final Flask commit.
+            runtime.attach_finalizer(finalizer)
+
+            if config.enabled:
+                assert blueprint is not None
+                # Blueprint registration publishes both routes and the
+                # pre-bound routing hook. It is the last irreversible commit.
+                try:
+                    app.register_blueprint(blueprint)
+                finally:
+                    # 只有本次 init_app() 创建的 exact Blueprint 对象
+                    # 被当前 app 接受，才能将本次提交视为不可逆。
+                    # Names, endpoints and routes cannot prove ownership.
+                    # This check intentionally runs only after this call to
+                    # register_blueprint() has returned or raised.
+                    blueprint_published = any(
+                        item is blueprint
+                        for item in app.blueprints.values()
+                    )
+
+            activated = True
+            if prepared is not None:
+                activated = registry_service._activate_prepared_start(
+                    prepared
+                )
+
             log_manager.get_logger("runtime").info(
                 "Flask-XXLJob initialized enabled=%s auto_register=%s.",
                 config.enabled,
                 config.auto_register,
             )
-
-            if config.enabled and config.auto_register:
-                start_registry_with_shutdown(registry_service)
-        except Exception as exc:
-            log_manager.get_logger("runtime").error(
-                "Flask-XXLJob initialization failed exception_type=%s.",
-                type(exc).__name__,
-            )
-            runtime.close()
+            if prepared is not None and not activated:
+                log_manager.get_logger("runtime").info(
+                    "Automatic Registry activation was cancelled by a "
+                    "concurrent Registry lifecycle operation."
+                )
+        except Exception:
+            logger.exception("Flask-XXLJob initialization commit failed.")
+            if blueprint_published:
+                # Flask has no public Blueprint rollback API. Once this exact
+                # Blueprint is visible, its Runtime ownership must remain
+                # visible too; only settle this init call's Prepared token.
+                if prepared is not None:
+                    try:
+                        registry_service._settle_prepared_after_publish_failure(
+                            prepared
+                        )
+                    except Exception:  # noqa: BLE001 - preserve commit error
+                        try:
+                            logger.exception(
+                                "Failed to settle Registry activation after "
+                                "Blueprint publication."
+                            )
+                        except Exception:  # noqa: BLE001 - preserve root error
+                            pass
+            else:
+                self._close_uncommitted_runtime_resources(
+                    app=app,
+                    runtime=runtime,
+                    registry_service=registry_service,
+                    prepared=prepared,
+                    finalizer=finalizer,
+                    cli_added=cli_added,
+                    application_added=application_added,
+                    log_manager=log_manager,
+                )
             raise
 
-    def _register_cli(self, app: Flask) -> None:
-        from .cli.commands import xxljob_cli
+    def _close_uncommitted_runtime_resources(
+        self,
+        *,
+        app: Flask,
+        runtime: Optional[XXLJobRuntime],
+        registry_service: Optional[RegistryService],
+        prepared: Optional[_PreparedRegistryStart],
+        finalizer: Optional[finalize],
+        cli_added: bool,
+        application_added: bool,
+        log_manager: Optional[XXLJobLogManager],
+    ) -> None:
+        """Close only resources privately owned by a failed init_app call."""
+        prepared_cancelled = False
+        if registry_service is not None and prepared is not None:
+            try:
+                prepared_cancelled = (
+                    registry_service._cancel_prepared_start(prepared)
+                )
+            except Exception:  # noqa: BLE001 - preserve initialization error
+                try:
+                    logger.exception(
+                        "Failed to cancel an uncommitted Registry Thread."
+                    )
+                except Exception:  # noqa: BLE001 - cleanup cannot replace root
+                    pass
+            if prepared_cancelled:
+                try:
+                    registry_service._join_prepared_start(
+                        prepared, timeout=1.0
+                    )
+                except Exception:  # noqa: BLE001 - preserve init error
+                    try:
+                        logger.exception(
+                            "Failed to join an uncommitted Registry Thread."
+                        )
+                    except Exception:  # noqa: BLE001 - preserve root error
+                        pass
 
-        # 幂等注册 CLI 分组。 / Register the CLI group idempotently.
-        if "xxljob" not in app.cli.commands:
-            app.cli.add_command(xxljob_cli)
+        if finalizer is not None:
+            try:
+                # detach 只撤销回调；失败初始化绝不能借此进入正式 Runtime
+                # shutdown 或访问 Admin。
+                # detach only disarms the callback; failed initialization must
+                # not enter Runtime shutdown or contact the Admin service.
+                finalizer.detach()
+            except Exception:  # noqa: BLE001 - preserve initialization error
+                try:
+                    logger.exception(
+                        "Failed to detach an uncommitted Runtime finalizer."
+                    )
+                except Exception:  # noqa: BLE001 - cleanup cannot replace root
+                    pass
+
+        if cli_added:
+            try:
+                from .cli.commands import xxljob_cli
+
+                # 只撤销本次仍持有 identity 的命令，避免误删并发替换对象。
+                # Remove only the command identity still owned by this init.
+                if app.cli.commands.get("xxljob") is xxljob_cli:
+                    del app.cli.commands["xxljob"]
+            except Exception:  # noqa: BLE001 - preserve initialization error
+                try:
+                    logger.exception(
+                        "Failed to remove an uncommitted XXL-JOB CLI command."
+                    )
+                except Exception:  # noqa: BLE001 - cleanup cannot replace root
+                    pass
+
+        if runtime is not None:
+            try:
+                # identity guard 防止失败收尾误删后来发布的其他 Runtime。
+                # The identity guard preserves a replacement Runtime.
+                extensions = getattr(app, "extensions", None)
+                if (
+                    extensions is not None
+                    and extensions.get(EXTENSION_KEY) is runtime
+                ):
+                    del extensions[EXTENSION_KEY]
+            except Exception:  # noqa: BLE001 - preserve initialization error
+                try:
+                    logger.exception(
+                        "Failed to remove an uncommitted Runtime extension."
+                    )
+                except Exception:  # noqa: BLE001 - cleanup cannot replace root
+                    pass
+
+        if application_added:
+            try:
+                self._applications.discard(app)
+            except Exception:  # noqa: BLE001 - preserve initialization error
+                try:
+                    logger.exception(
+                        "Failed to discard an uncommitted application record."
+                    )
+                except Exception:  # noqa: BLE001 - cleanup cannot replace root
+                    pass
+
+        if log_manager is not None:
+            try:
+                log_manager.close()
+            except Exception:  # noqa: BLE001 - preserve initialization error
+                try:
+                    logger.exception(
+                        "Failed to close uncommitted logging resources."
+                    )
+                except Exception:  # noqa: BLE001 - cleanup cannot replace root
+                    pass
 
     @staticmethod
-    def _register_protocol_error_handlers(app: Flask, route_prefix: str) -> None:
-        # 路由级错误（404/405）在进入 Blueprint 视图前产生，Blueprint 的
-        # errorhandler 无法捕获。使用 before_request 检查 Flask 已保存的路由异常，
-        # 只处理执行器路径，避免覆盖宿主应用已有的 404/405 错误处理器。
-        # Routing errors (404/405) are produced before the blueprint view runs,
-        # so a blueprint errorhandler cannot catch them. Inspect Flask's stored
-        # routing exception in before_request and handle executor paths only,
-        # without replacing the host application's existing 404/405 handlers.
-        from flask import jsonify, request
-        from werkzeug.exceptions import HTTPException
+    def _ensure_cli_available(app: Flask) -> None:
+        from .cli.commands import xxljob_cli
 
-        from .response.executor import XXLJobResponse
+        existing = app.cli.commands.get("xxljob")
+        if existing is not None and existing is not xxljob_cli:
+            raise XXLJobInitializationError(
+                "Flask-XXLJob CLI command conflict: xxljob. Remove or rename "
+                "the host command before init_app()."
+            )
 
-        paths = executor_paths(route_prefix)
+    def _register_cli(self, app: Flask) -> bool:
+        from .cli.commands import xxljob_cli
 
-        def _handle_protocol_routing_error() -> Any:
-            exc = getattr(request, "routing_exception", None)
-            if (
-                isinstance(exc, HTTPException)
-                and exc.code in (404, 405)
-                and request.path in paths
-            ):
-                runtime = current_app.extensions.get(EXTENSION_KEY)
-                if runtime is not None:
-                    runtime.log_manager.get_logger("protocol").warning(
-                        "XXL-JOB routing error path=%s status=%s.",
-                        request.path,
-                        exc.code,
-                    )
-                return jsonify(
-                    XXLJobResponse.failure(
-                        "XXL-JOB request error: " + (exc.name or "error")
-                    ).to_dict()
-                )
-            return None
-
-        app.before_request(_handle_protocol_routing_error)
+        self._ensure_cli_available(app)
+        if app.cli.commands.get("xxljob") is xxljob_cli:
+            return False
+        app.cli.add_command(xxljob_cli)
+        return True
 
     # ------------------------------------------------------------------
     # 请求处理函数注册 / Request-callback registration
@@ -399,19 +591,34 @@ class FlaskXXLJob:
         """
         向 XXL-JOB Admin 发送任务最终执行结果回调。
 
-        在 Flask 应用上下文中可省略 ``app`` 参数。``handle_msg`` 为 ``None`` 时
-        按空信息处理。``log_id`` 与 ``log_date_time`` 必须为整数（不接受布尔值）。
+        目标应用 Runtime 会先被解析；未初始化、无可解析应用及多应用歧义等错误
+        仍按现有规则抛出。仅当 Runtime 成功解析且 disabled 时，才会在 Callback
+        负载校验和规范化前返回本地 disabled 结果。
+
+        enabled 时沿用既有参数契约。在 Flask 应用上下文中可省略 ``app`` 参数；
+        ``handle_msg`` 为 ``None`` 时按空信息处理，字符串按配置截断；``log_id``、
+        ``log_date_time`` 与 ``handle_code`` 必须为整数（不接受布尔值）。
 
         Send the final task-execution result callback to the XXL-JOB admin.
 
-        The ``app`` argument may be omitted inside a Flask application context.
-        A ``None`` ``handle_msg`` is treated as an empty message. ``log_id`` and
-        ``log_date_time`` must be integers (booleans are rejected).
+        The target application Runtime is resolved first; uninitialized, missing,
+        and ambiguous application errors remain visible. Only a successfully
+        resolved disabled Runtime returns the local disabled result before Callback
+        payload validation and normalization.
+
+        Enabled runtimes retain the existing argument contract. The ``app`` argument
+        may be omitted inside a Flask application context. A ``None`` ``handle_msg``
+        is treated as an empty message, strings are truncated per configuration, and
+        ``log_id``, ``log_date_time`` and ``handle_code`` must be integers (booleans
+        are rejected).
         """
-        _require_int("log_id", log_id)
-        _require_int("log_date_time", log_date_time)
-        _require_int("handle_code", handle_code)
         runtime = self._get_runtime(app)
+        # 先解析目标 Runtime，确保 disabled 只跳过负载解释，不吞掉应用解析错误。
+        # Resolve Runtime first so disabled skips only payload work, not app errors.
+        if runtime.config.enabled:
+            _require_int("log_id", log_id)
+            _require_int("log_date_time", log_date_time)
+            _require_int("handle_code", handle_code)
         return runtime.callback_client.callback(
             log_id=log_id,
             log_date_time=log_date_time,
@@ -429,7 +636,14 @@ class FlaskXXLJob:
         """
         发送任务成功回调（``handle_code=200``）。
 
+        本方法直接委托 :meth:`callback`，因此沿用其 Runtime 优先解析、disabled
+        负载短路和 enabled 参数处理语义。
+
         Send a task-success callback (``handle_code=200``).
+
+        This method delegates directly to :meth:`callback`, inheriting its
+        Runtime-first resolution, disabled payload short-circuit, and enabled
+        argument behavior.
         """
         return self.callback(
             log_id=log_id,
@@ -449,7 +663,14 @@ class FlaskXXLJob:
         """
         发送任务失败回调（``handle_code=500``）。
 
+        本方法直接委托 :meth:`callback`，因此沿用其 Runtime 优先解析、disabled
+        负载短路和 enabled 参数处理语义。
+
         Send a task-failure callback (``handle_code=500``).
+
+        This method delegates directly to :meth:`callback`, inheriting its
+        Runtime-first resolution, disabled payload short-circuit, and enabled
+        argument behavior.
         """
         return self.callback(
             log_id=log_id,
@@ -467,14 +688,19 @@ class FlaskXXLJob:
         """
         在一次官方请求中批量发送多条任务结果回调。
 
-        发送前会完整校验所有条目，超过批量上限或存在非法条目时抛出异常且不发送任何
-        数据（全有或全无）。在 Flask 应用上下文中可省略 ``app`` 参数。
+        目标应用 Runtime 会先被解析，应用解析错误仍按现有规则抛出。Runtime
+        disabled 时会在复制、长度检查、遍历和规范化批量负载前返回本地结果；enabled
+        时才完整校验所有条目，超过批量上限或存在非法条目时抛出异常且不发送任何数据
+        （全有或全无）。在 Flask 应用上下文中可省略 ``app`` 参数。
 
         Send multiple task-result callbacks in a single official request.
 
-        All items are validated before sending; exceeding the batch limit or an
-        invalid item raises without sending any data (all-or-nothing). The
-        ``app`` argument may be omitted inside a Flask application context.
+        The target application Runtime is resolved first, so application-resolution
+        errors remain visible. A disabled Runtime returns locally before the batch is
+        copied, length-checked, iterated, or normalized. Enabled runtimes validate all
+        items before sending; exceeding the batch limit or an invalid item raises
+        without sending any data (all-or-nothing). The ``app`` argument may be omitted
+        inside a Flask application context.
         """
         return self._get_runtime(app).callback_client.callback_many(callbacks)
 
@@ -518,19 +744,26 @@ class FlaskXXLJob:
 
     def start_registry(self, app: Optional[Flask] = None) -> None:
         """
-        启动执行器自动注册/续约线程（幂等）。
+        启动执行器自动注册/续约生命周期（幂等且非阻塞）。
 
-        Start the executor auto-registration/renewal thread (idempotent).
+        Start the executor registration-renewal lifecycle (idempotent and
+        non-blocking).
         """
         self._get_runtime(app).registry_service.start()
 
-    def stop_registry(self, app: Optional[Flask] = None) -> None:
+    def stop_registry(
+        self,
+        app: Optional[Flask] = None,
+        *,
+        remove: bool = False,
+    ) -> None:
         """
-        停止执行器自动注册/续约线程并注销执行器。
+        立即停止本地续约；可选地排队一次后台注销。
 
-        Stop the executor auto-registration/renewal thread and deregister.
+        Stop local renewal immediately and optionally enqueue one background
+        deregistration.
         """
-        self._get_runtime(app).registry_service.stop()
+        self._get_runtime(app).registry_service.stop(remove=remove)
 
     # ------------------------------------------------------------------
     # 内部辅助 / Internal helpers

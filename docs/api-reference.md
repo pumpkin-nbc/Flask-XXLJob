@@ -2,7 +2,7 @@
 
 # API reference
 
-This page documents the public API of Flask-XXLJob 0.3.4. The extension only
+This page documents the public API of Flask-XXLJob 0.4.0. The extension only
 adapts the XXL-JOB 2.4.1 protocol; it never executes business tasks.
 
 ## `FlaskXXLJob`
@@ -63,6 +63,34 @@ result = xxl_job.register_executor(app)   # CallResult
 result = xxl_job.remove_executor(app)     # CallResult
 ```
 
+Both are synchronous one-shot Admin operations. They share the current
+process's Registry network lock but do not start or stop a lifecycle or advance
+a lifecycle generation. While a renewal Worker is current, `remove_executor()`
+remains an ordinary one-shot RPC and does not consume lifecycle cleanup state.
+When no Worker is current, the same API participates in
+terminal Active/Pending ownership so a successful synchronous Remove can be
+reused by shutdown instead of being sent twice. A failed call preserves the
+existing `registered` snapshot. When the extension is disabled, both return a
+local config-failure `CallResult` without an Admin RPC.
+
+An explicit `register_executor()` joins the
+generation's still-open Register Coordination before waiting for the network
+lock. If lifecycle cleanup then linearizes, shutdown remains non-blocking and
+defers its Remove until those already-participating calls complete. Calls that
+begin after the window closes retain the existing one-shot API semantics.
+This also applies to generation zero: accepted manual registration creates a
+cleanup responsibility without creating a Worker, advancing generation or
+starting renewal. Exit cleanup can remove it once, and that cached result never
+satisfies a later generation-one Worker lifecycle.
+
+A real one-shot Register completion is accepted solely by strict sequence and
+the captured ProcessState identity. Generation or Coordination changes do not
+erase an Admin RPC that actually occurred: an accepted success still updates
+`registered=True` and advances the applied sequence. Those lifecycle identities
+are checked separately before the success may reopen cleanup responsibility,
+so an old-generation completion cannot alter a newer generation's cleanup
+cache, Coordination, Pending or Active ownership.
+
 ### Task-result callbacks
 
 ```python
@@ -75,14 +103,56 @@ xxl_job.callback_many(callbacks, app=None)   # list of CallbackRequest or dict
 `callback_many` validates every item before sending, never auto-splits, and
 rejects the whole batch (sending nothing) if any item is invalid or the count
 exceeds `XXL_JOB_CALLBACK_BATCH_MAX_SIZE`.
+When `XXL_JOB_ENABLED=False`, all four callback forms return the existing local
+disabled result without Admin HTTP. The target Runtime is resolved first, so an
+uninitialized app or ambiguous multi-app call still raises its existing error.
+After a disabled Runtime is found, no callback payload is validated, normalized
+or iterated. Enabled validation, `handle_msg=None` conversion and truncation are
+unchanged. A Callback-only process uses `ENABLED=True`, `AUTO_REGISTER=False`.
 
 ### Status and lifecycle
 
 ```python
 status = xxl_job.get_status(app)   # XXLJobStatus
 xxl_job.start_registry(app)
-xxl_job.stop_registry(app)
+xxl_job.stop_registry(app)                  # Local stop; immediate return.
+xxl_job.stop_registry(app, remove=True)     # Add one background Remove.
 ```
+
+`start_registry()` validates complete Registry configuration, creates at most
+one current daemon renewal Worker for the process, and returns before its first
+Admin call completes. `stop_registry()` has a keyword-only `remove=False`
+default: it immediately detaches and wakes that Worker, does not join or access
+Admin, and preserves the latest `registered` snapshot. Consequently
+`registry_thread_running=False` and `registered=True` is valid.
+
+When `init_app()` performs automatic Registry startup, it uses the same private
+Worker lifecycle in two phases: an OS Thread is created before Flask commit but
+waits on an activation gate with zero Admin RPCs; after commit, only the caller
+that created that Prepared token may commit its generation/Worker and wake it.
+Prepared ownership is not reported as a running Registry thread. A concurrent
+Registry stop or shutdown may cancel the candidate normally. Once committed,
+all early Worker exits—including a stop before the first RPC—remain inside the
+normal Worker `try/finally` cleanup boundary.
+
+`stop_registry(remove=True)` first validates configuration, performs the same
+local stop, and schedules one background `registryRemove` for the current
+cleanup responsibility. A successful terminal Remove satisfies that
+responsibility. A later accepted register in the same generation recreates the
+remote identity and therefore opens a new cleanup responsibility; this is not
+an automatic retry of a failed Remove. To obtain a deterministic synchronous
+result, use:
+
+```python
+xxl_job.stop_registry(app)
+result = xxl_job.remove_executor(app)
+```
+
+All Registry state is process-local. Every local read first checks the PID; a
+forked child gets blank locks, Worker/Remove ownership, sequences and snapshots
+without acquiring a parent lock. Status reads never access Admin or create a
+thread. Periodic renewal remains immediate registration followed by
+`REGISTRY_INTERVAL` waits.
 
 ## Request models
 
@@ -121,11 +191,17 @@ result.address        # admin address that produced the result
 result.admin_address  # alias of address
 result.error          # local error string (never contains the token)
 result.error_type     # None | 'network' | 'timeout' | 'http'
-                      #      | 'invalid_json' | 'business' | 'config'
+                      #      | 'invalid_json' | 'invalid_response'
+                      #      | 'business' | 'config'
 result.attempt_count  # total HTTP attempts made
 result.elapsed_ms     # total elapsed milliseconds
 result.http_status    # last HTTP status code, if any
 ```
+
+`invalid_json` means parsing failed. `invalid_response` means the parsed body
+was not an object or had an invalid `code`/`msg` type. The constant is available
+as `flask_xxljob.client.ERROR_INVALID_RESPONSE`; it is intentionally not a
+top-level `flask_xxljob` export. Admin POST requests do not follow redirects.
 
 ## `XXLJobStatus`
 
@@ -179,5 +255,11 @@ flask xxljob register
 flask xxljob remove
 flask xxljob status
 ```
+
+`xxljob remove` first stops the current local Registry renewal lifecycle and
+then performs one synchronous Remove. A failed Admin Remove produces a non-zero
+exit code but never restarts renewal. This terminal CLI behavior is deliberately
+different from the public low-level `remove_executor()`, which performs only
+one synchronous RPC and does not stop a Worker.
 
 See [configuration](configuration.md) for the full list of configuration keys.

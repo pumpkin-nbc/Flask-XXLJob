@@ -29,8 +29,14 @@ Run the full check set before opening a pull request:
 .venv\Scripts\python.exe -m mypy flask_xxljob
 .venv\Scripts\python.exe -m pytest
 .venv\Scripts\python.exe scripts\check_docs.py
-.venv\Scripts\python.exe scripts\check_package.py
+.venv\Scripts\python.exe scripts\check_package.py --dist-dir <clean-build-dir>
 ```
+
+Build release artifacts into a new empty directory before the package check;
+do not reuse historical files under `dist/`. The separate temporary virtual
+environment required by the installed-wheel smoke is a release verification
+exception to the development-environment rule above. See
+[Publishing](docs/publishing.md).
 
 ## Documentation
 

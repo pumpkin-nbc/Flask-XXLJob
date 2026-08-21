@@ -28,6 +28,53 @@ Job routing, block strategies, timeouts and retries are still managed by the
 XXL-JOB admin. Flask-XXLJob only relays the protocol; your task service keeps
 full control over execution.
 
+## Upgrading 0.3.4 to 0.4.0
+
+`0.4.0` replaces the Registry thread-centric lifecycle with a process-local
+state machine. Task dispatch, five executor endpoints, callbacks, the Admin
+protocol and `REGISTRY_INTERVAL` are unchanged.
+
+```bash
+pip install --upgrade flask-xxljob==0.4.0
+```
+
+`XXL_JOB_AUTO_REGISTER_ON_INIT` was never released and is now removed without a
+deprecation period. If it remains in `app.config`, `init_app()` fails even when
+`XXL_JOB_ENABLED=False`:
+
+- Old `False`: set `XXL_JOB_AUTO_REGISTER=False`, then call
+  `start_registry(app)` explicitly where needed.
+- Old `True`: delete the key and retain `XXL_JOB_AUTO_REGISTER=True`.
+- Any other old value: delete the key and use `XXL_JOB_AUTO_REGISTER`.
+
+Automatic startup is now exactly `XXL_JOB_ENABLED and
+XXL_JOB_AUTO_REGISTER`. For Gunicorn preload or a factory imported by Celery:
+
+```python
+app.config["XXL_JOB_AUTO_REGISTER"] = False
+xxl_job.init_app(app)
+xxl_job.start_registry(app)  # Run after fork in the Registry-owning process.
+```
+
+`XXL_JOB_DEREGISTER_ON_EXIT` now defaults to `False`. `stop_registry()` also
+defaults to a local-only, immediate stop and preserves `registered`. Use
+`stop_registry(remove=True)` for one background Remove for the current cleanup
+responsibility, or pair a local stop with synchronous `remove_executor()` when
+the result is required. A successful terminal Remove is reused by finalization;
+if a later accepted register recreates the remote identity in the same
+generation, it opens a new necessary cleanup responsibility rather than a retry.
+
+Registry completeness is checked only when an enabled Registry operation is
+actually requested, so `AUTO_REGISTER=False` supports protocol-only
+initialization without Admin settings. `ENABLED=False` short-circuits Registry
+behavior, while removed-key detection and existing field validation still run.
+
+Forked children replace all Registry locks, workers, generations, Remove state,
+sequences and snapshots before reading local state. In one process all four
+Registry RPC forms are strictly serialized. No cross-process lock, leader
+election, signal handling, or deployment detection was added; every worker that
+starts Registry still owns its own lifecycle.
+
 ## Upgrading 0.3.3 to 0.3.4
 
 `0.3.4` starts automatic registration from configuration alone
@@ -212,7 +259,7 @@ No. All 0.1.1 public APIs, imports and configuration keys are unchanged. The
 only additive change is an optional `error_type` category on the call result
 returned by `register_executor`, `remove_executor` and the `callback*` methods,
 which lets you distinguish failures (`network`, `timeout`, `http`,
-`invalid_json`, `business`, `config`) without inspecting the underlying
+`invalid_json`, `invalid_response`, `business`, `config`) without inspecting the underlying
 `requests` objects. Reading it is optional.
 
 ### Upgrade

@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     tags:
-      - "v0.3.4"
+      - "v0.4.0"
 
 permissions:
   contents: read
@@ -25,8 +25,8 @@ jobs:
         run: |
           set -euo pipefail
           version="$(python -c 'import runpy; print(runpy.run_path("flask_xxljob/_version.py")["__version__"])')"
-          grep -Fqx "## [${version}] - 2026-07-25" CHANGELOG.md
-          grep -Fqx "## [${version}] - 2026-07-25" CHANGELOG.zh-CN.md
+          grep -Fqx "## [${version}] - 2026-08-16" CHANGELOG.md
+          grep -Fqx "## [${version}] - 2026-08-16" CHANGELOG.zh-CN.md
           if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
             if [[ "${GITHUB_REF_NAME}" != "v${version}" ]]; then
               echo "Tag ${GITHUB_REF_NAME} does not match package version ${version}." >&2
@@ -43,15 +43,46 @@ jobs:
       - name: Check documentation
         run: python scripts/check_docs.py
       - name: Build wheel and source distribution
-        run: python -m build
+        env:
+          BUILD_DIR: ${{ runner.temp }}/flask-xxljob-release-dist
+        run: |
+          rm -rf "${BUILD_DIR}"
+          mkdir -p "${BUILD_DIR}"
+          python -m build --outdir "${BUILD_DIR}"
       - name: Check distribution metadata
-        run: python -m twine check dist/*
+        env:
+          BUILD_DIR: ${{ runner.temp }}/flask-xxljob-release-dist
+        run: |
+          python -m twine check \
+            "${BUILD_DIR}/flask_xxljob-0.4.0-py3-none-any.whl" \
+            "${BUILD_DIR}/flask_xxljob-0.4.0.tar.gz"
       - name: Check distribution contents
-        run: python scripts/check_package.py
+        env:
+          BUILD_DIR: ${{ runner.temp }}/flask-xxljob-release-dist
+        run: python scripts/check_package.py --dist-dir "${BUILD_DIR}"
+      - name: Smoke-test isolated installed wheel
+        env:
+          BUILD_DIR: ${{ runner.temp }}/flask-xxljob-release-dist
+          SMOKE_VENV: ${{ runner.temp }}/flask-xxljob-release-smoke-venv
+          SMOKE_WORK: ${{ runner.temp }}/flask-xxljob-release-smoke-work
+        run: |
+          rm -rf "${SMOKE_VENV}" "${SMOKE_WORK}"
+          python -m venv "${SMOKE_VENV}"
+          "${SMOKE_VENV}/bin/python" -m pip install --upgrade pip
+          "${SMOKE_VENV}/bin/python" -m pip install \
+            "${BUILD_DIR}/flask_xxljob-0.4.0-py3-none-any.whl"
+          "${SMOKE_VENV}/bin/python" -m pip check
+          mkdir -p "${SMOKE_WORK}"
+          cp scripts/smoke_installed_wheel.py "${SMOKE_WORK}/smoke_installed_wheel.py"
+          cd "${SMOKE_WORK}"
+          unset PYTHONPATH
+          export PYTHONNOUSERSITE=1
+          "${SMOKE_VENV}/bin/python" smoke_installed_wheel.py \
+            --source-root "${GITHUB_WORKSPACE}"
       - uses: actions/upload-artifact@v4
         with:
           name: python-distributions
-          path: dist/
+          path: ${{ runner.temp }}/flask-xxljob-release-dist/
           if-no-files-found: error
           retention-days: 7
 
